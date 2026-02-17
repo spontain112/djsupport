@@ -1,12 +1,20 @@
 """CLI entry point for djsupport."""
 
 import sys
+from datetime import datetime
 
 import click
 from dotenv import load_dotenv
 
 from djsupport.matcher import match_track
 from djsupport.rekordbox import parse_xml
+from djsupport.report import (
+    MatchedTrack,
+    PlaylistReport,
+    SyncReport,
+    print_report,
+    save_report,
+)
 from djsupport.spotify import create_or_update_playlist, get_client, get_user_playlists
 
 
@@ -21,7 +29,8 @@ def cli():
 @click.option("--playlist", "-p", help="Sync only this playlist (by name).")
 @click.option("--dry-run", is_flag=True, help="Preview matches without creating playlists.")
 @click.option("--threshold", "-t", default=80, show_default=True, help="Minimum match confidence (0-100).")
-def sync(xml_path: str, playlist: str | None, dry_run: bool, threshold: int):
+@click.option("--report", "report_path", type=click.Path(), default=None, help="Save detailed Markdown report to this path.")
+def sync(xml_path: str, playlist: str | None, dry_run: bool, threshold: int, report_path: str | None):
     """Sync Rekordbox playlists to Spotify.
 
     XML_PATH is the path to your Rekordbox XML library export.
@@ -44,19 +53,17 @@ def sync(xml_path: str, playlist: str | None, dry_run: bool, threshold: int):
         sp = get_client()
         existing = None
 
-    total_matched = 0
-    total_unmatched = 0
-    all_unmatched: list[str] = []
+    report = SyncReport(
+        timestamp=datetime.now(),
+        threshold=threshold,
+        dry_run=dry_run,
+    )
 
     for pl in playlists:
-        click.echo(f"\n{'=' * 60}")
-        click.echo(f"Playlist: {pl.path} ({len(pl.track_ids)} tracks)")
-        click.echo("=" * 60)
-
+        pl_report = PlaylistReport(name=pl.name, path=pl.path)
         matched_uris: list[str] = []
-        unmatched: list[str] = []
 
-        with click.progressbar(pl.track_ids, label="Matching tracks") as bar:
+        with click.progressbar(pl.track_ids, label=f"Matching: {pl.name}") as bar:
             for tid in bar:
                 track = tracks.get(tid)
                 if track is None:
@@ -65,37 +72,31 @@ def sync(xml_path: str, playlist: str | None, dry_run: bool, threshold: int):
                 result = match_track(sp, track, threshold=threshold)
                 if result:
                     matched_uris.append(result["uri"])
+                    pl_report.matched.append(MatchedTrack(
+                        rekordbox_name=track.display,
+                        spotify_name=result["name"],
+                        spotify_artist=result["artist"],
+                        score=result["score"],
+                    ))
                 else:
-                    unmatched.append(track.display)
-
-        total_matched += len(matched_uris)
-        total_unmatched += len(unmatched)
-
-        click.echo(f"  Matched: {len(matched_uris)}/{len(pl.track_ids)}")
-
-        if unmatched:
-            click.echo(f"  Unmatched ({len(unmatched)}):")
-            for name in unmatched:
-                click.echo(f"    - {name}")
-            all_unmatched.extend(unmatched)
+                    pl_report.unmatched.append(track.display)
 
         if not dry_run and matched_uris:
-            playlist_id = create_or_update_playlist(sp, pl.name, matched_uris, existing)
-            click.echo(f"  -> Spotify playlist updated: {pl.name} (id: {playlist_id})")
+            playlist_id, action = create_or_update_playlist(sp, pl.name, matched_uris, existing)
+            pl_report.action = action
             # Update cache so subsequent playlists see this one
             if existing is not None:
                 existing[pl.name] = playlist_id
         elif dry_run:
-            click.echo("  (dry run - no changes made)")
+            pl_report.action = "dry-run"
 
-    click.echo(f"\n{'=' * 60}")
-    click.echo(f"Total matched: {total_matched}")
-    click.echo(f"Total unmatched: {total_unmatched}")
+        report.playlists.append(pl_report)
 
-    if all_unmatched:
-        click.echo(f"\nAll unmatched tracks ({len(all_unmatched)}):")
-        for name in all_unmatched:
-            click.echo(f"  - {name}")
+    print_report(report)
+
+    if report_path:
+        save_report(report, report_path)
+        click.echo(f"\nDetailed report saved to {report_path}")
 
 
 @cli.command("list")

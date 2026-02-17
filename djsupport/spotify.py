@@ -62,10 +62,10 @@ def create_or_update_playlist(
     name: str,
     track_uris: list[str],
     existing_playlists: dict[str, str] | None = None,
-) -> str:
+) -> tuple[str, str]:
     """Create a playlist or replace its tracks if it already exists.
 
-    Returns the playlist ID.
+    Returns (playlist_id, action) where action is "created" or "updated".
     """
     if existing_playlists is None:
         existing_playlists = get_user_playlists(sp)
@@ -74,9 +74,11 @@ def create_or_update_playlist(
 
     if name in existing_playlists:
         playlist_id = existing_playlists[name]
+        action = "updated"
     else:
         result = sp.user_playlist_create(user_id, name, public=False)
         playlist_id = result["id"]
+        action = "created"
 
     # Replace all tracks (Spotify API accepts max 100 per call)
     if track_uris:
@@ -86,4 +88,4 @@ def create_or_update_playlist(
     else:
         sp.playlist_replace_items(playlist_id, [])
 
-    return playlist_id
+    return playlist_id, action
