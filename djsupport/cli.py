@@ -29,8 +29,10 @@ def cli():
 @click.option("--playlist", "-p", help="Sync only this playlist (by name).")
 @click.option("--dry-run", is_flag=True, help="Preview matches without creating playlists.")
 @click.option("--threshold", "-t", default=80, show_default=True, help="Minimum match confidence (0-100).")
+@click.option("--all", "combine_all", is_flag=True, help="Combine all tracks into a single playlist instead of per-folder.")
+@click.option("--all-name", default="Rekordbox All", show_default=True, help="Name for the combined playlist (used with --all).")
 @click.option("--report", "report_path", type=click.Path(), default=None, help="Save detailed Markdown report to this path.")
-def sync(xml_path: str, playlist: str | None, dry_run: bool, threshold: int, report_path: str | None):
+def sync(xml_path: str, playlist: str | None, dry_run: bool, threshold: int, combine_all: bool, all_name: str, report_path: str | None):
     """Sync Rekordbox playlists to Spotify.
 
     XML_PATH is the path to your Rekordbox XML library export.
@@ -45,6 +47,20 @@ def sync(xml_path: str, playlist: str | None, dry_run: bool, threshold: int, rep
         if not playlists:
             click.echo(f"Playlist '{playlist}' not found.", err=True)
             sys.exit(1)
+
+    # Combine all tracks into a single playlist, sorted by date added
+    if combine_all:
+        seen: set[str] = set()
+        all_track_ids: list[str] = []
+        for pl in playlists:
+            for tid in pl.track_ids:
+                if tid not in seen:
+                    seen.add(tid)
+                    all_track_ids.append(tid)
+        all_track_ids.sort(key=lambda tid: tracks[tid].date_added if tid in tracks else "")
+        from djsupport.rekordbox import Playlist as RBPlaylist
+        playlists = [RBPlaylist(name=all_name, path=all_name, track_ids=all_track_ids)]
+        click.echo(f"Combined {len(all_track_ids)} unique tracks into '{all_name}' (sorted by date added).")
 
     if not dry_run:
         sp = get_client()

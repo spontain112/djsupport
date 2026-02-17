@@ -14,6 +14,7 @@ class Track:
     remixer: str
     label: str
     genre: str
+    date_added: str  # e.g. "2024-03-15"
 
     @property
     def display(self) -> str:
@@ -50,6 +51,7 @@ def parse_xml(xml_path: str | Path) -> tuple[dict[str, Track], list[Playlist]]:
                 remixer=track_el.get("Remixer", ""),
                 label=track_el.get("Label", ""),
                 genre=track_el.get("Genre", ""),
+                date_added=track_el.get("DateAdded", ""),
             )
 
     # Parse playlist tree
