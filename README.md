@@ -9,6 +9,7 @@ Sync your Rekordbox playlists to Spotify. Parses a Rekordbox XML library export,
 - **Dry-run mode** — preview matches without creating or modifying any Spotify playlists
 - **Threshold control** — tune the minimum match confidence (0–100, default 80)
 - **Playlist filtering** — sync a single playlist by name or all playlists at once
+- **Combined playlist** — merge all tracks into a single playlist sorted by date added
 
 ## Prerequisites
 
@@ -82,6 +83,18 @@ Adjust the match confidence threshold (default 80):
 
 ```bash
 djsupport sync path/to/library.xml -t 70
+```
+
+Combine all tracks into a single playlist (sorted by date added):
+
+```bash
+djsupport sync path/to/library.xml --all
+```
+
+Use a custom name for the combined playlist:
+
+```bash
+djsupport sync path/to/library.xml --all --all-name "My DJ Tracks"
 ```
 
 ## License

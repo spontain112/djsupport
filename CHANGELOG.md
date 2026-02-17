@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `--all` flag to combine all tracks into a single Spotify playlist instead of per-folder
+- `--all-name` option to set a custom name for the combined playlist (default: "Rekordbox All")
+- Combined playlist is sorted by Rekordbox date added (oldest first)
+- `DateAdded` field parsed from Rekordbox XML
+
 ## [0.1.0] - 2026-02-17
 
 ### Added
