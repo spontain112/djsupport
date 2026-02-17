@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "djsupport"
+version = "0.1.0"
+description = "Sync Rekordbox playlists to Spotify"
+requires-python = ">=3.10"
+dependencies = [
+    "spotipy>=2.23",
+    "click>=8.0",
+    "python-dotenv>=1.0",
+    "rapidfuzz>=3.0",
+]
+
+[project.scripts]
+djsupport = "djsupport.cli:cli"
