@@ -28,15 +28,13 @@ pip install -e .
 
 ### 1. Spotify credentials
 
-Create a `.env` file in the project root:
+Copy the example env file and fill in your credentials:
 
-```
-SPOTIPY_CLIENT_ID=your_client_id
-SPOTIPY_CLIENT_SECRET=your_client_secret
-SPOTIPY_REDIRECT_URI=http://localhost:8888/callback
+```bash
+cp .env.example .env
 ```
 
-You can obtain these values from the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) after creating an application.
+You can obtain these values from the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) after creating an application. Make sure `http://localhost:8888/callback` is added as a Redirect URI in your app settings.
 
 ### 2. Rekordbox XML export
 
