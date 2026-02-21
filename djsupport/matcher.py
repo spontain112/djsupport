@@ -36,34 +36,36 @@ def _score_result(track: Track, result: dict) -> float:
     return artist_score * 0.4 + title_score * 0.6
 
 
+def _best_above_threshold(results: list[dict], track: Track, threshold: int) -> dict | None:
+    """Return the highest-scoring result if it meets the threshold, else None."""
+    if not results:
+        return None
+    scored = [(r, _score_result(track, r)) for r in results]
+    scored.sort(key=lambda x: x[1], reverse=True)
+    best, best_score = scored[0]
+    return {**best, "score": best_score} if best_score >= threshold else None
+
+
 def match_track(sp, track: Track, threshold: int = 80) -> dict | None:
     """Try to find a Spotify match for a Rekordbox track.
 
     Returns the best matching Spotify result dict (with uri, name, artist, album)
     or None if no match meets the threshold.
     """
-    # Strategy 1: search with artist + title
+    # Strategy 1: field-filtered search with artist + title
     results = search_track(sp, track.artist, track.name)
+    match = _best_above_threshold(results, track, threshold)
+    if match:
+        return match
 
-    if not results:
-        # Strategy 2: strip mix info from title
-        stripped = _strip_mix_info(track.name)
-        if stripped != track.name:
-            results = search_track(sp, track.artist, stripped)
+    # Strategy 2: strip mix info from title and retry with field filters
+    stripped = _strip_mix_info(track.name)
+    if stripped != track.name:
+        results = search_track(sp, track.artist, stripped)
+        match = _best_above_threshold(results, track, threshold)
+        if match:
+            return match
 
-    if not results and track.remixer:
-        # Strategy 3: include remixer as part of artist search
-        results = search_track(sp, f"{track.artist} {track.remixer}", track.name)
-
-    if not results:
-        return None
-
-    # Score and pick the best result
-    scored = [(r, _score_result(track, r)) for r in results]
-    scored.sort(key=lambda x: x[1], reverse=True)
-
-    best, best_score = scored[0]
-    if best_score >= threshold:
-        return {**best, "score": best_score}
-
-    return None
+    # Strategy 3: keyword-only search — broader, catches metadata variations
+    results = search_track(sp, track.artist, track.name, use_field_filters=False)
+    return _best_above_threshold(results, track, threshold)

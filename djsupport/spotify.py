@@ -18,14 +18,21 @@ def get_client() -> spotipy.Spotify:
 
 
 def search_track(
-    sp: spotipy.Spotify, artist: str, title: str, album: str | None = None
+    sp: spotipy.Spotify,
+    artist: str,
+    title: str,
+    album: str | None = None,
+    use_field_filters: bool = True,
 ) -> list[dict]:
     """Search Spotify for a track. Returns list of result dicts with uri, name, artist, album."""
-    query = f"artist:{artist} track:{title}"
-    if album:
-        query += f" album:{album}"
+    if use_field_filters:
+        query = f"artist:{artist} track:{title}"
+        if album:
+            query += f" album:{album}"
+    else:
+        query = f"{artist} {title}"
 
-    results = sp.search(q=query, type="track", limit=5)
+    results = sp.search(q=query, type="track", limit=10)
     items = results.get("tracks", {}).get("items", [])
 
     return [
