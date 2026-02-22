@@ -1,16 +1,50 @@
+# Credentials and tokens
 .env
+.cache
+.cache/
+.spotipy_cache*
+
+# Python
 __pycache__/
 *.pyc
+*.pyo
 *.egg-info/
 dist/
 build/
 .venv/
-.cache
-.cache/
-.spotipy_cache*
+
+# App-specific state (personal data)
 .djsupport_cache*
 .djsupport_playlists*
-
-# Personal data
 *.xml
 CLAUDE.md
+
+# Claude Code / AI tools
+.claude/
+
+# Internal planning docs (local-only)
+docs/plans/
+
+# IDE files
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Type checking
+.mypy_cache/
+
+# Logs
+*.log
