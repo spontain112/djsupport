@@ -9,6 +9,7 @@ build/
 .cache/
 .spotipy_cache*
 .djsupport_cache*
+.djsupport_playlists*
 
 # Personal data
 *.xml

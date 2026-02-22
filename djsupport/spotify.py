@@ -1,7 +1,13 @@
 """Spotify API wrapper using spotipy."""
 
+from __future__ import annotations
+
+from datetime import datetime
+
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
+
+from djsupport.state import PlaylistState, PlaylistStateManager
 
 
 SCOPES = "playlist-modify-public playlist-modify-private"
@@ -57,11 +63,50 @@ def get_user_playlists(sp: spotipy.Spotify) -> dict[str, str]:
     return playlists
 
 
+def format_playlist_name(name: str, prefix: str | None = None) -> str:
+    """Return prefixed playlist name, e.g. 'djsupport / My Playlist'."""
+    if prefix:
+        return f"{prefix} / {name}"
+    return name
+
+
+def resolve_playlist_id(
+    sp: spotipy.Spotify,
+    name: str,
+    prefix: str | None,
+    existing_playlists: dict[str, str],
+    state_manager: PlaylistStateManager | None = None,
+) -> tuple[str | None, str]:
+    """Look up a Spotify playlist ID for a Rekordbox playlist.
+
+    Returns (playlist_id | None, found_by) where found_by is one of:
+    "state", "name", or "none".
+    """
+    # 1. Check state for stored ID
+    if state_manager is not None:
+        state = state_manager.get(name)
+        if state is not None:
+            try:
+                sp.playlist(state.spotify_id, fields="id")
+                return state.spotify_id, "state"
+            except spotipy.SpotifyException:
+                pass  # playlist deleted, fall through
+
+    # 2. Check existing playlists by formatted name only
+    formatted = format_playlist_name(name, prefix)
+    if formatted in existing_playlists:
+        return existing_playlists[formatted], "name"
+
+    return None, "none"
+
+
 def create_or_update_playlist(
     sp: spotipy.Spotify,
     name: str,
     track_uris: list[str],
     existing_playlists: dict[str, str] | None = None,
+    prefix: str | None = None,
+    state_manager: PlaylistStateManager | None = None,
 ) -> tuple[str, str]:
     """Create a playlist or replace its tracks if it already exists.
 
@@ -72,11 +117,15 @@ def create_or_update_playlist(
 
     user_id = sp.current_user()["id"]
 
-    if name in existing_playlists:
-        playlist_id = existing_playlists[name]
+    playlist_id, found_by = resolve_playlist_id(
+        sp, name, prefix, existing_playlists, state_manager,
+    )
+
+    if playlist_id is not None:
         action = "updated"
     else:
-        result = sp.user_playlist_create(user_id, name, public=False)
+        display_name = format_playlist_name(name, prefix)
+        result = sp.user_playlist_create(user_id, display_name, public=False)
         playlist_id = result["id"]
         action = "created"
 
@@ -87,6 +136,15 @@ def create_or_update_playlist(
             sp.playlist_add_items(playlist_id, track_uris[i : i + 100])
     else:
         sp.playlist_replace_items(playlist_id, [])
+
+    if state_manager is not None:
+        state_manager.set(name, PlaylistState(
+            spotify_id=playlist_id,
+            spotify_name=format_playlist_name(name, prefix),
+            rekordbox_path=name,
+            last_synced=datetime.now().isoformat(),
+            prefix_used=prefix,
+        ))
 
     return playlist_id, action
 
@@ -114,6 +172,8 @@ def incremental_update_playlist(
     name: str,
     desired_uris: list[str],
     existing_playlists: dict[str, str] | None = None,
+    prefix: str | None = None,
+    state_manager: PlaylistStateManager | None = None,
 ) -> tuple[str, str, dict]:
     """Update a playlist incrementally, only adding/removing the diff.
 
@@ -123,11 +183,17 @@ def incremental_update_playlist(
     if existing_playlists is None:
         existing_playlists = get_user_playlists(sp)
 
-    if name not in existing_playlists:
-        pid, action = create_or_update_playlist(sp, name, desired_uris, existing_playlists)
+    playlist_id, found_by = resolve_playlist_id(
+        sp, name, prefix, existing_playlists, state_manager,
+    )
+
+    if playlist_id is None:
+        pid, action = create_or_update_playlist(
+            sp, name, desired_uris, existing_playlists,
+            prefix=prefix, state_manager=state_manager,
+        )
         return pid, action, {"added": len(desired_uris), "removed": 0, "unchanged": 0}
 
-    playlist_id = existing_playlists[name]
     current_uris = get_playlist_tracks(sp, playlist_id)
 
     current_set = set(current_uris)
@@ -137,7 +203,18 @@ def incremental_update_playlist(
     to_add = desired_set - current_set
     unchanged = current_set & desired_set
 
+    def _save_state(pid: str, action: str) -> None:
+        if state_manager is not None:
+            state_manager.set(name, PlaylistState(
+                spotify_id=pid,
+                spotify_name=format_playlist_name(name, prefix),
+                rekordbox_path=name,
+                last_synced=datetime.now().isoformat(),
+                prefix_used=prefix,
+            ))
+
     if not to_remove and not to_add:
+        _save_state(playlist_id, "unchanged")
         return playlist_id, "unchanged", {
             "added": 0, "removed": 0, "unchanged": len(unchanged),
         }
@@ -147,6 +224,7 @@ def incremental_update_playlist(
         sp.playlist_replace_items(playlist_id, desired_uris[:100])
         for i in range(100, len(desired_uris), 100):
             sp.playlist_add_items(playlist_id, desired_uris[i : i + 100])
+        _save_state(playlist_id, "replaced")
         return playlist_id, "replaced", {
             "added": len(to_add), "removed": len(to_remove),
             "unchanged": len(unchanged),
@@ -164,6 +242,7 @@ def incremental_update_playlist(
         for i in range(0, len(add_list), 100):
             sp.playlist_add_items(playlist_id, add_list[i : i + 100])
 
+    _save_state(playlist_id, "updated")
     return playlist_id, "updated", {
         "added": len(to_add), "removed": len(to_remove),
         "unchanged": len(unchanged),

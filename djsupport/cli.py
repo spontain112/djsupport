@@ -42,6 +42,9 @@ def cli():
 @click.option("--retry-days", default=7, show_default=True, help="Auto-retry failures older than N days.")
 @click.option("--cache-path", default=".djsupport_cache.json", show_default=True, help="Path to cache file.")
 @click.option("--incremental/--no-incremental", default=True, show_default=True, help="Use incremental playlist updates.")
+@click.option("--prefix", default="djsupport", show_default=True, help="Prefix for Spotify playlist names.")
+@click.option("--no-prefix", is_flag=True, help="Disable playlist name prefix.")
+@click.option("--state-path", default=".djsupport_playlists.json", show_default=True, help="Path to playlist state file.")
 def sync(
     xml_path: str,
     playlist: str | None,
@@ -55,6 +58,9 @@ def sync(
     retry_days: int,
     cache_path: str,
     incremental: bool,
+    prefix: str,
+    no_prefix: bool,
+    state_path: str,
 ):
     """Sync Rekordbox playlists to Spotify.
 
@@ -95,12 +101,41 @@ def sync(
         if cached_count:
             click.echo(f"Loaded {cached_count} cached matches from {cache_path}")
 
+    # Resolve prefix
+    actual_prefix = None if no_prefix else prefix
+
+    # Initialize playlist state manager
+    from djsupport.state import PlaylistStateManager
+    state_mgr = PlaylistStateManager(state_path)
+    state_mgr.load()
+
     if not dry_run:
         sp = get_client()
         existing = get_user_playlists(sp)
     else:
         sp = get_client()
         existing = None
+
+    # First-run migration: populate state from existing Spotify playlists
+    if not dry_run and existing and state_mgr.is_empty():
+        from djsupport.spotify import format_playlist_name
+        from djsupport.state import PlaylistState
+        from datetime import datetime as dt
+        migrated = 0
+        for pl in playlists:
+            for candidate in (format_playlist_name(pl.name, actual_prefix), pl.name):
+                if candidate in existing:
+                    state_mgr.set(pl.name, PlaylistState(
+                        spotify_id=existing[candidate],
+                        spotify_name=candidate,
+                        rekordbox_path=pl.name,
+                        last_synced=dt.now().isoformat(),
+                        prefix_used=actual_prefix if candidate != pl.name else None,
+                    ))
+                    migrated += 1
+                    break
+        if migrated:
+            click.echo(f"Migrated {migrated} existing playlist(s) to state file.")
 
     report = SyncReport(
         timestamp=datetime.now(),
@@ -149,14 +184,18 @@ def sync(
             if incremental:
                 playlist_id, action, _diff = incremental_update_playlist(
                     sp, pl.name, matched_uris, existing,
+                    prefix=actual_prefix, state_manager=state_mgr,
                 )
             else:
                 playlist_id, action = create_or_update_playlist(
                     sp, pl.name, matched_uris, existing,
+                    prefix=actual_prefix, state_manager=state_mgr,
                 )
             pl_report.action = action
             if existing is not None:
-                existing[pl.name] = playlist_id
+                from djsupport.spotify import format_playlist_name
+                formatted = format_playlist_name(pl.name, actual_prefix)
+                existing[formatted] = playlist_id
         elif dry_run:
             pl_report.action = "dry-run"
 
@@ -165,6 +204,10 @@ def sync(
     # Save cache (even in dry-run — API lookups are still worth caching)
     if cache is not None:
         cache.save()
+
+    # Save playlist state (skip in dry-run)
+    if not dry_run:
+        state_mgr.save()
 
     print_report(report)
 
