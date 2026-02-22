@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `djsupport library set` and `djsupport library show` commands to save and inspect a default Rekordbox XML path
+- Local config file (`.djsupport_config.json`) for storing the default Rekordbox XML path
+- Match classification in reports (`exact` vs `fallback_version`) to distinguish remix/version substitutions
+- Version fallback counts in sync summaries and match type columns in Markdown reports
+
+### Changed
+
+- `djsupport list` and `djsupport sync` can now use the saved Rekordbox XML path when no XML path argument is provided
+- Matcher now treats remix/version identity as a first-class signal and prefers exact-version matches before fallback versions
+- Matcher now recognizes Spotify hyphen-style version names (e.g. `Track - XYZ Remix`) in addition to parenthetical mix names
+- Matcher normalization now folds diacritics (e.g. `För` -> `For`) to improve cross-catalog matching
+
+### Fixed
+
+- Incremental playlist updates now pass URI strings correctly to Spotify item-removal calls
+
 ## [0.2.0] - 2026-02-22
 
 ### Added
