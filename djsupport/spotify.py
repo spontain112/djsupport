@@ -241,7 +241,7 @@ def incremental_update_playlist(
         }
 
     if to_remove:
-        remove_items = [{"uri": uri} for uri in to_remove]
+        remove_items = list(to_remove)
         for i in range(0, len(remove_items), 100):
             sp.playlist_remove_all_occurrences_of_items(
                 playlist_id, remove_items[i : i + 100],

@@ -22,6 +22,7 @@ class CacheEntry:
     matched: bool
     timestamp: str
     threshold: int
+    match_type: str | None = None
 
 
 class MatchCache:
@@ -77,6 +78,7 @@ class MatchCache:
                 spotify_name=result["name"],
                 spotify_artist=result["artist"],
                 score=result["score"],
+                match_type=result.get("match_type"),
                 matched=True,
                 timestamp=datetime.now().isoformat(),
                 threshold=threshold,
@@ -87,6 +89,7 @@ class MatchCache:
                 spotify_name=None,
                 spotify_artist=None,
                 score=None,
+                match_type=None,
                 matched=False,
                 timestamp=datetime.now().isoformat(),
                 threshold=threshold,

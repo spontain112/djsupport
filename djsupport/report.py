@@ -10,6 +10,7 @@ class MatchedTrack:
     spotify_name: str
     spotify_artist: str
     score: float
+    match_type: str = "exact"
 
 
 @dataclass
@@ -79,6 +80,9 @@ def print_report(report: SyncReport) -> None:
                 f"  min {min(scores):.1f}"
                 f"  max {max(scores):.1f}"
             )
+            fallback_count = sum(1 for m in pl.matched if m.match_type == "fallback_version")
+            if fallback_count:
+                click.echo(f"  Version fallbacks: {fallback_count}")
 
         if pl.unmatched:
             click.echo(f"  Unmatched ({len(pl.unmatched)}):")
@@ -127,14 +131,20 @@ def save_report(report: SyncReport, path: str) -> None:
                 f" | min {min(scores):.1f}"
                 f" | max {max(scores):.1f}"
             )
+            fallback_count = sum(1 for m in pl.matched if m.match_type == "fallback_version")
+            if fallback_count:
+                lines.append(f"**Version fallbacks:** {fallback_count}")
 
         lines.append("")
 
         if pl.matched:
-            lines.append("| Rekordbox | Spotify Match | Score |")
-            lines.append("|-----------|---------------|-------|")
+            lines.append("| Rekordbox | Spotify Match | Score | Match Type |")
+            lines.append("|-----------|---------------|-------|------------|")
             for m in pl.matched:
-                lines.append(f"| {m.rekordbox_name} | {m.spotify_artist} - {m.spotify_name} | {m.score:.1f} |")
+                lines.append(
+                    f"| {m.rekordbox_name} | {m.spotify_artist} - {m.spotify_name}"
+                    f" | {m.score:.1f} | {m.match_type} |"
+                )
             lines.append("")
 
         if pl.unmatched:
@@ -148,18 +158,18 @@ def save_report(report: SyncReport, path: str) -> None:
     low_confidence = []
     for pl in report.playlists:
         for m in pl.matched:
-            if m.score < 90:
+            if m.score < 90 or m.match_type == "fallback_version":
                 low_confidence.append((pl.path, m))
 
     if low_confidence:
         lines.append("## Low Confidence Matches (score < 90)")
         lines.append("")
-        lines.append("| Playlist | Rekordbox | Spotify Match | Score |")
-        lines.append("|----------|-----------|---------------|-------|")
+        lines.append("| Playlist | Rekordbox | Spotify Match | Score | Match Type |")
+        lines.append("|----------|-----------|---------------|-------|------------|")
         for pl_path, m in low_confidence:
             lines.append(
                 f"| {pl_path} | {m.rekordbox_name}"
-                f" | {m.spotify_artist} - {m.spotify_name} | {m.score:.1f} |"
+                f" | {m.spotify_artist} - {m.spotify_name} | {m.score:.1f} | {m.match_type} |"
             )
         lines.append("")
 

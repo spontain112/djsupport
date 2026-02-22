@@ -1,6 +1,7 @@
 """Fuzzy matching between Rekordbox tracks and Spotify search results."""
 
 import re
+import unicodedata
 
 from rapidfuzz import fuzz
 
@@ -10,6 +11,9 @@ from djsupport.spotify import search_track
 
 def _normalize(text: str) -> str:
     """Lowercase, strip whitespace, and remove common noise."""
+    # Fold accents/diacritics so e.g. "För" and "For" compare equally.
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
     text = text.lower().strip()
     # Remove country tags like (IL), (UA), (UK)
     text = re.sub(r"\s*\([A-Z]{2,3}\)", "", text, flags=re.IGNORECASE)
@@ -27,28 +31,124 @@ def _strip_mix_info(title: str) -> str:
 
     e.g. 'Vultora (Original Mix)' -> 'Vultora'
          'Today [Permanent Vacation]' -> 'Today'
+         'What Is Real - Deep in the Playa Mix' -> 'What Is Real'
     """
     title = re.sub(r"\s*\(.*?(mix|remix|edit|version|dub)\)", "", title, flags=re.IGNORECASE)
     title = re.sub(r"\s*\[.*?\]", "", title)
+    # Strip trailing hyphen descriptors like " - XYZ Remix" used by Spotify
+    title = re.sub(r"\s+-\s+[^-]*\b(mix|remix|edit|version|dub)\b.*$", "", title, flags=re.IGNORECASE)
     return title.strip()
+
+
+def _extract_mix_descriptor(title: str) -> str | None:
+    """Extract a remix/mix/edit descriptor from parentheses or brackets."""
+    descriptors = _extract_mix_descriptors(title)
+    return descriptors[0] if descriptors else None
+
+
+def _extract_mix_descriptors(title: str) -> list[str]:
+    """Extract all version-like descriptors (mix/remix/edit/etc.) from a title."""
+    descriptors: list[str] = []
+    candidates = re.findall(r"[\(\[]([^\)\]]+)[\)\]]", title)
+    for c in candidates:
+        if re.search(r"\b(mix|remix|edit|version|dub)\b", c, flags=re.IGNORECASE):
+            descriptors.append(_normalize(c))
+    # Spotify often uses "Track Name - XYZ Remix" instead of parentheses
+    hyphen_match = re.search(
+        r"\s+-\s+([^-]*\b(mix|remix|edit|version|dub)\b.*)$",
+        title,
+        flags=re.IGNORECASE,
+    )
+    if hyphen_match:
+        descriptors.append(_normalize(hyphen_match.group(1)))
+    # Preserve order, remove duplicates
+    seen: set[str] = set()
+    unique: list[str] = []
+    for d in descriptors:
+        if d not in seen:
+            seen.add(d)
+            unique.append(d)
+    return unique
+
+
+def _is_named_variant(mix_descriptor: str | None) -> bool:
+    """True for non-original variants like remixes/edits/dubs."""
+    if not mix_descriptor:
+        return False
+    # "Original Mix" is often omitted on Spotify; treat it as the default version.
+    return "original" not in mix_descriptor
+
+
+def _score_components(track: Track, result: dict) -> dict[str, float]:
+    """Return matching score components for a Rekordbox/Spotify pair."""
+    artist_score = fuzz.token_sort_ratio(
+        _normalize(track.artist), _normalize(result["artist"])
+    )
+    norm_title = _normalize(track.name)
+    norm_result = _normalize(result["name"])
+    raw_title_score = fuzz.token_sort_ratio(norm_title, norm_result)
+    stripped_title_score = fuzz.token_sort_ratio(
+        _normalize(_strip_mix_info(track.name)),
+        _normalize(_strip_mix_info(result["name"])),
+    )
+    return {
+        "artist_score": artist_score,
+        "raw_title_score": raw_title_score,
+        "stripped_title_score": stripped_title_score,
+    }
+
+
+def _classify_version_match(track: Track, result: dict) -> str:
+    """Classify version agreement as exact or fallback_version."""
+    track_mix = _extract_mix_descriptor(track.name)
+    result_mix = _extract_mix_descriptor(result["name"])
+
+    track_named_variant = _is_named_variant(track_mix)
+    result_named_variant = _is_named_variant(result_mix)
+
+    if track_named_variant:
+        if result_mix is None:
+            return "fallback_version"
+        if fuzz.token_sort_ratio(track_mix or "", result_mix or "") < 80:
+            return "fallback_version"
+        # If the result includes additional version tags beyond the requested one
+        # (e.g. "... (Deep in the Playa Mix) - Video Edit"), classify as fallback.
+        result_descriptors = _extract_mix_descriptors(result["name"])
+        for desc in result_descriptors[1:]:
+            if fuzz.token_sort_ratio(track_mix or "", desc) < 80:
+                return "fallback_version"
+        if track.remixer:
+            remixer = _normalize(track.remixer)
+            result_text = _normalize(f'{result["artist"]} {result["name"]}')
+            if remixer and remixer not in result_text:
+                return "fallback_version"
+        return "exact"
+
+    # Track appears to be original/default version. Named remix/edit on Spotify is a fallback.
+    if result_named_variant:
+        return "fallback_version"
+    return "exact"
 
 
 def _score_result(track: Track, result: dict) -> float:
     """Score a Spotify result against a Rekordbox track (0-100)."""
-    artist_score = fuzz.token_sort_ratio(
-        _normalize(track.artist), _normalize(result["artist"])
-    )
-    # Score title both raw and with mix info stripped, take the better one
-    norm_title = _normalize(track.name)
-    norm_result = _normalize(result["name"])
-    title_score = fuzz.token_sort_ratio(norm_title, norm_result)
-    stripped_score = fuzz.token_sort_ratio(
-        _normalize(_strip_mix_info(track.name)),
-        _normalize(_strip_mix_info(result["name"])),
-    )
+    components = _score_components(track, result)
+    artist_score = components["artist_score"]
+    title_score = components["raw_title_score"]
+    stripped_score = components["stripped_title_score"]
     title_score = max(title_score, stripped_score)
+
+    # Penalize remix/edit variant mismatches. Base-title matching alone can
+    # incorrectly treat different versions of the same track as exact matches.
+    penalty = 0.0
+    if _classify_version_match(track, result) == "fallback_version":
+        # Looking for an unavailable/mismatched version. Keep candidate visible,
+        # but reduce score so exact-version matches win when they exist.
+        penalty += 15.0
+
     # Weight title slightly more since artist names vary in format
-    return artist_score * 0.4 + title_score * 0.6
+    score = artist_score * 0.4 + title_score * 0.6 - penalty
+    return max(0.0, min(100.0, score))
 
 
 def match_track(sp, track: Track, threshold: int = 80) -> dict | None:
@@ -89,12 +189,35 @@ def match_track(sp, track: Track, threshold: int = 80) -> dict | None:
             seen.add(r["uri"])
             unique.append(r)
 
-    scored = [(r, _score_result(track, r)) for r in unique]
-    scored.sort(key=lambda x: x[1], reverse=True)
+    scored: list[tuple[dict, float, float, dict[str, float], str]] = []
+    for r in unique:
+        components = _score_components(track, r)
+        exact_score = _score_result(track, r)
+        base_score = components["artist_score"] * 0.4 + components["stripped_title_score"] * 0.6
+        match_type = _classify_version_match(track, r)
+        scored.append((r, exact_score, base_score, components, match_type))
 
-    best, best_score = scored[0]
-    if best_score >= threshold:
-        return {**best, "score": best_score}
+    # First pass: exact version matches only.
+    exact_candidates = [s for s in scored if s[4] == "exact"]
+    exact_candidates.sort(key=lambda x: x[1], reverse=True)
+    if exact_candidates:
+        best, best_score, _base_score, _components, _match_type = exact_candidates[0]
+        if best_score >= threshold:
+            return {**best, "score": best_score, "match_type": "exact"}
+
+    # Second pass: fallback to a different version if the base track is strong.
+    # This preserves the user's track intent in reporting while avoiding silent
+    # "exact" classifications for remix/version substitutions.
+    fallback_candidates = [s for s in scored if s[4] == "fallback_version"]
+    fallback_candidates.sort(key=lambda x: x[2], reverse=True)
+    if fallback_candidates:
+        best, _exact_score, base_score, components, _match_type = fallback_candidates[0]
+        if (
+            base_score >= threshold
+            and components["stripped_title_score"] >= 90
+            and components["artist_score"] >= 70
+        ):
+            return {**best, "score": base_score, "match_type": "fallback_version"}
 
     return None
 
@@ -118,6 +241,7 @@ def match_track_cached(
                 "name": entry.spotify_name,
                 "artist": entry.spotify_artist,
                 "score": entry.score,
+                "match_type": entry.match_type or "exact",
             }, "cache"
         else:
             if not cache.is_retry_eligible(track.artist, track.name,

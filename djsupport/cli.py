@@ -64,8 +64,9 @@ def sync(
 ):
     """Sync Rekordbox playlists to Spotify.
 
-    XML_PATH is the path to your Rekordbox XML library export.
+    XML_PATH is the path to your Rekordbox XML library export (optional if configured via `library set`).
     """
+    xml_path = _resolve_xml_path(xml_path)
     click.echo(f"Parsing {xml_path}...")
     tracks, playlists = parse_xml(xml_path)
     click.echo(f"Found {len(tracks)} tracks and {len(playlists)} playlists.")
