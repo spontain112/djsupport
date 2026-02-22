@@ -41,6 +41,20 @@ You can obtain these values from the [Spotify Developer Dashboard](https://devel
 
 In Rekordbox, go to **File > Export Collection in xml format** and save the file somewhere accessible.
 
+### 3. Save your Rekordbox XML path (recommended)
+
+Save the XML path once so future commands can omit it:
+
+```bash
+djsupport library set /path/to/library.xml
+```
+
+Check the saved path/status:
+
+```bash
+djsupport library show
+```
+
 ## Usage
 
 ### List playlists
@@ -48,7 +62,7 @@ In Rekordbox, go to **File > Export Collection in xml format** and save the file
 Preview what playlists are available in your Rekordbox export:
 
 ```bash
-djsupport list path/to/library.xml
+djsupport list
 ```
 
 Output:
@@ -64,7 +78,7 @@ Output:
 Sync all playlists:
 
 ```bash
-djsupport sync path/to/library.xml
+djsupport sync
 ```
 
 Sync a single playlist:
@@ -96,6 +110,8 @@ Use a custom name for the combined playlist:
 ```bash
 djsupport sync path/to/library.xml --all --all-name "My DJ Tracks"
 ```
+
+You can still pass an explicit XML path at any time to override the saved path for a single run.
 
 ## License
 

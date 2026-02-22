@@ -2,10 +2,12 @@
 
 import sys
 from datetime import datetime
+from pathlib import Path
 
 import click
 from dotenv import load_dotenv
 
+from djsupport.config import ConfigManager, validate_rekordbox_xml
 from djsupport.matcher import match_track, match_track_cached
 from djsupport.rekordbox import parse_xml
 from djsupport.report import (
@@ -29,8 +31,73 @@ def cli():
     load_dotenv()
 
 
+def _resolve_xml_path(explicit_xml_path: str | None) -> str:
+    """Resolve Rekordbox XML path from explicit arg or saved local config."""
+    if explicit_xml_path:
+        return explicit_xml_path
+
+    cfg = ConfigManager()
+    cfg.load()
+    saved_path = cfg.get_rekordbox_xml_path()
+    if not saved_path:
+        raise click.ClickException(
+            "No Rekordbox XML path configured. "
+            "Run `djsupport library set /path/to/library.xml` "
+            "or pass an explicit XML path."
+        )
+
+    p = Path(saved_path).expanduser()
+    if not p.exists() or not p.is_file():
+        raise click.ClickException(
+            "Configured Rekordbox XML path is missing or invalid:\n"
+            f"  {p}\n"
+            "Run `djsupport library set /path/to/library.xml` to update it."
+        )
+    return str(p)
+
+
+@cli.group()
+def library():
+    """Manage local Rekordbox XML path configuration."""
+
+
+@library.command("set")
+@click.argument("xml_path", type=click.Path(exists=True, dir_okay=False))
+def library_set(xml_path: str):
+    """Validate and save the default Rekordbox XML path."""
+    ok, error = validate_rekordbox_xml(xml_path)
+    if not ok:
+        raise click.ClickException(error or "Invalid Rekordbox XML file.")
+
+    cfg = ConfigManager()
+    cfg.load()
+    cfg.set_rekordbox_xml_path(xml_path)
+    cfg.save()
+
+    click.echo(f"Saved Rekordbox XML path: {cfg.get_rekordbox_xml_path()}")
+
+
+@library.command("show")
+def library_show():
+    """Show configured Rekordbox XML path and validation status."""
+    cfg = ConfigManager()
+    cfg.load()
+    xml_path = cfg.get_rekordbox_xml_path()
+    if not xml_path:
+        click.echo("Rekordbox XML path is not configured.")
+        click.echo("Set it with: djsupport library set /path/to/library.xml")
+        return
+
+    click.echo(f"Configured Rekordbox XML path: {xml_path}")
+    ok, error = validate_rekordbox_xml(xml_path)
+    if ok:
+        click.echo("Status: OK (exists and parseable)")
+    else:
+        click.echo(f"Status: INVALID ({error})")
+
+
 @cli.command()
-@click.argument("xml_path", type=click.Path(exists=True))
+@click.argument("xml_path", required=False, type=click.Path(exists=True, dir_okay=False))
 @click.option("--playlist", "-p", help="Sync only this playlist (by name).")
 @click.option("--dry-run", is_flag=True, help="Preview matches without creating playlists.")
 @click.option("--threshold", "-t", default=80, show_default=True, help="Minimum match confidence (0-100).")
@@ -46,7 +113,7 @@ def cli():
 @click.option("--no-prefix", is_flag=True, help="Disable playlist name prefix.")
 @click.option("--state-path", default=".djsupport_playlists.json", show_default=True, help="Path to playlist state file.")
 def sync(
-    xml_path: str,
+    xml_path: str | None,
     playlist: str | None,
     dry_run: bool,
     threshold: int,
@@ -156,6 +223,7 @@ def sync(
                         spotify_name=result["name"],
                         spotify_artist=result["artist"],
                         score=result["score"],
+                        match_type=result.get("match_type", "exact"),
                     ))
                 else:
                     pl_report.unmatched.append(track.display)
@@ -197,9 +265,10 @@ def sync(
 
 
 @cli.command("list")
-@click.argument("xml_path", type=click.Path(exists=True))
-def list_playlists(xml_path: str):
+@click.argument("xml_path", required=False, type=click.Path(exists=True, dir_okay=False))
+def list_playlists(xml_path: str | None):
     """List all playlists in a Rekordbox XML export."""
+    xml_path = _resolve_xml_path(xml_path)
     _, playlists = parse_xml(xml_path)
     for pl in playlists:
         click.echo(f"  {pl.path} ({len(pl.track_ids)} tracks)")
