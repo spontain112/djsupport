@@ -92,12 +92,23 @@ def resolve_playlist_id(
             except spotipy.SpotifyException:
                 pass  # playlist deleted, fall through
 
-    # 2. Check existing playlists by formatted name only
+    # 2. Check existing playlists by formatted name, then bare name
     formatted = format_playlist_name(name, prefix)
     if formatted in existing_playlists:
         return existing_playlists[formatted], "name"
 
+    # 3. Fall back to bare name (pre-prefix playlist)
+    if prefix and name in existing_playlists:
+        return existing_playlists[name], "name"
+
     return None, "none"
+
+
+def _rename_if_needed(sp: spotipy.Spotify, playlist_id: str, expected_name: str) -> None:
+    """Rename a Spotify playlist if its current name differs from expected_name."""
+    current = sp.playlist(playlist_id, fields="name")
+    if current["name"] != expected_name:
+        sp.playlist_change_details(playlist_id, name=expected_name)
 
 
 def create_or_update_playlist(
@@ -123,6 +134,9 @@ def create_or_update_playlist(
 
     if playlist_id is not None:
         action = "updated"
+        # Rename if the Spotify name doesn't match the expected formatted name
+        formatted = format_playlist_name(name, prefix)
+        _rename_if_needed(sp, playlist_id, formatted)
     else:
         display_name = format_playlist_name(name, prefix)
         result = sp.user_playlist_create(user_id, display_name, public=False)
@@ -193,6 +207,10 @@ def incremental_update_playlist(
             prefix=prefix, state_manager=state_manager,
         )
         return pid, action, {"added": len(desired_uris), "removed": 0, "unchanged": 0}
+
+    # Rename if the Spotify name doesn't match the expected formatted name
+    formatted = format_playlist_name(name, prefix)
+    _rename_if_needed(sp, playlist_id, formatted)
 
     current_uris = get_playlist_tracks(sp, playlist_id)
 
