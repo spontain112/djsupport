@@ -18,7 +18,10 @@ class PlaylistReport:
     path: str
     matched: list[MatchedTrack] = field(default_factory=list)
     unmatched: list[str] = field(default_factory=list)
-    action: str = "dry-run"  # "created", "updated", or "dry-run"
+    action: str = "dry-run"  # "created", "updated", "unchanged", or "dry-run"
+    cache_hits: int = 0
+    api_lookups: int = 0
+    retried: int = 0
 
     @property
     def total(self) -> int:
@@ -35,6 +38,7 @@ class SyncReport:
     threshold: int
     dry_run: bool
     playlists: list[PlaylistReport] = field(default_factory=list)
+    cache_enabled: bool = False
 
     @property
     def total_matched(self) -> int:
@@ -81,14 +85,22 @@ def print_report(report: SyncReport) -> None:
             for name in pl.unmatched:
                 click.echo(f"    - {name}")
 
+        if report.cache_enabled:
+            click.echo(f"  Cache: {pl.cache_hits} hits | {pl.api_lookups} API | {pl.retried} retries")
+
     click.echo()
     click.echo("\u2500" * 42)
+    total_cache = sum(p.cache_hits for p in report.playlists)
+    total_api = sum(p.api_lookups for p in report.playlists)
+    total_retries = sum(p.retried for p in report.playlists)
     click.echo(
         f"  TOTALS: {len(report.playlists)} playlists"
         f" | {report.total_matched} matched"
         f" | {report.total_unmatched} unmatched"
     )
     click.echo(f"  Overall match rate: {report.overall_match_rate:.1f}%")
+    if report.cache_enabled:
+        click.echo(f"  Cache: {total_cache} hits | {total_api} API calls | {total_retries} retries")
     click.echo("\u2500" * 42)
 
 
@@ -160,6 +172,15 @@ def save_report(report: SyncReport, path: str) -> None:
         f" | {report.total_unmatched} unmatched"
         f" | {report.overall_match_rate:.1f}% match rate"
     )
+    if report.cache_enabled:
+        total_cache = sum(p.cache_hits for p in report.playlists)
+        total_api = sum(p.api_lookups for p in report.playlists)
+        total_retries = sum(p.retried for p in report.playlists)
+        lines.append(
+            f"**Cache:** {total_cache} hits"
+            f" | {total_api} API calls"
+            f" | {total_retries} retries"
+        )
     lines.append("")
 
     with open(path, "w") as f:

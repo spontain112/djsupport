@@ -97,3 +97,34 @@ def match_track(sp, track: Track, threshold: int = 80) -> dict | None:
         return {**best, "score": best_score}
 
     return None
+
+
+def match_track_cached(
+    sp, track: Track, cache: "MatchCache", threshold: int = 80,
+    retry_days: int = 7, force_retry: bool = False,
+) -> tuple[dict | None, str]:
+    """Match with cache support. Returns (result, source).
+
+    source is one of: "cache", "api", "retry"
+    """
+    from djsupport.cache import MatchCache  # noqa: F811
+
+    entry = cache.lookup(track.artist, track.name, threshold)
+
+    if entry is not None:
+        if entry.matched:
+            return {
+                "uri": entry.spotify_uri,
+                "name": entry.spotify_name,
+                "artist": entry.spotify_artist,
+                "score": entry.score,
+            }, "cache"
+        else:
+            if not cache.is_retry_eligible(track.artist, track.name,
+                                           retry_days, force_retry):
+                return None, "cache"
+
+    result = match_track(sp, track, threshold=threshold)
+    cache.store(track.artist, track.name, threshold, result)
+    source = "retry" if entry is not None else "api"
+    return result, source
