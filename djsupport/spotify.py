@@ -80,7 +80,8 @@ def resolve_playlist_id(
     """Look up a Spotify playlist ID for a Rekordbox playlist.
 
     Returns (playlist_id | None, found_by) where found_by is one of:
-    "state", "name", or "none".
+    "state" or "none".  Only state-tracked playlists are valid update
+    targets — name-based matching is intentionally disabled for safety.
     """
     # 1. Check state for stored ID
     if state_manager is not None:
@@ -91,15 +92,6 @@ def resolve_playlist_id(
                 return state.spotify_id, "state"
             except spotipy.SpotifyException:
                 pass  # playlist deleted, fall through
-
-    # 2. Check existing playlists by formatted name, then bare name
-    formatted = format_playlist_name(name, prefix)
-    if formatted in existing_playlists:
-        return existing_playlists[formatted], "name"
-
-    # 3. Fall back to bare name (pre-prefix playlist)
-    if prefix and name in existing_playlists:
-        return existing_playlists[name], "name"
 
     return None, "none"
 

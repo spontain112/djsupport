@@ -116,27 +116,6 @@ def sync(
         sp = get_client()
         existing = None
 
-    # First-run migration: populate state from existing Spotify playlists
-    if not dry_run and existing and state_mgr.is_empty():
-        from djsupport.spotify import format_playlist_name
-        from djsupport.state import PlaylistState
-        from datetime import datetime as dt
-        migrated = 0
-        for pl in playlists:
-            for candidate in (format_playlist_name(pl.name, actual_prefix), pl.name):
-                if candidate in existing:
-                    state_mgr.set(pl.name, PlaylistState(
-                        spotify_id=existing[candidate],
-                        spotify_name=candidate,
-                        rekordbox_path=pl.name,
-                        last_synced=dt.now().isoformat(),
-                        prefix_used=actual_prefix if candidate != pl.name else None,
-                    ))
-                    migrated += 1
-                    break
-        if migrated:
-            click.echo(f"Migrated {migrated} existing playlist(s) to state file.")
-
     report = SyncReport(
         timestamp=datetime.now(),
         threshold=threshold,
