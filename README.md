@@ -5,14 +5,15 @@ Sync your Rekordbox playlists to Spotify. Parses a Rekordbox XML library export,
 ## Features
 
 - **Rekordbox XML parsing** — reads playlists and tracks from your Rekordbox library export
-- **Fuzzy matching** — multi-strategy search using artist, title, and remixer fields with configurable confidence threshold
-- **Dry-run mode** — preview matches without creating or modifying any Spotify playlists
-- **Threshold control** — tune the minimum match confidence (0–100, default 80)
-- **Playlist filtering** — sync a single playlist by name or all playlists at once
-- **Combined playlist** — merge all tracks into a single playlist sorted by date added
+- **Fuzzy matching** — multi-strategy search using artist, title, remixer, and duration fields with configurable confidence threshold
+- **Duration-based matching** — disambiguates original, radio, and extended versions using track duration
 - **Match caching** — persists matches to disk so subsequent syncs skip already-matched tracks; auto-retries failed matches after 7 days
 - **Incremental updates** — only adds/removes changed tracks instead of replacing entire playlists
-- **Graceful rate limiting** — aborts with a clear message, saves cache, and exits non-zero instead of hanging for hours; resume later to continue where you left off
+- **Dry-run mode** — preview matches without creating or modifying any Spotify playlists
+- **Markdown reports** — save detailed match reports with per-playlist breakdowns
+- **Playlist prefix** — prefix Spotify playlist names (e.g. `djsupport / Deep House`) to keep them organized
+- **Combined playlist** — merge all tracks into a single playlist sorted by date added
+- **Graceful rate limiting** — aborts with a clear message, saves cache, and exits non-zero instead of hanging; resume later to continue where you left off
 
 ## Prerequisites
 
@@ -87,34 +88,90 @@ djsupport sync
 Sync a single playlist:
 
 ```bash
-djsupport sync path/to/library.xml -p "Deep House"
+djsupport sync -p "Deep House"
 ```
 
-Preview matches without modifying Spotify (dry run):
+Preview matches without modifying Spotify:
 
 ```bash
-djsupport sync path/to/library.xml --dry-run
+djsupport sync --dry-run
 ```
 
-Adjust the match confidence threshold (default 80):
+Combine all tracks into a single playlist sorted by date added:
 
 ```bash
-djsupport sync path/to/library.xml -t 70
+djsupport sync --all --all-name "My DJ Tracks"
 ```
 
-Combine all tracks into a single playlist (sorted by date added):
+### Tuning match quality
+
+Adjust the minimum match confidence (0–100, default 80):
 
 ```bash
-djsupport sync path/to/library.xml --all
+djsupport sync -t 70
 ```
 
-Use a custom name for the combined playlist:
+### Cache and retry
+
+Bypass the cache and re-search every track:
 
 ```bash
-djsupport sync path/to/library.xml --all --all-name "My DJ Tracks"
+djsupport sync --no-cache
 ```
 
-You can still pass an explicit XML path at any time to override the saved path for a single run.
+Force retry all previously failed matches:
+
+```bash
+djsupport sync --retry
+```
+
+Change auto-retry window (default: retry failures older than 7 days):
+
+```bash
+djsupport sync --retry-days 3
+```
+
+### Reports
+
+Save a detailed Markdown report:
+
+```bash
+djsupport sync --report report.md
+```
+
+### Playlist naming
+
+Spotify playlists are prefixed with `djsupport /` by default. Change or disable the prefix:
+
+```bash
+djsupport sync --prefix "dj"
+djsupport sync --no-prefix
+```
+
+### Advanced options
+
+You can pass an explicit XML path at any time to override the saved path:
+
+```bash
+djsupport sync /path/to/library.xml
+```
+
+All sync options:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `-p, --playlist` | | Sync only this playlist by name |
+| `--dry-run` | | Preview without modifying Spotify |
+| `-t, --threshold` | 80 | Minimum match confidence (0–100) |
+| `--all` | | Combine all tracks into one playlist |
+| `--all-name` | Rekordbox All | Name for the combined playlist |
+| `--report` | | Save Markdown report to this path |
+| `--no-cache` | | Bypass match cache |
+| `--retry` | | Force retry all failed matches |
+| `--retry-days` | 7 | Auto-retry failures older than N days |
+| `--incremental` | on | Diff-based playlist updates |
+| `--prefix` | djsupport | Prefix for Spotify playlist names |
+| `--no-prefix` | | Disable playlist name prefix |
 
 ## License
 
