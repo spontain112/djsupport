@@ -7,12 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Updated `CLAUDE.md` to reflect v0.2.0 project state (new modules, test suite, all CLI flags, conventions)
+- `CLAUDE.md` and `docs/` are now tracked in git for collaborator visibility
+- Removed `CLAUDE.md` and `docs/` from `.gitignore`
+
+## [0.2.1] - 2026-02-22
+
 ### Added
 
 - `djsupport library set` and `djsupport library show` commands to save and inspect a default Rekordbox XML path
 - Local config file (`.djsupport_config.json`) for storing the default Rekordbox XML path
 - Match classification in reports (`exact` vs `fallback_version`) to distinguish remix/version substitutions
 - Version fallback counts in sync summaries and match type columns in Markdown reports
+- pytest test suite with 143 tests across all modules
 
 ### Changed
 
