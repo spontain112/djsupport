@@ -54,11 +54,12 @@ Files:
 
 ## Error handling
 
-Three patterns used consistently:
+Four patterns used consistently:
 
 1. **Silent degradation for file loads** — `load()` methods return early on missing files, parse errors, or version mismatches. No exceptions raised.
 2. **`(bool, str | None)` tuple returns** — Validation functions return success/error tuples (e.g., `validate_rekordbox_xml`).
 3. **`click.ClickException`** — User-facing errors in CLI code use Click's exception for clean terminal output.
+4. **`RateLimitError` for API-level abort** — Raised in `spotify.py` when Spotify's `Retry-After` exceeds `MAX_RATE_LIMIT_WAIT` (60s). Caught in `cli.py`'s sync loop to save cache, print partial report, and `sys.exit(1)`. Short waits (<=60s) are retried once automatically via `_api_call_with_rate_limit`. Spotipy's built-in retries handle transient 429s on playlist operations.
 
 Files:
 - `config.py:26-39` — silent load with early returns
@@ -66,6 +67,9 @@ Files:
 - `state.py:26-37` — silent load with early returns
 - `config.py:54` — `validate_rekordbox_xml() -> tuple[bool, str | None]`
 - `cli.py:43-55` — `click.ClickException` for missing/invalid XML path
+- `spotify.py:19-35` — `RateLimitError` exception class
+- `spotify.py:50-72` — `_api_call_with_rate_limit` wrapper (applied to search, the hot path)
+- `cli.py:239-248` — catch `RateLimitError`, save cache, exit non-zero
 
 ## Testing conventions
 
