@@ -11,12 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - `docs/solutions/` directory for documented problem solutions with YAML frontmatter
 - First solution doc: `docs/solutions/integration-issues/outdated-claude-md-and-gitignore-drift.md`
+- `.claude/docs/architectural_patterns.md` — extracted cross-file patterns (persistent state, dataclasses, DI, error handling, testing)
+- "Additional documentation" section in `CLAUDE.md` for progressive disclosure
 
 ### Changed
 
 - Updated `CLAUDE.md` to reflect v0.2.0 project state (new modules, test suite, all CLI flags, conventions)
 - `CLAUDE.md` and `docs/` are now tracked in git for collaborator visibility
 - Removed `CLAUDE.md` and `docs/` from `.gitignore`
+- Added `.claude/docs/` exception to `.gitignore` so architectural docs are tracked
 - Added `docs/solutions/` and `docs/plans/` to project structure in `CLAUDE.md`
 - Added convention: update `CLAUDE.md` in the same PR when changing modules, CLI flags, or conventions
 

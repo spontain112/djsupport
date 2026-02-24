@@ -66,3 +66,7 @@ pytest --cov=djsupport     # Run with coverage
 - `docs/` contains plans, test plans, and reports
 - `docs/solutions/` holds documented problem solutions with YAML frontmatter (created via `/compound` workflow)
 - Update CLAUDE.md in the same PR when adding modules, CLI flags, or changing conventions
+
+## Additional documentation
+
+- [Architectural patterns](.claude/docs/architectural_patterns.md) — persistent state, dataclass conventions, DI, error handling, testing patterns

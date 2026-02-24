@@ -21,7 +21,8 @@ build/
 !tests/fixtures/*.xml
 
 # Claude Code session data (local-only)
-.claude/
+.claude/*
+!.claude/docs/
 
 # IDE files
 .vscode/
