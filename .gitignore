@@ -19,13 +19,9 @@ build/
 .djsupport_config.json
 *.xml
 !tests/fixtures/*.xml
-CLAUDE.md
 
-# Claude Code / AI tools
+# Claude Code session data (local-only)
 .claude/
-
-# Internal planning docs (local-only)
-docs/plans/
 
 # IDE files
 .vscode/
