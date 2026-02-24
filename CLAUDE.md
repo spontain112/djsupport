@@ -26,7 +26,9 @@ djsupport/
   state.py      # Playlist ID mapping for incremental sync
   report.py     # Post-sync terminal + Markdown reports
 tests/          # pytest suite (143 tests)
-docs/           # Plans and reports
+docs/           # Plans, reports, and solution docs
+  solutions/    # Documented problem solutions (YAML frontmatter, searchable)
+  plans/        # Implementation and feature plans
 ```
 
 ## Key commands
@@ -62,3 +64,5 @@ pytest --cov=djsupport     # Run with coverage
 - Version tracked in `pyproject.toml` (`version = "0.2.0"`)
 - Changelog follows Keep a Changelog format in `CHANGELOG.md`
 - `docs/` contains plans, test plans, and reports
+- `docs/solutions/` holds documented problem solutions with YAML frontmatter (created via `/compound` workflow)
+- Update CLAUDE.md in the same PR when adding modules, CLI flags, or changing conventions
