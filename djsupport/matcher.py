@@ -130,6 +130,22 @@ def _classify_version_match(track: Track, result: dict) -> str:
     return "exact"
 
 
+def _duration_penalty(track_duration_s: int, result_duration_ms: int) -> float:
+    """Penalty for duration mismatch between Rekordbox and Spotify tracks.
+
+    Returns 0 when durations are unavailable or within 30s of each other.
+    Beyond 30s, applies 10 points per additional 30s, capped at 30.
+    """
+    if track_duration_s <= 0 or result_duration_ms <= 0:
+        return 0.0
+    result_duration_s = result_duration_ms / 1000
+    diff = abs(track_duration_s - result_duration_s)
+    if diff <= 30:
+        return 0.0
+    excess = diff - 30
+    return min(30.0, (excess / 30) * 10)
+
+
 def _score_result(track: Track, result: dict) -> float:
     """Score a Spotify result against a Rekordbox track (0-100)."""
     components = _score_components(track, result)
@@ -145,6 +161,9 @@ def _score_result(track: Track, result: dict) -> float:
         # Looking for an unavailable/mismatched version. Keep candidate visible,
         # but reduce score so exact-version matches win when they exist.
         penalty += 15.0
+
+    # Penalize duration mismatches (disambiguates original vs extended/radio edits)
+    penalty += _duration_penalty(track.duration, result.get("duration_ms", 0))
 
     # Weight title slightly more since artist names vary in format
     score = artist_score * 0.4 + title_score * 0.6 - penalty
@@ -177,6 +196,10 @@ def match_track(sp, track: Track, threshold: int = 80) -> dict | None:
     clean_title = _normalize(stripped)
     if clean_artist != track.artist.lower().strip() or clean_title != stripped.lower().strip():
         all_results.extend(search_track(sp, clean_artist, clean_title))
+
+    # Strategy 5: plain-text search without field prefixes (forgiving of misspellings)
+    if not all_results:
+        all_results.extend(search_track(sp, track.artist, track.name, plain=True))
 
     if not all_results:
         return None

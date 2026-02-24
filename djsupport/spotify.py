@@ -24,10 +24,17 @@ def get_client() -> spotipy.Spotify:
 
 
 def search_track(
-    sp: spotipy.Spotify, artist: str, title: str, album: str | None = None
+    sp: spotipy.Spotify, artist: str, title: str, album: str | None = None,
+    plain: bool = False,
 ) -> list[dict]:
-    """Search Spotify for a track. Returns list of result dicts with uri, name, artist, album."""
-    query = f"artist:{artist} track:{title}"
+    """Search Spotify for a track. Returns list of result dicts with uri, name, artist, album.
+
+    If plain=True, search without field prefixes (more forgiving of misspellings).
+    """
+    if plain:
+        query = f"{artist} {title}"
+    else:
+        query = f"artist:{artist} track:{title}"
     if album:
         query += f" album:{album}"
 
@@ -40,6 +47,7 @@ def search_track(
             "name": item["name"],
             "artist": ", ".join(a["name"] for a in item["artists"]),
             "album": item["album"]["name"],
+            "duration_ms": item.get("duration_ms", 0),
         }
         for item in items
     ]

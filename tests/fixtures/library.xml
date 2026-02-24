@@ -9,7 +9,8 @@
                Remixer=""
                Label="Diynamic"
                Genre="Melodic House &amp; Techno"
-               DateAdded="2024-01-15"/>
+               DateAdded="2024-01-15"
+               TotalTime="412"/>
         <TRACK TrackID="2"
                Name="Sapphire (Joris Voorn Remix)"
                Artist="Eagles &amp; Butterflies"
@@ -17,7 +18,8 @@
                Remixer="Joris Voorn"
                Label="Rejected"
                Genre="Techno"
-               DateAdded="2024-02-01"/>
+               DateAdded="2024-02-01"
+               TotalTime="368"/>
         <TRACK TrackID="3"
                Name="F&#252;r Immer"
                Artist="&#194;me"
@@ -25,7 +27,8 @@
                Remixer=""
                Label="Innervisions"
                Genre="Deep House"
-               DateAdded="2024-03-10"/>
+               DateAdded="2024-03-10"
+               TotalTime="485"/>
     </COLLECTION>
     <PLAYLISTS>
         <NODE Type="0" Name="ROOT" Count="1">

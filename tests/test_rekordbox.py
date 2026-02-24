@@ -35,6 +35,12 @@ class TestParseXml:
         assert t.artist == "Âme"
         assert t.name == "Für Immer"
 
+    def test_track_duration_parsed(self, library_xml):
+        tracks, _ = parse_xml(library_xml)
+        assert tracks["1"].duration == 412
+        assert tracks["2"].duration == 368
+        assert tracks["3"].duration == 485
+
     def test_parses_correct_number_of_playlists(self, library_xml):
         _, playlists = parse_xml(library_xml)
         assert len(playlists) == 2

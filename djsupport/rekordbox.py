@@ -15,6 +15,7 @@ class Track:
     label: str
     genre: str
     date_added: str  # e.g. "2024-03-15"
+    duration: int = 0  # seconds, from TotalTime attribute
 
     @property
     def display(self) -> str:
@@ -43,6 +44,7 @@ def parse_xml(xml_path: str | Path) -> tuple[dict[str, Track], list[Playlist]]:
     if collection is not None:
         for track_el in collection.findall("TRACK"):
             tid = track_el.get("TrackID", "")
+            total_time = track_el.get("TotalTime", "0")
             tracks[tid] = Track(
                 track_id=tid,
                 name=track_el.get("Name", ""),
@@ -52,6 +54,7 @@ def parse_xml(xml_path: str | Path) -> tuple[dict[str, Track], list[Playlist]]:
                 label=track_el.get("Label", ""),
                 genre=track_el.get("Genre", ""),
                 date_added=track_el.get("DateAdded", ""),
+                duration=int(total_time) if total_time.isdigit() else 0,
             )
 
     # Parse playlist tree

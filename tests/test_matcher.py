@@ -11,13 +11,14 @@ from djsupport.matcher import (
     _extract_mix_descriptors,
     _is_named_variant,
     _classify_version_match,
+    _duration_penalty,
     _score_result,
     match_track,
 )
 from djsupport.rekordbox import Track
 
 
-def make_track(name="Test Track", artist="Test Artist", remixer=""):
+def make_track(name="Test Track", artist="Test Artist", remixer="", duration=0):
     return Track(
         track_id="1",
         name=name,
@@ -27,19 +28,21 @@ def make_track(name="Test Track", artist="Test Artist", remixer=""):
         label="",
         genre="",
         date_added="",
+        duration=duration,
     )
 
 
-def make_result(name="Test Track", artist="Test Artist", uri="spotify:track:abc"):
-    return {"uri": uri, "name": name, "artist": artist, "album": ""}
+def make_result(name="Test Track", artist="Test Artist", uri="spotify:track:abc", duration_ms=0):
+    return {"uri": uri, "name": name, "artist": artist, "album": "", "duration_ms": duration_ms}
 
 
-def make_spotify_item(name, artist, uri):
+def make_spotify_item(name, artist, uri, duration_ms=0):
     return {
         "uri": uri,
         "name": name,
         "artists": [{"name": artist}],
         "album": {"name": "Album"},
+        "duration_ms": duration_ms,
     }
 
 
@@ -270,3 +273,56 @@ class TestMatchTrack:
         result = match_track(sp, track, threshold=80)
         # Verify multiple search calls were made (remixer strategy fires)
         assert sp.search.call_count >= 1
+
+    def test_plain_text_fallback_fires_when_no_field_results(self):
+        """Strategy 5 plain-text search runs when field-specific searches return nothing."""
+        sp = MagicMock()
+        # First calls (field-specific) return nothing, last call (plain) returns a result
+        sp.search.side_effect = [
+            {"tracks": {"items": []}},  # Strategy 1
+            {"tracks": {"items": [make_spotify_item("Track", "Artist", "uri:1")]}},  # Strategy 5 plain
+        ]
+        track = make_track("Track", "Artist")
+        result = match_track(sp, track, threshold=80)
+        assert result is not None
+        assert result["uri"] == "uri:1"
+        # Verify plain search was called (no field prefixes)
+        last_call_query = sp.search.call_args_list[-1][1].get("q") or sp.search.call_args_list[-1][0][0]
+        assert "artist:" not in last_call_query
+        assert "track:" not in last_call_query
+
+
+class TestDurationPenalty:
+    def test_no_penalty_when_track_duration_zero(self):
+        assert _duration_penalty(0, 300000) == 0.0
+
+    def test_no_penalty_when_result_duration_zero(self):
+        assert _duration_penalty(300, 0) == 0.0
+
+    def test_no_penalty_within_30s(self):
+        assert _duration_penalty(300, 310000) == 0.0  # 10s diff
+
+    def test_no_penalty_at_exactly_30s(self):
+        assert _duration_penalty(300, 330000) == 0.0
+
+    def test_penalty_beyond_30s(self):
+        # 60s diff = 30s excess -> 10 points
+        penalty = _duration_penalty(300, 360000)
+        assert penalty == pytest.approx(10.0)
+
+    def test_penalty_capped_at_30(self):
+        # 300s diff -> way beyond cap
+        penalty = _duration_penalty(300, 600000)
+        assert penalty == 30.0
+
+    def test_duration_disambiguates_versions(self):
+        """A track with known duration should score the closer-duration result higher."""
+        track = make_track("Confusion", "New Order")
+        track = Track(
+            track_id="1", name="Confusion", artist="New Order",
+            album="", remixer="", label="", genre="", date_added="",
+            duration=470,  # ~7:50
+        )
+        short_result = make_result("Confusion", "New Order", "uri:short", duration_ms=260000)  # ~4:20
+        long_result = make_result("Confusion", "New Order", "uri:long", duration_ms=470000)  # ~7:50
+        assert _score_result(track, long_result) > _score_result(track, short_result)
