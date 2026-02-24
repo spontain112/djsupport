@@ -18,6 +18,7 @@ from djsupport.report import (
     save_report,
 )
 from djsupport.spotify import (
+    RateLimitError,
     create_or_update_playlist,
     get_client,
     get_user_playlists,
@@ -195,45 +196,58 @@ def sync(
         pl_report = PlaylistReport(name=pl.name, path=pl.path)
         matched_uris: list[str] = []
 
-        with click.progressbar(
-            pl.track_ids,
-            label=f"Matching: {pl.name}",
-            show_eta=True,
-            show_percent=True,
-            show_pos=True,
-            item_show_func=lambda tid: tracks[tid].display[:50] if tid and tid in tracks else "",
-        ) as bar:
-            for tid in bar:
-                track = tracks.get(tid)
-                if track is None:
-                    continue
+        try:
+            with click.progressbar(
+                pl.track_ids,
+                label=f"Matching: {pl.name}",
+                show_eta=True,
+                show_percent=True,
+                show_pos=True,
+                item_show_func=lambda tid: tracks[tid].display[:50] if tid and tid in tracks else "",
+            ) as bar:
+                for tid in bar:
+                    track = tracks.get(tid)
+                    if track is None:
+                        continue
 
-                if cache is not None:
-                    result, source = match_track_cached(
-                        sp, track, cache, threshold=threshold,
-                        retry_days=retry_days, force_retry=retry,
-                    )
-                    if source == "cache":
-                        pl_report.cache_hits += 1
-                    elif source == "retry":
-                        pl_report.retried += 1
+                    if cache is not None:
+                        result, source = match_track_cached(
+                            sp, track, cache, threshold=threshold,
+                            retry_days=retry_days, force_retry=retry,
+                        )
+                        if source == "cache":
+                            pl_report.cache_hits += 1
+                        elif source == "retry":
+                            pl_report.retried += 1
+                        else:
+                            pl_report.api_lookups += 1
                     else:
+                        result = match_track(sp, track, threshold=threshold)
                         pl_report.api_lookups += 1
-                else:
-                    result = match_track(sp, track, threshold=threshold)
-                    pl_report.api_lookups += 1
 
-                if result:
-                    matched_uris.append(result["uri"])
-                    pl_report.matched.append(MatchedTrack(
-                        rekordbox_name=track.display,
-                        spotify_name=result["name"],
-                        spotify_artist=result["artist"],
-                        score=result["score"],
-                        match_type=result.get("match_type", "exact"),
-                    ))
-                else:
-                    pl_report.unmatched.append(track.display)
+                    if result:
+                        matched_uris.append(result["uri"])
+                        pl_report.matched.append(MatchedTrack(
+                            rekordbox_name=track.display,
+                            spotify_name=result["name"],
+                            spotify_artist=result["artist"],
+                            score=result["score"],
+                            match_type=result.get("match_type", "exact"),
+                        ))
+                    else:
+                        pl_report.unmatched.append(track.display)
+        except RateLimitError as e:
+            click.echo(f"\n{e}", err=True)
+            # Save cache before exiting so progress isn't lost
+            if cache is not None:
+                cache.save()
+                click.echo(f"Cache saved to {cache_path} ({len(cache.entries)} entries).", err=True)
+            report.playlists.append(pl_report)
+            # Print partial report, then exit non-zero
+            print_report(report)
+            if report_path:
+                save_report(report, report_path)
+            sys.exit(1)
 
         if not dry_run and matched_uris:
             if incremental:

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from datetime import datetime
+from typing import Any
 
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
@@ -11,6 +14,27 @@ from djsupport.state import PlaylistState, PlaylistStateManager
 
 
 SCOPES = "playlist-modify-public playlist-modify-private"
+
+MAX_RATE_LIMIT_WAIT = 60  # seconds — abort if Spotify asks us to wait longer
+
+
+class RateLimitError(Exception):
+    """Raised when Spotify rate limit wait exceeds MAX_RATE_LIMIT_WAIT."""
+
+    def __init__(self, retry_after: int):
+        self.retry_after = retry_after
+        minutes = retry_after // 60
+        hours = retry_after // 3600
+        if hours > 0:
+            wait_str = f"{hours}h {(retry_after % 3600) // 60}m"
+        elif minutes > 0:
+            wait_str = f"{minutes}m {retry_after % 60}s"
+        else:
+            wait_str = f"{retry_after}s"
+        super().__init__(
+            f"Spotify rate limit exceeded. Retry after {wait_str}. "
+            f"Aborting — resume later to continue where you left off."
+        )
 
 
 def get_client() -> spotipy.Spotify:
@@ -21,6 +45,31 @@ def get_client() -> spotipy.Spotify:
     """
     auth_manager = SpotifyOAuth(scope=SCOPES)
     return spotipy.Spotify(auth_manager=auth_manager)
+
+
+def _api_call_with_rate_limit(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+    """Execute a Spotify API call, handling rate limits gracefully.
+
+    Short waits (<=MAX_RATE_LIMIT_WAIT) are retried automatically.
+    Long waits raise RateLimitError so the CLI can save cache and exit.
+    """
+    try:
+        return func(*args, **kwargs)
+    except spotipy.SpotifyException as e:
+        if e.http_status == 429:
+            retry_after = int(e.headers.get("Retry-After", 0)) if e.headers else 0
+            retry_after = max(retry_after, 1)  # floor at 1s to avoid busy-loop
+            if retry_after <= MAX_RATE_LIMIT_WAIT:
+                time.sleep(retry_after)
+                try:
+                    return func(*args, **kwargs)
+                except spotipy.SpotifyException as e2:
+                    if e2.http_status == 429:
+                        retry_after2 = int(e2.headers.get("Retry-After", 0)) if e2.headers else 0
+                        raise RateLimitError(retry_after2) from e2
+                    raise
+            raise RateLimitError(retry_after) from e
+        raise
 
 
 def search_track(
@@ -38,7 +87,7 @@ def search_track(
     if album:
         query += f" album:{album}"
 
-    results = sp.search(q=query, type="track", limit=5)
+    results = _api_call_with_rate_limit(sp.search, q=query, type="track", limit=5)
     items = results.get("tracks", {}).get("items", [])
 
     return [
