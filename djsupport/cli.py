@@ -195,7 +195,14 @@ def sync(
         pl_report = PlaylistReport(name=pl.name, path=pl.path)
         matched_uris: list[str] = []
 
-        with click.progressbar(pl.track_ids, label=f"Matching: {pl.name}") as bar:
+        with click.progressbar(
+            pl.track_ids,
+            label=f"Matching: {pl.name}",
+            show_eta=True,
+            show_percent=True,
+            show_pos=True,
+            item_show_func=lambda tid: tracks[tid].display[:50] if tid and tid in tracks else "",
+        ) as bar:
             for tid in bar:
                 track = tracks.get(tid)
                 if track is None:
