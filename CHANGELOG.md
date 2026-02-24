@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `tests/fixtures/match_test_data.csv` — ground truth matching test data (19 tracks from "Afro inspired" playlist with verified Spotify URLs)
 - `docs/solutions/` directory for documented problem solutions with YAML frontmatter
 - First solution doc: `docs/solutions/integration-issues/outdated-claude-md-and-gitignore-drift.md`
 - `.claude/docs/architectural_patterns.md` — extracted cross-file patterns (persistent state, dataclasses, DI, error handling, testing)
