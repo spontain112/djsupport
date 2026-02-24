@@ -15,7 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `duration_ms` included in Spotify search result dicts
 - `plain` parameter on `search_track` for field-prefix-free queries
 - Graceful rate limit handling — aborts with a clear message, saves cache, and exits non-zero instead of hanging for hours
-- `tests/test_spotify.py` — unit tests for rate limit handling (11 tests)
+- Defensive `Retry-After` header parsing — handles non-numeric (RFC 7231 date), negative, and missing values
+- `tests/test_spotify.py` — unit tests for rate limit handling (17 tests)
+- Solution doc: `docs/solutions/integration-issues/spotify-rate-limit-handling.md`
 - `tests/fixtures/match_test_data.csv` — ground truth matching test data (19 tracks from "Afro inspired" playlist with verified Spotify URLs)
 - `docs/solutions/` directory for documented problem solutions with YAML frontmatter
 - First solution doc: `docs/solutions/integration-issues/outdated-claude-md-and-gitignore-drift.md`
@@ -24,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Updated README with all current features, flags, and usage examples
 - Updated `CLAUDE.md` to reflect v0.2.0 project state (new modules, test suite, all CLI flags, conventions)
 - `CLAUDE.md` and `docs/` are now tracked in git for collaborator visibility
 - Removed `CLAUDE.md` and `docs/` from `.gitignore`
