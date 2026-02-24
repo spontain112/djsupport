@@ -14,5 +14,22 @@ dependencies = [
     "rapidfuzz>=3.0",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+]
+
 [project.scripts]
 djsupport = "djsupport.cli:cli"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short -q"
+
+[tool.coverage.run]
+source = ["djsupport"]
+omit = ["djsupport/cli.py"]
+
+[tool.coverage.report]
+show_missing = true
