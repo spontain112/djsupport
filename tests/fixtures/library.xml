@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DJ_PLAYLISTS Version="1.0.0">
+    <PRODUCT Name="rekordbox" Version="6.0.0" Company="AlphaTheta"/>
+    <COLLECTION Entries="3">
+        <TRACK TrackID="1"
+               Name="Vultora (Original Mix)"
+               Artist="Solomun"
+               Album="Vultora"
+               Remixer=""
+               Label="Diynamic"
+               Genre="Melodic House &amp; Techno"
+               DateAdded="2024-01-15"/>
+        <TRACK TrackID="2"
+               Name="Sapphire (Joris Voorn Remix)"
+               Artist="Eagles &amp; Butterflies"
+               Album="Sapphire"
+               Remixer="Joris Voorn"
+               Label="Rejected"
+               Genre="Techno"
+               DateAdded="2024-02-01"/>
+        <TRACK TrackID="3"
+               Name="F&#252;r Immer"
+               Artist="&#194;me"
+               Album="F&#252;r Immer"
+               Remixer=""
+               Label="Innervisions"
+               Genre="Deep House"
+               DateAdded="2024-03-10"/>
+    </COLLECTION>
+    <PLAYLISTS>
+        <NODE Type="0" Name="ROOT" Count="1">
+            <NODE Type="0" Name="My Playlists" Count="2">
+                <NODE Type="1" Name="Peak Time" KeyType="0" Entries="2">
+                    <TRACK Key="1"/>
+                    <TRACK Key="2"/>
+                </NODE>
+                <NODE Type="1" Name="Deep" KeyType="0" Entries="1">
+                    <TRACK Key="3"/>
+                </NODE>
+            </NODE>
+        </NODE>
+    </PLAYLISTS>
+</DJ_PLAYLISTS>

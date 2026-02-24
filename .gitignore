@@ -18,6 +18,7 @@ build/
 .djsupport_playlists*
 .djsupport_config.json
 *.xml
+!tests/fixtures/*.xml
 CLAUDE.md
 
 # Claude Code / AI tools
