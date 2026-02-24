@@ -10,6 +10,9 @@ Sync your Rekordbox playlists to Spotify. Parses a Rekordbox XML library export,
 - **Threshold control** — tune the minimum match confidence (0–100, default 80)
 - **Playlist filtering** — sync a single playlist by name or all playlists at once
 - **Combined playlist** — merge all tracks into a single playlist sorted by date added
+- **Match caching** — persists matches to disk so subsequent syncs skip already-matched tracks; auto-retries failed matches after 7 days
+- **Incremental updates** — only adds/removes changed tracks instead of replacing entire playlists
+- **Graceful rate limiting** — aborts with a clear message, saves cache, and exits non-zero instead of hanging for hours; resume later to continue where you left off
 
 ## Prerequisites
 
