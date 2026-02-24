@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import spotipy
 
-from djsupport.spotify import RateLimitError, _api_call_with_rate_limit
+from djsupport.spotify import RateLimitError, _api_call_with_rate_limit, _parse_retry_after
 
 
 def _make_429(retry_after: int) -> spotipy.SpotifyException:
@@ -94,4 +94,46 @@ class TestApiCallWithRateLimit:
         func = MagicMock(side_effect=[exc, "ok"])
         result = _api_call_with_rate_limit(func)
         assert result == "ok"
-        mock_sleep.assert_called_once_with(1)  # floor of max(0, 1)
+        mock_sleep.assert_called_once_with(1)
+
+    @patch("djsupport.spotify.time.sleep")
+    def test_non_numeric_retry_after_defaults_to_1s(self, mock_sleep):
+        exc = spotipy.SpotifyException(429, -1, "rate limited")
+        exc.http_status = 429
+        exc.headers = {"Retry-After": "Fri, 31 Dec 2026 23:59:59 GMT"}
+        func = MagicMock(side_effect=[exc, "ok"])
+        result = _api_call_with_rate_limit(func)
+        assert result == "ok"
+        mock_sleep.assert_called_once_with(1)
+
+
+class TestParseRetryAfter:
+    def test_numeric_value(self):
+        exc = spotipy.SpotifyException(429, -1, "rate limited")
+        exc.http_status = 429
+        exc.headers = {"Retry-After": "30"}
+        assert _parse_retry_after(exc) == 30
+
+    def test_zero_floors_to_1(self):
+        exc = spotipy.SpotifyException(429, -1, "rate limited")
+        exc.http_status = 429
+        exc.headers = {"Retry-After": "0"}
+        assert _parse_retry_after(exc) == 1
+
+    def test_negative_floors_to_1(self):
+        exc = spotipy.SpotifyException(429, -1, "rate limited")
+        exc.http_status = 429
+        exc.headers = {"Retry-After": "-5"}
+        assert _parse_retry_after(exc) == 1
+
+    def test_non_numeric_defaults_to_1(self):
+        exc = spotipy.SpotifyException(429, -1, "rate limited")
+        exc.http_status = 429
+        exc.headers = {"Retry-After": "Fri, 31 Dec 2026 23:59:59 GMT"}
+        assert _parse_retry_after(exc) == 1
+
+    def test_none_headers_defaults_to_1(self):
+        exc = spotipy.SpotifyException(429, -1, "rate limited")
+        exc.http_status = 429
+        exc.headers = None
+        assert _parse_retry_after(exc) == 1

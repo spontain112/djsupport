@@ -47,6 +47,15 @@ def get_client() -> spotipy.Spotify:
     return spotipy.Spotify(auth_manager=auth_manager)
 
 
+def _parse_retry_after(exc: spotipy.SpotifyException) -> int:
+    """Extract Retry-After seconds from a 429 response, with defensive parsing."""
+    try:
+        raw = exc.headers.get("Retry-After", 0) if exc.headers else 0
+        return max(int(raw), 1)  # floor at 1s to avoid busy-loop
+    except (ValueError, TypeError):
+        return 1
+
+
 def _api_call_with_rate_limit(func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
     """Execute a Spotify API call, handling rate limits gracefully.
 
@@ -57,16 +66,14 @@ def _api_call_with_rate_limit(func: Callable[..., Any], *args: Any, **kwargs: An
         return func(*args, **kwargs)
     except spotipy.SpotifyException as e:
         if e.http_status == 429:
-            retry_after = int(e.headers.get("Retry-After", 0)) if e.headers else 0
-            retry_after = max(retry_after, 1)  # floor at 1s to avoid busy-loop
+            retry_after = _parse_retry_after(e)
             if retry_after <= MAX_RATE_LIMIT_WAIT:
                 time.sleep(retry_after)
                 try:
                     return func(*args, **kwargs)
                 except spotipy.SpotifyException as e2:
                     if e2.http_status == 429:
-                        retry_after2 = int(e2.headers.get("Retry-After", 0)) if e2.headers else 0
-                        raise RateLimitError(retry_after2) from e2
+                        raise RateLimitError(_parse_retry_after(e2)) from e2
                     raise
             raise RateLimitError(retry_after) from e
         raise
