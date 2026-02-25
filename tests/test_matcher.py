@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from djsupport.matcher import (
+    EARLY_EXIT_THRESHOLD,
     _normalize,
     _strip_mix_info,
     _extract_mix_descriptor,
@@ -267,12 +268,13 @@ class TestMatchTrack:
         assert result["uri"] == "spotify:track:abc"
 
     def test_remixer_triggers_additional_strategy(self):
-        """When track has a remixer, an extra search strategy is used."""
+        """When track has a remixer and Strategy 1 finds the exact remix, early exit fires."""
         sp = self._mock_sp([make_spotify_item("Sapphire (Joris Voorn Remix)", "Eagles & Butterflies", "uri:2")])
         track = make_track("Sapphire (Joris Voorn Remix)", "Eagles & Butterflies", remixer="Joris Voorn")
         result = match_track(sp, track, threshold=80)
-        # Verify multiple search calls were made (remixer strategy fires)
-        assert sp.search.call_count >= 1
+        assert result is not None
+        # Strategy 1 finds the exact remix at high confidence → early exit
+        assert sp.search.call_count == 1
 
     def test_plain_text_fallback_fires_when_no_field_results(self):
         """Strategy 5 plain-text search runs when field-specific searches return nothing."""
@@ -290,6 +292,117 @@ class TestMatchTrack:
         last_call_query = sp.search.call_args_list[-1][1].get("q") or sp.search.call_args_list[-1][0][0]
         assert "artist:" not in last_call_query
         assert "track:" not in last_call_query
+
+
+class TestEarlyExit:
+    """Tests for early-exit optimization in match_track."""
+
+    def _mock_sp(self, items):
+        sp = MagicMock()
+        sp.search.return_value = {"tracks": {"items": items}}
+        return sp
+
+    def test_early_exit_on_high_confidence_exact_match(self):
+        """Strategy 1 returns a perfect exact match — remaining strategies skipped."""
+        sp = self._mock_sp([make_spotify_item("Vultora", "Solomun", "uri:1")])
+        # Plain track with no mix info, no remixer, no normalization change.
+        # Strategy 1 should score ~100 (exact match) and trigger early exit.
+        track = make_track("Vultora", "Solomun")
+        result = match_track(sp, track, threshold=80)
+        assert result is not None
+        assert result["uri"] == "uri:1"
+        assert result["score"] >= EARLY_EXIT_THRESHOLD
+        assert result["match_type"] == "exact"
+        # Only Strategy 1 should have fired
+        assert sp.search.call_count == 1
+
+    def test_no_early_exit_on_moderate_score(self):
+        """Strategy 1 returns a moderate match (below 95) — remaining strategies should run."""
+        # Use a duration mismatch to create a penalty that drops score below 95.
+        # Track: 300s, Result: 380s → 80s diff → 50s excess → ~16.7 penalty → score ~83
+        sp = self._mock_sp([make_spotify_item("Vultora", "Solomun", "uri:1", duration_ms=380000)])
+        track = make_track("Vultora (Original Mix)", "Solomun", duration=300)
+        result = match_track(sp, track, threshold=80)
+        assert result is not None
+        # Score is below 95 due to duration penalty → Strategy 2 should have fired
+        assert sp.search.call_count >= 2
+
+    def test_no_early_exit_when_best_is_fallback_version(self):
+        """Strategy 1 returns only fallback_version results — should not early exit."""
+        # Track requests a remix, Strategy 1 returns the original (no remix descriptor).
+        # _classify_version_match → fallback_version → -15 penalty → below 95.
+        sp = self._mock_sp([make_spotify_item("Sapphire", "Eagles & Butterflies", "uri:1")])
+        track = make_track("Sapphire (Joris Voorn Remix)", "Eagles & Butterflies", remixer="Joris Voorn")
+        result = match_track(sp, track, threshold=80)
+        # Strategies 1, 2 (stripped title differs), and 3 (remixer) should fire
+        assert sp.search.call_count >= 3
+
+    def test_remix_strategy1_returns_original_no_early_exit(self):
+        """Remix track where Strategy 1 finds original version — must not early exit."""
+        sp = MagicMock()
+        original = make_spotify_item("Sapphire", "Eagles & Butterflies", "uri:original", duration_ms=300000)
+        remix = make_spotify_item("Sapphire (Joris Voorn Remix)", "Eagles & Butterflies", "uri:remix", duration_ms=420000)
+        # Strategy 1 returns only the original; Strategy 3 (remixer) finds the remix
+        sp.search.side_effect = [
+            {"tracks": {"items": [original]}},       # Strategy 1: artist + title
+            {"tracks": {"items": [original]}},       # Strategy 2: stripped title
+            {"tracks": {"items": [remix]}},           # Strategy 3: remixer search
+        ]
+        track = make_track("Sapphire (Joris Voorn Remix)", "Eagles & Butterflies",
+                           remixer="Joris Voorn", duration=420)
+        result = match_track(sp, track, threshold=80)
+        assert result is not None
+        # Should have picked the remix from Strategy 3, not early-exited on original
+        assert result["uri"] == "uri:remix"
+        assert sp.search.call_count == 3
+
+    def test_remix_strategy1_returns_correct_remix_early_exit(self):
+        """Remix track where Strategy 1 finds the exact remix — should early exit."""
+        remix = make_spotify_item("Sapphire (Joris Voorn Remix)", "Eagles & Butterflies", "uri:remix")
+        sp = self._mock_sp([remix])
+        track = make_track("Sapphire (Joris Voorn Remix)", "Eagles & Butterflies", remixer="Joris Voorn")
+        result = match_track(sp, track, threshold=80)
+        assert result is not None
+        assert result["uri"] == "uri:remix"
+        assert result["score"] >= EARLY_EXIT_THRESHOLD
+        assert result["match_type"] == "exact"
+        # Early exit: only Strategy 1 fired
+        assert sp.search.call_count == 1
+
+    def test_threshold_boundary_at_exactly_95(self):
+        """A score of exactly EARLY_EXIT_THRESHOLD should trigger early exit."""
+        # Use a track/result pair that will score exactly at the boundary.
+        # Perfect artist match (100) + slightly imperfect title (~91.7) = 40 + 55 = 95
+        sp = self._mock_sp([make_spotify_item("Vultora", "Solomun", "uri:1")])
+        track = make_track("Vultora", "Solomun")
+        result = match_track(sp, track, threshold=80)
+        # This scores 100 (perfect match), which is >= 95 → early exit
+        assert result is not None
+        assert result["score"] >= EARLY_EXIT_THRESHOLD
+        assert sp.search.call_count == 1
+
+    def test_threshold_boundary_below_95_no_early_exit(self):
+        """A score just below EARLY_EXIT_THRESHOLD should not trigger early exit."""
+        # Use a small duration mismatch to push score just below 95.
+        # Track: 300s, Result: 360s → 60s diff → 30s excess → 10 penalty → score ~90
+        sp = self._mock_sp([make_spotify_item("Vultora", "Solomun", "uri:1", duration_ms=360000)])
+        track = make_track("Vultora (Original Mix)", "Solomun", duration=300)
+        result = match_track(sp, track, threshold=80)
+        assert result is not None
+        # Score is below 95 due to duration penalty → no early exit → Strategy 2 fires
+        assert sp.search.call_count >= 2
+
+    def test_strategy5_still_fires_when_all_empty(self):
+        """Early exit logic does not interfere with Strategy 5 (plain-text fallback)."""
+        sp = MagicMock()
+        sp.search.side_effect = [
+            {"tracks": {"items": []}},  # Strategy 1: empty
+            {"tracks": {"items": [make_spotify_item("Track", "Artist", "uri:1")]}},  # Strategy 5: plain
+        ]
+        track = make_track("Track", "Artist")
+        result = match_track(sp, track, threshold=80)
+        assert result is not None
+        assert result["uri"] == "uri:1"
 
 
 class TestDurationPenalty:

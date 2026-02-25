@@ -6,6 +6,8 @@ import unicodedata
 from rapidfuzz import fuzz
 
 from djsupport.rekordbox import Track
+
+EARLY_EXIT_THRESHOLD = 95  # Skip remaining strategies when Strategy 1 finds a high-confidence exact match
 from djsupport.spotify import search_track
 
 
@@ -170,44 +172,19 @@ def _score_result(track: Track, result: dict) -> float:
     return max(0.0, min(100.0, score))
 
 
-def match_track(sp, track: Track, threshold: int = 80) -> dict | None:
-    """Try to find a Spotify match for a Rekordbox track.
+def _select_best(track: Track, results: list[dict], threshold: int) -> dict | None:
+    """Score and select the best match from a list of Spotify results.
 
-    Runs all search strategies and picks the best result across all of them.
-    Returns the best matching Spotify result dict (with uri, name, artist, album)
-    or None if no match meets the threshold.
+    Deduplicates by URI, scores all candidates, and returns the best match
+    meeting the threshold. Prefers exact-version matches over fallback versions.
     """
-    all_results: list[dict] = []
-
-    # Strategy 1: search with artist + title
-    all_results.extend(search_track(sp, track.artist, track.name))
-
-    # Strategy 2: strip mix info from title
-    stripped = _strip_mix_info(track.name)
-    if stripped != track.name:
-        all_results.extend(search_track(sp, track.artist, stripped))
-
-    # Strategy 3: include remixer as part of artist search
-    if track.remixer:
-        all_results.extend(search_track(sp, f"{track.artist} {track.remixer}", track.name))
-
-    # Strategy 4: clean artist (strips country tags) + stripped title
-    clean_artist = _normalize(track.artist)
-    clean_title = _normalize(stripped)
-    if clean_artist != track.artist.lower().strip() or clean_title != stripped.lower().strip():
-        all_results.extend(search_track(sp, clean_artist, clean_title))
-
-    # Strategy 5: plain-text search without field prefixes (forgiving of misspellings)
-    if not all_results:
-        all_results.extend(search_track(sp, track.artist, track.name, plain=True))
-
-    if not all_results:
+    if not results:
         return None
 
-    # Dedupe by URI, score all, pick the best
+    # Dedupe by URI
     seen: set[str] = set()
     unique: list[dict] = []
-    for r in all_results:
+    for r in results:
         if r["uri"] not in seen:
             seen.add(r["uri"])
             unique.append(r)
@@ -243,6 +220,46 @@ def match_track(sp, track: Track, threshold: int = 80) -> dict | None:
             return {**best, "score": base_score, "match_type": "fallback_version"}
 
     return None
+
+
+def match_track(sp, track: Track, threshold: int = 80) -> dict | None:
+    """Try to find a Spotify match for a Rekordbox track.
+
+    Runs search strategies in order and picks the best result across all of them.
+    If Strategy 1 returns a high-confidence exact match (>= EARLY_EXIT_THRESHOLD),
+    remaining strategies are skipped to reduce API calls.
+    """
+    all_results: list[dict] = []
+
+    # Strategy 1: search with artist + title
+    all_results.extend(search_track(sp, track.artist, track.name))
+
+    # Early exit: if Strategy 1 already found a high-confidence exact match,
+    # skip remaining strategies to reduce API calls.
+    early = _select_best(track, all_results, EARLY_EXIT_THRESHOLD)
+    if early is not None and early["match_type"] == "exact":
+        return early
+
+    # Strategy 2: strip mix info from title
+    stripped = _strip_mix_info(track.name)
+    if stripped != track.name:
+        all_results.extend(search_track(sp, track.artist, stripped))
+
+    # Strategy 3: include remixer as part of artist search
+    if track.remixer:
+        all_results.extend(search_track(sp, f"{track.artist} {track.remixer}", track.name))
+
+    # Strategy 4: clean artist (strips country tags) + stripped title
+    clean_artist = _normalize(track.artist)
+    clean_title = _normalize(stripped)
+    if clean_artist != track.artist.lower().strip() or clean_title != stripped.lower().strip():
+        all_results.extend(search_track(sp, clean_artist, clean_title))
+
+    # Strategy 5: plain-text search without field prefixes (forgiving of misspellings)
+    if not all_results:
+        all_results.extend(search_track(sp, track.artist, track.name, plain=True))
+
+    return _select_best(track, all_results, threshold)
 
 
 def match_track_cached(
