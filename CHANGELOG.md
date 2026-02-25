@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `.claude/docs/architectural_patterns.md` — extracted cross-file patterns (persistent state, dataclasses, DI, error handling, testing)
 - "Additional documentation" section in `CLAUDE.md` for progressive disclosure
 
+### Fixed
+
+- Duplicate tracks in Spotify playlists — different Rekordbox entries (e.g., remixes) resolving to the same Spotify URI are now deduplicated before playlist creation
+
 ### Changed
 
 - Early exit optimization in `match_track` — skips remaining search strategies when Strategy 1 finds a high-confidence exact match (score >= 95), reducing API calls by 40-60% on large library syncs

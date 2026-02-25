@@ -249,6 +249,15 @@ def sync(
                 save_report(report, report_path)
             sys.exit(1)
 
+        # Deduplicate URIs (different Rekordbox tracks can resolve to the same Spotify track)
+        seen_uris: set[str] = set()
+        unique_uris: list[str] = []
+        for uri in matched_uris:
+            if uri not in seen_uris:
+                seen_uris.add(uri)
+                unique_uris.append(uri)
+        matched_uris = unique_uris
+
         if not dry_run and matched_uris:
             if incremental:
                 playlist_id, action, _diff = incremental_update_playlist(
