@@ -124,7 +124,7 @@ Removed `retries=0` — spotipy's built-in retry (default 3) handles transient 5
 - **Cache aggressively**: `--dry-run` saves cache without modifying Spotify. Resume later with cached matches.
 - **Sync incrementally**: Use `--playlist "Name"` to sync smaller batches instead of all 167 playlists at once.
 - **Monitor progress**: Progress bar shows track count and ETA. Rate limit errors show exact wait time.
-- **Future optimization**: Early exit in `match_track` when strategy 1 finds a high-confidence match could reduce API calls by 40-60%.
+- **Implemented**: Early exit in `match_track` when Strategy 1 finds a high-confidence exact match (score >= 95) skips remaining strategies, reducing API calls by 40-60%. See `EARLY_EXIT_THRESHOLD` in `matcher.py`.
 
 ## Test Coverage
 
