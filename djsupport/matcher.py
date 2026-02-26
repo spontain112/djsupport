@@ -32,10 +32,11 @@ def _strip_mix_info(title: str) -> str:
     """Remove parenthetical remix/mix info and bracket tags from a title.
 
     e.g. 'Vultora (Original Mix)' -> 'Vultora'
+         'Night Drive (Extended)' -> 'Night Drive'
          'Today [Permanent Vacation]' -> 'Today'
          'What Is Real - Deep in the Playa Mix' -> 'What Is Real'
     """
-    title = re.sub(r"\s*\(.*?(mix|remix|edit|version|dub)\)", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"\s*\(.*?(mix|remix|edit|version|dub|extended|radio|instrumental|short)\)", "", title, flags=re.IGNORECASE)
     title = re.sub(r"\s*\[.*?\]", "", title)
     # Strip trailing hyphen descriptors like " - XYZ Remix" used by Spotify
     title = re.sub(r"\s+-\s+[^-]*\b(mix|remix|edit|version|dub)\b.*$", "", title, flags=re.IGNORECASE)
@@ -53,7 +54,7 @@ def _extract_mix_descriptors(title: str) -> list[str]:
     descriptors: list[str] = []
     candidates = re.findall(r"[\(\[]([^\)\]]+)[\)\]]", title)
     for c in candidates:
-        if re.search(r"\b(mix|remix|edit|version|dub)\b", c, flags=re.IGNORECASE):
+        if re.search(r"\b(mix|remix|edit|version|dub|extended|radio|instrumental|short)\b", c, flags=re.IGNORECASE):
             descriptors.append(_normalize(c))
     # Spotify often uses "Track Name - XYZ Remix" instead of parentheses
     hyphen_match = re.search(
@@ -133,10 +134,14 @@ def _classify_version_match(track: Track, result: dict) -> str:
 
 
 def _duration_penalty(track_duration_s: int, result_duration_ms: int) -> float:
-    """Penalty for duration mismatch between Rekordbox and Spotify tracks.
+    """Penalty for duration mismatch between source and Spotify tracks.
 
     Returns 0 when durations are unavailable or within 30s of each other.
-    Beyond 30s, applies 10 points per additional 30s, capped at 30.
+    Beyond 30s, applies 5 points per additional 30s, capped at 15.
+
+    The cap is intentionally low so that duration alone cannot reject an
+    otherwise strong artist+title match — common when Beatport lists extended
+    DJ versions and Spotify only has shorter radio edits.
     """
     if track_duration_s <= 0 or result_duration_ms <= 0:
         return 0.0
@@ -145,12 +150,15 @@ def _duration_penalty(track_duration_s: int, result_duration_ms: int) -> float:
     if diff <= 30:
         return 0.0
     excess = diff - 30
-    return min(30.0, (excess / 30) * 10)
+    return min(15.0, (excess / 30) * 5)
 
 
-def _score_result(track: Track, result: dict) -> float:
+def _score_result(
+    track: Track, result: dict, components: dict[str, float] | None = None,
+) -> float:
     """Score a Spotify result against a Rekordbox track (0-100)."""
-    components = _score_components(track, result)
+    if components is None:
+        components = _score_components(track, result)
     artist_score = components["artist_score"]
     title_score = components["raw_title_score"]
     stripped_score = components["stripped_title_score"]
@@ -192,7 +200,7 @@ def _select_best(track: Track, results: list[dict], threshold: int) -> dict | No
     scored: list[tuple[dict, float, float, dict[str, float], str]] = []
     for r in unique:
         components = _score_components(track, r)
-        exact_score = _score_result(track, r)
+        exact_score = _score_result(track, r, components)
         base_score = components["artist_score"] * 0.4 + components["stripped_title_score"] * 0.6
         match_type = _classify_version_match(track, r)
         scored.append((r, exact_score, base_score, components, match_type))

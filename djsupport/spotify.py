@@ -174,6 +174,8 @@ def create_or_update_playlist(
     existing_playlists: dict[str, str] | None = None,
     prefix: str | None = None,
     state_manager: PlaylistStateManager | None = None,
+    source_path: str | None = None,
+    source_type: str = "rekordbox",
 ) -> tuple[str, str]:
     """Create a playlist or replace its tracks if it already exists.
 
@@ -211,9 +213,10 @@ def create_or_update_playlist(
         state_manager.set(name, PlaylistState(
             spotify_id=playlist_id,
             spotify_name=format_playlist_name(name, prefix),
-            rekordbox_path=name,
+            source_path=source_path or name,
             last_synced=datetime.now().isoformat(),
             prefix_used=prefix,
+            source_type=source_type,
         ))
 
     return playlist_id, action
@@ -244,6 +247,8 @@ def incremental_update_playlist(
     existing_playlists: dict[str, str] | None = None,
     prefix: str | None = None,
     state_manager: PlaylistStateManager | None = None,
+    source_path: str | None = None,
+    source_type: str = "rekordbox",
 ) -> tuple[str, str, dict]:
     """Update a playlist incrementally, only adding/removing the diff.
 
@@ -261,6 +266,7 @@ def incremental_update_playlist(
         pid, action = create_or_update_playlist(
             sp, name, desired_uris, existing_playlists,
             prefix=prefix, state_manager=state_manager,
+            source_path=source_path, source_type=source_type,
         )
         return pid, action, {"added": len(desired_uris), "removed": 0, "unchanged": 0}
 
@@ -282,9 +288,10 @@ def incremental_update_playlist(
             state_manager.set(name, PlaylistState(
                 spotify_id=pid,
                 spotify_name=format_playlist_name(name, prefix),
-                rekordbox_path=name,
+                source_path=source_path or name,
                 last_synced=datetime.now().isoformat(),
                 prefix_used=prefix,
+                source_type=source_type,
             ))
 
     if not to_remove and not to_add:

@@ -16,6 +16,8 @@ build/
 # App-specific state (personal data)
 .djsupport_cache*
 .djsupport_playlists*
+.djsupport_beatport_cache*
+.djsupport_beatport_playlists*
 .djsupport_config.json
 *.xml
 !tests/fixtures/*.xml
