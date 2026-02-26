@@ -11,7 +11,7 @@ BEATPORT_CHART_URL_PREFIX = "beatport.com/chart/"
 BEATPORT_CHART_PATTERN = re.compile(
     r"^https://(www\.)?beatport\.com/chart/[\w-]+/\d+/?$"
 )
-USER_AGENT = "Mozilla/5.0 (compatible; djsupport/0.2.0)"
+USER_AGENT = "Mozilla/5.0 (compatible; djsupport/0.3.0)"
 REQUEST_TIMEOUT = (5, 30)  # (connect, read) seconds
 MAX_RESPONSE_SIZE = 5 * 1024 * 1024  # 5 MB
 

@@ -82,7 +82,7 @@ pytest --cov=djsupport     # Run with coverage
 - CLI entry point is `djsupport.cli:cli`
 - Spotify credentials come from `.env` (SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET, SPOTIPY_REDIRECT_URI)
 - `.env`, `*.xml`, `.spotipy_cache*`, `.djsupport_config.json`, `.djsupport_cache*`, `.djsupport_playlists*`, `.djsupport_beatport_cache.json`, `.djsupport_beatport_playlists.json` are gitignored — never commit these
-- Version tracked in `pyproject.toml` (`version = "0.2.0"`)
+- Version tracked in `pyproject.toml` (`version = "0.3.0"`)
 - Changelog follows Keep a Changelog format in `CHANGELOG.md`
 - `docs/` contains plans, test plans, and reports
 - `docs/solutions/` holds documented problem solutions with YAML frontmatter (created via `/compound` workflow)
