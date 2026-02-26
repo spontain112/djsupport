@@ -32,10 +32,13 @@ def _strip_mix_info(title: str) -> str:
     """Remove parenthetical remix/mix info and bracket tags from a title.
 
     e.g. 'Vultora (Original Mix)' -> 'Vultora'
+         'Night Drive (Extended)' -> 'Night Drive'
          'Today [Permanent Vacation]' -> 'Today'
          'What Is Real - Deep in the Playa Mix' -> 'What Is Real'
     """
-    title = re.sub(r"\s*\(.*?(mix|remix|edit|version|dub)\)", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"\s*\(.*?(mix|remix|edit|version|dub|extended|radio|instrumental|short)\)", "", title, flags=re.IGNORECASE)
+    # Strip standalone version tags like (Extended), (Radio), (Instrumental)
+    title = re.sub(r"\s*\((extended|radio|instrumental|short)\)", "", title, flags=re.IGNORECASE)
     title = re.sub(r"\s*\[.*?\]", "", title)
     # Strip trailing hyphen descriptors like " - XYZ Remix" used by Spotify
     title = re.sub(r"\s+-\s+[^-]*\b(mix|remix|edit|version|dub)\b.*$", "", title, flags=re.IGNORECASE)
@@ -53,7 +56,7 @@ def _extract_mix_descriptors(title: str) -> list[str]:
     descriptors: list[str] = []
     candidates = re.findall(r"[\(\[]([^\)\]]+)[\)\]]", title)
     for c in candidates:
-        if re.search(r"\b(mix|remix|edit|version|dub)\b", c, flags=re.IGNORECASE):
+        if re.search(r"\b(mix|remix|edit|version|dub|extended|radio|instrumental|short)\b", c, flags=re.IGNORECASE):
             descriptors.append(_normalize(c))
     # Spotify often uses "Track Name - XYZ Remix" instead of parentheses
     hyphen_match = re.search(
