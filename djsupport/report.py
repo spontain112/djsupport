@@ -6,7 +6,7 @@ from datetime import datetime
 
 @dataclass
 class MatchedTrack:
-    rekordbox_name: str
+    source_name: str
     spotify_name: str
     spotify_artist: str
     score: float
@@ -40,6 +40,7 @@ class SyncReport:
     dry_run: bool
     playlists: list[PlaylistReport] = field(default_factory=list)
     cache_enabled: bool = False
+    source_label: str = "Rekordbox"
 
     @property
     def total_matched(self) -> int:
@@ -138,11 +139,11 @@ def save_report(report: SyncReport, path: str) -> None:
         lines.append("")
 
         if pl.matched:
-            lines.append("| Rekordbox | Spotify Match | Score | Match Type |")
+            lines.append(f"| {report.source_label} | Spotify Match | Score | Match Type |")
             lines.append("|-----------|---------------|-------|------------|")
             for m in pl.matched:
                 lines.append(
-                    f"| {m.rekordbox_name} | {m.spotify_artist} - {m.spotify_name}"
+                    f"| {m.source_name} | {m.spotify_artist} - {m.spotify_name}"
                     f" | {m.score:.1f} | {m.match_type} |"
                 )
             lines.append("")
@@ -164,11 +165,11 @@ def save_report(report: SyncReport, path: str) -> None:
     if low_confidence:
         lines.append("## Low Confidence Matches (score < 90)")
         lines.append("")
-        lines.append("| Playlist | Rekordbox | Spotify Match | Score | Match Type |")
+        lines.append(f"| Playlist | {report.source_label} | Spotify Match | Score | Match Type |")
         lines.append("|----------|-----------|---------------|-------|------------|")
         for pl_path, m in low_confidence:
             lines.append(
-                f"| {pl_path} | {m.rekordbox_name}"
+                f"| {pl_path} | {m.source_name}"
                 f" | {m.spotify_artist} - {m.spotify_name} | {m.score:.1f} | {m.match_type} |"
             )
         lines.append("")

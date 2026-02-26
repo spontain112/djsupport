@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 from djsupport.config import ConfigManager, validate_rekordbox_xml
 from djsupport.matcher import match_track, match_track_cached
-from djsupport.rekordbox import parse_xml
+from djsupport.rekordbox import Track, parse_xml
 from djsupport.report import (
     MatchedTrack,
     PlaylistReport,
@@ -20,6 +20,7 @@ from djsupport.report import (
 from djsupport.spotify import (
     RateLimitError,
     create_or_update_playlist,
+    format_playlist_name,
     get_client,
     get_user_playlists,
     incremental_update_playlist,
@@ -55,6 +56,96 @@ def _resolve_xml_path(explicit_xml_path: str | None) -> str:
             "Run `djsupport library set /path/to/library.xml` to update it."
         )
     return str(p)
+
+
+def _match_and_sync_playlist(
+    tracks: list[Track],
+    playlist_name: str,
+    playlist_path: str,
+    *,
+    sp,
+    cache,
+    state_mgr,
+    existing_playlists: dict[str, str] | None,
+    threshold: int,
+    dry_run: bool,
+    incremental: bool,
+    prefix: str | None,
+    retry_days: int = 7,
+    retry: bool = False,
+) -> PlaylistReport:
+    """Match tracks to Spotify and create/update a playlist.
+
+    Returns a PlaylistReport. Raises RateLimitError if Spotify rate limit
+    is exceeded — caller should save cache and handle the abort.
+    """
+    pl_report = PlaylistReport(name=playlist_name, path=playlist_path)
+    matched_uris: list[str] = []
+
+    with click.progressbar(
+        tracks,
+        label=f"Matching: {playlist_name}",
+        show_eta=True,
+        show_percent=True,
+        show_pos=True,
+        item_show_func=lambda t: t.display[:50] if t else "",
+    ) as bar:
+        for track in bar:
+            if cache is not None:
+                result, source = match_track_cached(
+                    sp, track, cache, threshold=threshold,
+                    retry_days=retry_days, force_retry=retry,
+                )
+                if source == "cache":
+                    pl_report.cache_hits += 1
+                elif source == "retry":
+                    pl_report.retried += 1
+                else:
+                    pl_report.api_lookups += 1
+            else:
+                result = match_track(sp, track, threshold=threshold)
+                pl_report.api_lookups += 1
+
+            if result:
+                matched_uris.append(result["uri"])
+                pl_report.matched.append(MatchedTrack(
+                    source_name=track.display,
+                    spotify_name=result["name"],
+                    spotify_artist=result["artist"],
+                    score=result["score"],
+                    match_type=result.get("match_type", "exact"),
+                ))
+            else:
+                pl_report.unmatched.append(track.display)
+
+    # Deduplicate URIs (different source tracks can resolve to the same Spotify track)
+    seen_uris: set[str] = set()
+    unique_uris: list[str] = []
+    for uri in matched_uris:
+        if uri not in seen_uris:
+            seen_uris.add(uri)
+            unique_uris.append(uri)
+    matched_uris = unique_uris
+
+    if not dry_run and matched_uris:
+        if incremental:
+            playlist_id, action, _diff = incremental_update_playlist(
+                sp, playlist_name, matched_uris, existing_playlists,
+                prefix=prefix, state_manager=state_mgr,
+            )
+        else:
+            playlist_id, action = create_or_update_playlist(
+                sp, playlist_name, matched_uris, existing_playlists,
+                prefix=prefix, state_manager=state_mgr,
+            )
+        pl_report.action = action
+        if existing_playlists is not None:
+            formatted = format_playlist_name(playlist_name, prefix)
+            existing_playlists[formatted] = playlist_id
+    elif dry_run:
+        pl_report.action = "dry-run"
+
+    return pl_report
 
 
 @cli.group()
@@ -193,89 +284,34 @@ def sync(
     )
 
     for pl in playlists:
-        pl_report = PlaylistReport(name=pl.name, path=pl.path)
-        matched_uris: list[str] = []
+        # Resolve track IDs to Track objects
+        pl_tracks = [tracks[tid] for tid in pl.track_ids if tid in tracks]
 
         try:
-            with click.progressbar(
-                pl.track_ids,
-                label=f"Matching: {pl.name}",
-                show_eta=True,
-                show_percent=True,
-                show_pos=True,
-                item_show_func=lambda tid: tracks[tid].display[:50] if tid and tid in tracks else "",
-            ) as bar:
-                for tid in bar:
-                    track = tracks.get(tid)
-                    if track is None:
-                        continue
-
-                    if cache is not None:
-                        result, source = match_track_cached(
-                            sp, track, cache, threshold=threshold,
-                            retry_days=retry_days, force_retry=retry,
-                        )
-                        if source == "cache":
-                            pl_report.cache_hits += 1
-                        elif source == "retry":
-                            pl_report.retried += 1
-                        else:
-                            pl_report.api_lookups += 1
-                    else:
-                        result = match_track(sp, track, threshold=threshold)
-                        pl_report.api_lookups += 1
-
-                    if result:
-                        matched_uris.append(result["uri"])
-                        pl_report.matched.append(MatchedTrack(
-                            rekordbox_name=track.display,
-                            spotify_name=result["name"],
-                            spotify_artist=result["artist"],
-                            score=result["score"],
-                            match_type=result.get("match_type", "exact"),
-                        ))
-                    else:
-                        pl_report.unmatched.append(track.display)
+            pl_report = _match_and_sync_playlist(
+                pl_tracks,
+                pl.name,
+                pl.path,
+                sp=sp,
+                cache=cache,
+                state_mgr=state_mgr,
+                existing_playlists=existing,
+                threshold=threshold,
+                dry_run=dry_run,
+                incremental=incremental,
+                prefix=actual_prefix,
+                retry_days=retry_days,
+                retry=retry,
+            )
         except RateLimitError as e:
             click.echo(f"\n{e}", err=True)
-            # Save cache before exiting so progress isn't lost
             if cache is not None:
                 cache.save()
                 click.echo(f"Cache saved to {cache_path} ({len(cache.entries)} entries).", err=True)
-            report.playlists.append(pl_report)
-            # Print partial report, then exit non-zero
             print_report(report)
             if report_path:
                 save_report(report, report_path)
             sys.exit(1)
-
-        # Deduplicate URIs (different Rekordbox tracks can resolve to the same Spotify track)
-        seen_uris: set[str] = set()
-        unique_uris: list[str] = []
-        for uri in matched_uris:
-            if uri not in seen_uris:
-                seen_uris.add(uri)
-                unique_uris.append(uri)
-        matched_uris = unique_uris
-
-        if not dry_run and matched_uris:
-            if incremental:
-                playlist_id, action, _diff = incremental_update_playlist(
-                    sp, pl.name, matched_uris, existing,
-                    prefix=actual_prefix, state_manager=state_mgr,
-                )
-            else:
-                playlist_id, action = create_or_update_playlist(
-                    sp, pl.name, matched_uris, existing,
-                    prefix=actual_prefix, state_manager=state_mgr,
-                )
-            pl_report.action = action
-            if existing is not None:
-                from djsupport.spotify import format_playlist_name
-                formatted = format_playlist_name(pl.name, actual_prefix)
-                existing[formatted] = playlist_id
-        elif dry_run:
-            pl_report.action = "dry-run"
 
         report.playlists.append(pl_report)
 

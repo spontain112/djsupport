@@ -211,7 +211,7 @@ def create_or_update_playlist(
         state_manager.set(name, PlaylistState(
             spotify_id=playlist_id,
             spotify_name=format_playlist_name(name, prefix),
-            rekordbox_path=name,
+            source_path=name,
             last_synced=datetime.now().isoformat(),
             prefix_used=prefix,
         ))
@@ -282,7 +282,7 @@ def incremental_update_playlist(
             state_manager.set(name, PlaylistState(
                 spotify_id=pid,
                 spotify_name=format_playlist_name(name, prefix),
-                rekordbox_path=name,
+                source_path=name,
                 last_synced=datetime.now().isoformat(),
                 prefix_used=prefix,
             ))

@@ -11,7 +11,7 @@ from djsupport.report import MatchedTrack, PlaylistReport, SyncReport, save_repo
 
 def _matched(name="Track A", spotify_name="Track A", artist="Artist", score=95.0, match_type="exact"):
     return MatchedTrack(
-        rekordbox_name=name,
+        source_name=name,
         spotify_name=spotify_name,
         spotify_artist=artist,
         score=score,
@@ -35,12 +35,12 @@ def _report(playlists=(), threshold=80, dry_run=True, cache_enabled=False):
 
 class TestMatchedTrack:
     def test_default_match_type_is_exact(self):
-        m = MatchedTrack(rekordbox_name="A", spotify_name="A", spotify_artist="X", score=90.0)
+        m = MatchedTrack(source_name="A", spotify_name="A", spotify_artist="X", score=90.0)
         assert m.match_type == "exact"
 
     def test_fallback_match_type(self):
         m = MatchedTrack(
-            rekordbox_name="A", spotify_name="A (Remix)", spotify_artist="X",
+            source_name="A", spotify_name="A (Remix)", spotify_artist="X",
             score=85.0, match_type="fallback_version",
         )
         assert m.match_type == "fallback_version"

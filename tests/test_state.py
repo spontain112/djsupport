@@ -18,7 +18,7 @@ def sample_state():
     return PlaylistState(
         spotify_id="playlist:abc123",
         spotify_name="djsupport / Peak Time",
-        rekordbox_path="My Playlists/Peak Time",
+        source_path="My Playlists/Peak Time",
         last_synced="2024-01-15T12:00:00",
         prefix_used="djsupport",
     )
@@ -46,7 +46,7 @@ class TestPlaylistStateManager:
         updated = PlaylistState(
             spotify_id="playlist:newid",
             spotify_name="djsupport / Peak Time",
-            rekordbox_path="My Playlists/Peak Time",
+            source_path="My Playlists/Peak Time",
             last_synced="2024-06-01T10:00:00",
             prefix_used="djsupport",
         )
@@ -96,11 +96,11 @@ class TestPlaylistStateManager:
 
     def test_multiple_playlists(self, state_mgr):
         s1 = PlaylistState(
-            spotify_id="id:1", spotify_name="PL1", rekordbox_path="PL1",
+            spotify_id="id:1", spotify_name="PL1", source_path="PL1",
             last_synced="2024-01-01T00:00:00", prefix_used=None,
         )
         s2 = PlaylistState(
-            spotify_id="id:2", spotify_name="PL2", rekordbox_path="PL2",
+            spotify_id="id:2", spotify_name="PL2", source_path="PL2",
             last_synced="2024-01-02T00:00:00", prefix_used=None,
         )
         state_mgr.set("PL1", s1)
@@ -112,10 +112,53 @@ class TestPlaylistStateManager:
         path = str(tmp_path / "state.json")
         m1 = PlaylistStateManager(path=path)
         m1.set("PL", PlaylistState(
-            spotify_id="id:1", spotify_name="PL", rekordbox_path="PL",
+            spotify_id="id:1", spotify_name="PL", source_path="PL",
             last_synced="2024-01-01T00:00:00", prefix_used=None,
         ))
         m1.save()
         m2 = PlaylistStateManager(path=path)
         m2.load()
         assert m2.get("PL").prefix_used is None
+
+    def test_source_type_defaults_to_rekordbox(self, sample_state):
+        assert sample_state.source_type == "rekordbox"
+
+    def test_source_type_roundtrip(self, tmp_path):
+        path = str(tmp_path / "state.json")
+        m1 = PlaylistStateManager(path=path)
+        m1.set("BP", PlaylistState(
+            spotify_id="id:bp", spotify_name="Chart",
+            source_path="https://beatport.com/chart/test/123",
+            last_synced="2026-02-26T00:00:00", prefix_used="djsupport",
+            source_type="beatport",
+        ))
+        m1.save()
+        m2 = PlaylistStateManager(path=path)
+        m2.load()
+        state = m2.get("BP")
+        assert state.source_type == "beatport"
+        assert state.source_path == "https://beatport.com/chart/test/123"
+
+    def test_v1_migration_renames_rekordbox_path(self, tmp_path):
+        """v1 state files with rekordbox_path should be migrated to source_path."""
+        p = tmp_path / "state.json"
+        v1_data = {
+            "version": 1,
+            "entries": {
+                "Peak Time": {
+                    "spotify_id": "playlist:abc",
+                    "spotify_name": "djsupport / Peak Time",
+                    "rekordbox_path": "My Playlists/Peak Time",
+                    "last_synced": "2024-01-15T12:00:00",
+                    "prefix_used": "djsupport",
+                }
+            }
+        }
+        p.write_text(json.dumps(v1_data))
+        m = PlaylistStateManager(path=str(p))
+        m.load()
+        state = m.get("Peak Time")
+        assert state is not None
+        assert state.source_path == "My Playlists/Peak Time"
+        assert state.source_type == "rekordbox"
+        assert state.spotify_id == "playlist:abc"

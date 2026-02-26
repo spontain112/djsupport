@@ -1,11 +1,11 @@
-"""Persistent playlist ID mapping for Rekordbox → Spotify sync."""
+"""Persistent playlist ID mapping for source → Spotify sync."""
 
 import json
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
-STATE_VERSION = 1
+STATE_VERSION = 2
 DEFAULT_STATE_PATH = ".djsupport_playlists.json"
 
 
@@ -13,9 +13,10 @@ DEFAULT_STATE_PATH = ".djsupport_playlists.json"
 class PlaylistState:
     spotify_id: str
     spotify_name: str
-    rekordbox_path: str
+    source_path: str
     last_synced: str
     prefix_used: str | None
+    source_type: str = "rekordbox"
 
 
 class PlaylistStateManager:
@@ -31,7 +32,16 @@ class PlaylistStateManager:
             data = json.loads(self.path.read_text())
         except (json.JSONDecodeError, OSError):
             return
-        if data.get("version") != STATE_VERSION:
+        version = data.get("version")
+        if version == 1:
+            # Migrate v1 entries: rename rekordbox_path -> source_path
+            for key, entry in data.get("entries", {}).items():
+                if "rekordbox_path" in entry:
+                    entry["source_path"] = entry.pop("rekordbox_path")
+                    entry.setdefault("source_type", "rekordbox")
+                self.entries[key] = PlaylistState(**entry)
+            return
+        if version != STATE_VERSION:
             return
         for key, entry in data.get("entries", {}).items():
             self.entries[key] = PlaylistState(**entry)
@@ -45,11 +55,11 @@ class PlaylistStateManager:
         self.path.write_text(json.dumps(data, indent=2))
 
     def get(self, name: str) -> PlaylistState | None:
-        """Look up state by Rekordbox playlist name."""
+        """Look up state by playlist name."""
         return self.entries.get(name)
 
     def set(self, name: str, state: PlaylistState) -> None:
-        """Store state for a Rekordbox playlist name."""
+        """Store state for a playlist name."""
         self.entries[name] = state
 
     def is_empty(self) -> bool:
