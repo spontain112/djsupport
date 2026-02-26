@@ -2,7 +2,7 @@
 
 ## Project overview
 
-djsupport syncs Rekordbox playlists to Spotify. It parses a Rekordbox XML export, fuzzy-matches tracks against Spotify's catalog, and creates/updates Spotify playlists.
+djsupport syncs Rekordbox playlists and Beatport DJ charts to Spotify. It parses a Rekordbox XML export or scrapes a Beatport chart page, fuzzy-matches tracks against Spotify's catalog, and creates/updates Spotify playlists.
 
 ## Tech stack
 
@@ -10,6 +10,7 @@ djsupport syncs Rekordbox playlists to Spotify. It parses a Rekordbox XML export
 - Click for CLI
 - spotipy for Spotify API
 - rapidfuzz for fuzzy string matching
+- requests for Beatport HTTP fetching
 - python-dotenv for env config
 - pytest, pytest-cov (in `[project.optional-dependencies] dev`)
 
@@ -19,13 +20,14 @@ djsupport syncs Rekordbox playlists to Spotify. It parses a Rekordbox XML export
 djsupport/
   cli.py        # Click CLI entry point
   rekordbox.py  # XML parser — Track and Playlist dataclasses
+  beatport.py   # Beatport chart scraper — __NEXT_DATA__ extraction
   matcher.py    # Fuzzy matching logic against Spotify search
   spotify.py    # Spotify client wrapper (spotipy + OAuth)
   config.py     # Local config (saved Rekordbox XML path)
   cache.py      # Persistent match cache with retry logic
-  state.py      # Playlist ID mapping for incremental sync
+  state.py      # Playlist ID mapping for incremental sync (source-agnostic)
   report.py     # Post-sync terminal + Markdown reports
-tests/          # pytest suite (169 tests)
+tests/          # pytest suite (216 tests)
 docs/           # Plans, reports, and solution docs
   solutions/    # Documented problem solutions (YAML frontmatter, searchable)
   plans/        # Implementation and feature plans
@@ -40,6 +42,7 @@ djsupport sync <xml>       # Sync playlists to Spotify
 djsupport sync <xml> --dry-run  # Preview without modifying Spotify
 djsupport library set <xml>     # Save default Rekordbox XML path
 djsupport library show          # Show configured XML path
+djsupport beatport <url>        # Import Beatport chart to Spotify
 
 # Sync flags
 djsupport sync --playlist "My Playlist"  # Sync a single playlist
@@ -56,6 +59,17 @@ djsupport sync --no-prefix               # Disable playlist name prefix
 djsupport sync --incremental             # Incremental playlist updates (default)
 djsupport sync --state-path state.json   # Custom playlist state file location
 
+# Beatport flags
+djsupport beatport <url> --dry-run                  # Preview matches
+djsupport beatport <url> --threshold 90              # Minimum match confidence
+djsupport beatport <url> --no-cache                  # Bypass Beatport match cache
+djsupport beatport <url> --cache-path my.json        # Custom Beatport cache file
+djsupport beatport <url> --state-path my.json        # Custom Beatport state file
+djsupport beatport <url> --prefix "dj"               # Prefix for playlist name
+djsupport beatport <url> --no-prefix                 # No prefix
+djsupport beatport <url> --report report.md          # Save Markdown report
+djsupport beatport <url> --incremental               # Incremental updates (default)
+
 # Testing
 pytest                     # Run all tests
 pytest --cov=djsupport     # Run with coverage
@@ -65,7 +79,7 @@ pytest --cov=djsupport     # Run with coverage
 
 - CLI entry point is `djsupport.cli:cli`
 - Spotify credentials come from `.env` (SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET, SPOTIPY_REDIRECT_URI)
-- `.env`, `*.xml`, `.spotipy_cache*`, `.djsupport_config.json`, `.djsupport_cache.json`, `.djsupport_playlists.json` are gitignored — never commit these
+- `.env`, `*.xml`, `.spotipy_cache*`, `.djsupport_config.json`, `.djsupport_cache*`, `.djsupport_playlists*`, `.djsupport_beatport_cache.json`, `.djsupport_beatport_playlists.json` are gitignored — never commit these
 - Version tracked in `pyproject.toml` (`version = "0.2.0"`)
 - Changelog follows Keep a Changelog format in `CHANGELOG.md`
 - `docs/` contains plans, test plans, and reports

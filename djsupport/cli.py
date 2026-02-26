@@ -73,6 +73,7 @@ def _match_and_sync_playlist(
     prefix: str | None,
     retry_days: int = 7,
     retry: bool = False,
+    source_type: str = "rekordbox",
 ) -> PlaylistReport:
     """Match tracks to Spotify and create/update a playlist.
 
@@ -132,11 +133,13 @@ def _match_and_sync_playlist(
             playlist_id, action, _diff = incremental_update_playlist(
                 sp, playlist_name, matched_uris, existing_playlists,
                 prefix=prefix, state_manager=state_mgr,
+                source_path=playlist_path, source_type=source_type,
             )
         else:
             playlist_id, action = create_or_update_playlist(
                 sp, playlist_name, matched_uris, existing_playlists,
                 prefix=prefix, state_manager=state_mgr,
+                source_path=playlist_path, source_type=source_type,
             )
         pl_report.action = action
         if existing_playlists is not None:
@@ -338,3 +341,131 @@ def list_playlists(xml_path: str | None):
     _, playlists = parse_xml(xml_path)
     for pl in playlists:
         click.echo(f"  {pl.path} ({len(pl.track_ids)} tracks)")
+
+
+DEFAULT_BEATPORT_CACHE_PATH = ".djsupport_beatport_cache.json"
+DEFAULT_BEATPORT_STATE_PATH = ".djsupport_beatport_playlists.json"
+
+
+@cli.command()
+@click.argument("url")
+@click.option("--dry-run", is_flag=True, help="Preview without modifying Spotify.")
+@click.option("--threshold", "-t", default=80, show_default=True, help="Minimum match confidence (0-100).")
+@click.option("--no-cache", is_flag=True, help="Bypass match cache.")
+@click.option("--cache-path", default=DEFAULT_BEATPORT_CACHE_PATH, show_default=True, help="Path to Beatport match cache.")
+@click.option("--state-path", default=DEFAULT_BEATPORT_STATE_PATH, show_default=True, help="Path to Beatport playlist state.")
+@click.option("--report", "report_path", type=click.Path(), default=None, help="Save Markdown report.")
+@click.option("--prefix", default="djsupport", show_default=True, help="Prefix for Spotify playlist name.")
+@click.option("--no-prefix", is_flag=True, help="Disable playlist name prefix.")
+@click.option("--incremental/--no-incremental", default=True, show_default=True, help="Use incremental playlist updates.")
+def beatport(
+    url: str,
+    dry_run: bool,
+    threshold: int,
+    no_cache: bool,
+    cache_path: str,
+    state_path: str,
+    report_path: str | None,
+    prefix: str,
+    no_prefix: bool,
+    incremental: bool,
+) -> None:
+    """Create a Spotify playlist from a Beatport DJ chart.
+
+    URL is a Beatport chart page, e.g.:
+    https://www.beatport.com/chart/garage-go-tos/815070
+    """
+    import requests
+
+    from djsupport.beatport import BeatportParseError, InvalidBeatportURL, fetch_chart, validate_url
+
+    try:
+        url = validate_url(url)
+    except InvalidBeatportURL as e:
+        raise click.ClickException(str(e))
+
+    click.echo("Fetching chart from Beatport...")
+    try:
+        chart_name, curator, tracks = fetch_chart(url)
+    except BeatportParseError as e:
+        raise click.ClickException(str(e))
+    except requests.RequestException as e:
+        if hasattr(e, "response") and e.response is not None and e.response.status_code == 404:
+            raise click.ClickException("Chart not found — check the URL.")
+        raise click.ClickException(f"Failed to fetch chart: {e}")
+
+    if not tracks:
+        click.echo(f"Chart '{chart_name}' has no tracks.")
+        return
+
+    click.echo(f"Chart: {chart_name} by {curator}. {len(tracks)} tracks.")
+
+    # Initialize cache (separate from Rekordbox)
+    cache = None
+    if not no_cache:
+        from djsupport.cache import MatchCache
+        cache = MatchCache(cache_path)
+        cache.load()
+        if cache.entries:
+            click.echo(f"Loaded {len(cache.entries)} cached Beatport matches from {cache_path}")
+
+    # Resolve prefix
+    actual_prefix = None if no_prefix else prefix
+
+    # Initialize Beatport-specific playlist state
+    from djsupport.state import PlaylistStateManager
+    state_mgr = PlaylistStateManager(state_path)
+    state_mgr.load()
+
+    # Spotify client
+    sp = get_client()
+    existing = get_user_playlists(sp) if not dry_run else None
+
+    # Match and sync via shared helper
+    report = SyncReport(
+        timestamp=datetime.now(),
+        threshold=threshold,
+        dry_run=dry_run,
+        cache_enabled=cache is not None,
+        source_label="Beatport",
+    )
+
+    try:
+        pl_report = _match_and_sync_playlist(
+            tracks,
+            chart_name,
+            url,
+            sp=sp,
+            cache=cache,
+            state_mgr=state_mgr,
+            existing_playlists=existing,
+            threshold=threshold,
+            dry_run=dry_run,
+            incremental=incremental,
+            prefix=actual_prefix,
+            source_type="beatport",
+        )
+    except RateLimitError as e:
+        click.echo(f"\n{e}", err=True)
+        if cache is not None:
+            cache.save()
+            click.echo(f"Cache saved to {cache_path} ({len(cache.entries)} entries).", err=True)
+        print_report(report)
+        if report_path:
+            save_report(report, report_path)
+        sys.exit(1)
+
+    report.playlists.append(pl_report)
+
+    # Save cache
+    if cache is not None:
+        cache.save()
+
+    # Save state
+    if not dry_run:
+        state_mgr.save()
+
+    print_report(report)
+    if report_path:
+        save_report(report, report_path)
+        click.echo(f"\nDetailed report saved to {report_path}")

@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `djsupport beatport <url>` command — import a Beatport DJ chart as a Spotify playlist
+- `djsupport/beatport.py` module — scrapes Beatport chart pages via `__NEXT_DATA__` JSON extraction (no headless browser needed)
+- Beatport-specific cache (`.djsupport_beatport_cache.json`) and state (`.djsupport_beatport_playlists.json`), fully isolated from Rekordbox
+- Anti-bot challenge detection with clear user messaging
+- Security hardening: HTTPS-only URL validation, 5MB response size limit, redirect validation
+- `requests>=2.28` dependency for Beatport HTTP fetching
+- 44 new tests for Beatport module (URL validation, duration parsing, track parsing, chart data extraction, fetch error handling)
+- `source_type` field on `PlaylistState` to distinguish Rekordbox and Beatport sources
+- `source_label` field on `SyncReport` for dynamic Markdown table headers
 - Duration-based tie-breaking in matcher scoring — disambiguates original/radio/extended versions using Rekordbox `TotalTime` and Spotify `duration_ms`
 - Plain-text fallback search strategy (Strategy 5) — runs without `artist:`/`track:` field prefixes when field-specific searches return nothing, improving matches for misspelled artist/track names
 - `duration` field on `Track` dataclass, parsed from Rekordbox XML `TotalTime` attribute
@@ -29,6 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Duplicate tracks in Spotify playlists — different Rekordbox entries (e.g., remixes) resolving to the same Spotify URI are now deduplicated before playlist creation
 
 ### Changed
+
+- `PlaylistState.rekordbox_path` renamed to `source_path` (v1 state files migrated automatically)
+- `MatchedTrack.rekordbox_name` renamed to `source_name` for source-agnostic reporting
+- Extracted `_match_and_sync_playlist()` shared helper from `sync` command — both `sync` and `beatport` use it
+- `STATE_VERSION` bumped to 2 with automatic v1 migration logic
 
 - Early exit optimization in `match_track` — skips remaining search strategies when Strategy 1 finds a high-confidence exact match (score >= 95), reducing API calls by 40-60% on large library syncs
 - Updated README with all current features, flags, and usage examples
