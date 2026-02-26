@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Playlist descriptions on sync — Rekordbox playlists show "Synced from Rekordbox by djsupport", Beatport playlists show "Imported from Beatport by djsupport"
+
 ## [0.3.0] - 2026-02-26
 
 ### Added

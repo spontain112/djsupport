@@ -129,17 +129,23 @@ def _match_and_sync_playlist(
     matched_uris = unique_uris
 
     if not dry_run and matched_uris:
+        source_labels = {"rekordbox": "Rekordbox", "beatport": "Beatport"}
+        label = source_labels.get(source_type, source_type)
+        description = f"Synced from {label} by djsupport" if source_type == "rekordbox" else f"Imported from {label} by djsupport"
+
         if incremental:
             playlist_id, action, _diff = incremental_update_playlist(
                 sp, playlist_name, matched_uris, existing_playlists,
                 prefix=prefix, state_manager=state_mgr,
                 source_path=playlist_path, source_type=source_type,
+                description=description,
             )
         else:
             playlist_id, action = create_or_update_playlist(
                 sp, playlist_name, matched_uris, existing_playlists,
                 prefix=prefix, state_manager=state_mgr,
                 source_path=playlist_path, source_type=source_type,
+                description=description,
             )
         pl_report.action = action
         if existing_playlists is not None:

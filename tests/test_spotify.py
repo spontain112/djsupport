@@ -1,11 +1,17 @@
-"""Tests for djsupport.spotify rate limit handling."""
+"""Tests for djsupport.spotify."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 import pytest
 import spotipy
 
-from djsupport.spotify import RateLimitError, _api_call_with_rate_limit, _parse_retry_after
+from djsupport.spotify import (
+    RateLimitError,
+    _api_call_with_rate_limit,
+    _parse_retry_after,
+    create_or_update_playlist,
+    incremental_update_playlist,
+)
 
 
 def _make_429(retry_after: int) -> spotipy.SpotifyException:
@@ -137,3 +143,94 @@ class TestParseRetryAfter:
         exc.http_status = 429
         exc.headers = None
         assert _parse_retry_after(exc) == 1
+
+
+def _make_mock_sp(user_id="user1", existing_playlist_id=None):
+    """Create a mock Spotify client for playlist tests."""
+    sp = MagicMock()
+    sp.current_user.return_value = {"id": user_id}
+    sp.user_playlist_create.return_value = {"id": "new_pl_id"}
+    sp.playlist.return_value = {"name": "whatever", "id": existing_playlist_id or "pl_id"}
+    return sp
+
+
+class TestCreateOrUpdatePlaylistDescription:
+    @patch("djsupport.spotify.resolve_playlist_id", return_value=(None, "none"))
+    @patch("djsupport.spotify.get_user_playlists", return_value={})
+    def test_create_passes_description(self, _get, _resolve):
+        sp = _make_mock_sp()
+        create_or_update_playlist(
+            sp, "Test", ["spotify:track:1"],
+            description="Synced from Rekordbox by djsupport",
+        )
+        sp.user_playlist_create.assert_called_once_with(
+            "user1", "Test", public=False,
+            description="Synced from Rekordbox by djsupport",
+        )
+
+    @patch("djsupport.spotify.resolve_playlist_id", return_value=(None, "none"))
+    @patch("djsupport.spotify.get_user_playlists", return_value={})
+    def test_create_without_description(self, _get, _resolve):
+        sp = _make_mock_sp()
+        create_or_update_playlist(sp, "Test", ["spotify:track:1"])
+        sp.user_playlist_create.assert_called_once_with(
+            "user1", "Test", public=False,
+        )
+
+    @patch("djsupport.spotify._rename_if_needed")
+    @patch("djsupport.spotify.resolve_playlist_id", return_value=("existing_id", "state"))
+    @patch("djsupport.spotify.get_user_playlists", return_value={})
+    def test_update_sets_description(self, _get, _resolve, _rename):
+        sp = _make_mock_sp()
+        create_or_update_playlist(
+            sp, "Test", ["spotify:track:1"],
+            description="Imported from Beatport by djsupport",
+        )
+        sp.playlist_change_details.assert_called_once_with(
+            "existing_id", description="Imported from Beatport by djsupport",
+        )
+
+    @patch("djsupport.spotify._rename_if_needed")
+    @patch("djsupport.spotify.resolve_playlist_id", return_value=("existing_id", "state"))
+    @patch("djsupport.spotify.get_user_playlists", return_value={})
+    def test_update_without_description_skips_change_details(self, _get, _resolve, _rename):
+        sp = _make_mock_sp()
+        create_or_update_playlist(sp, "Test", ["spotify:track:1"])
+        sp.playlist_change_details.assert_not_called()
+
+
+class TestIncrementalUpdatePlaylistDescription:
+    @patch("djsupport.spotify.resolve_playlist_id", return_value=(None, "none"))
+    @patch("djsupport.spotify.get_user_playlists", return_value={})
+    def test_delegates_description_to_create(self, _get, _resolve):
+        sp = _make_mock_sp()
+        with patch("djsupport.spotify.create_or_update_playlist", return_value=("new_id", "created")) as mock_create:
+            incremental_update_playlist(
+                sp, "Test", ["spotify:track:1"],
+                description="Synced from Rekordbox by djsupport",
+            )
+            mock_create.assert_called_once()
+            assert mock_create.call_args.kwargs["description"] == "Synced from Rekordbox by djsupport"
+
+    @patch("djsupport.spotify.get_playlist_tracks", return_value=["spotify:track:1"])
+    @patch("djsupport.spotify._rename_if_needed")
+    @patch("djsupport.spotify.resolve_playlist_id", return_value=("existing_id", "state"))
+    @patch("djsupport.spotify.get_user_playlists", return_value={})
+    def test_existing_playlist_sets_description(self, _get, _resolve, _rename, _tracks):
+        sp = _make_mock_sp()
+        incremental_update_playlist(
+            sp, "Test", ["spotify:track:1"],
+            description="Imported from Beatport by djsupport",
+        )
+        sp.playlist_change_details.assert_called_once_with(
+            "existing_id", description="Imported from Beatport by djsupport",
+        )
+
+    @patch("djsupport.spotify.get_playlist_tracks", return_value=["spotify:track:1"])
+    @patch("djsupport.spotify._rename_if_needed")
+    @patch("djsupport.spotify.resolve_playlist_id", return_value=("existing_id", "state"))
+    @patch("djsupport.spotify.get_user_playlists", return_value={})
+    def test_existing_playlist_no_description_skips(self, _get, _resolve, _rename, _tracks):
+        sp = _make_mock_sp()
+        incremental_update_playlist(sp, "Test", ["spotify:track:1"])
+        sp.playlist_change_details.assert_not_called()

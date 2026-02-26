@@ -176,6 +176,7 @@ def create_or_update_playlist(
     state_manager: PlaylistStateManager | None = None,
     source_path: str | None = None,
     source_type: str = "rekordbox",
+    description: str | None = None,
 ) -> tuple[str, str]:
     """Create a playlist or replace its tracks if it already exists.
 
@@ -195,9 +196,14 @@ def create_or_update_playlist(
         # Rename if the Spotify name doesn't match the expected formatted name
         formatted = format_playlist_name(name, prefix)
         _rename_if_needed(sp, playlist_id, formatted)
+        if description:
+            sp.playlist_change_details(playlist_id, description=description)
     else:
         display_name = format_playlist_name(name, prefix)
-        result = sp.user_playlist_create(user_id, display_name, public=False)
+        create_kwargs: dict[str, Any] = {"public": False}
+        if description:
+            create_kwargs["description"] = description
+        result = sp.user_playlist_create(user_id, display_name, **create_kwargs)
         playlist_id = result["id"]
         action = "created"
 
@@ -249,6 +255,7 @@ def incremental_update_playlist(
     state_manager: PlaylistStateManager | None = None,
     source_path: str | None = None,
     source_type: str = "rekordbox",
+    description: str | None = None,
 ) -> tuple[str, str, dict]:
     """Update a playlist incrementally, only adding/removing the diff.
 
@@ -267,12 +274,15 @@ def incremental_update_playlist(
             sp, name, desired_uris, existing_playlists,
             prefix=prefix, state_manager=state_manager,
             source_path=source_path, source_type=source_type,
+            description=description,
         )
         return pid, action, {"added": len(desired_uris), "removed": 0, "unchanged": 0}
 
     # Rename if the Spotify name doesn't match the expected formatted name
     formatted = format_playlist_name(name, prefix)
     _rename_if_needed(sp, playlist_id, formatted)
+    if description:
+        sp.playlist_change_details(playlist_id, description=description)
 
     current_uris = get_playlist_tracks(sp, playlist_id)
 
