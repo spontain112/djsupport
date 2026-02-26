@@ -136,10 +136,14 @@ def _classify_version_match(track: Track, result: dict) -> str:
 
 
 def _duration_penalty(track_duration_s: int, result_duration_ms: int) -> float:
-    """Penalty for duration mismatch between Rekordbox and Spotify tracks.
+    """Penalty for duration mismatch between source and Spotify tracks.
 
     Returns 0 when durations are unavailable or within 30s of each other.
-    Beyond 30s, applies 10 points per additional 30s, capped at 30.
+    Beyond 30s, applies 5 points per additional 30s, capped at 15.
+
+    The cap is intentionally low so that duration alone cannot reject an
+    otherwise strong artist+title match — common when Beatport lists extended
+    DJ versions and Spotify only has shorter radio edits.
     """
     if track_duration_s <= 0 or result_duration_ms <= 0:
         return 0.0
@@ -148,7 +152,7 @@ def _duration_penalty(track_duration_s: int, result_duration_ms: int) -> float:
     if diff <= 30:
         return 0.0
     excess = diff - 30
-    return min(30.0, (excess / 30) * 10)
+    return min(15.0, (excess / 30) * 5)
 
 
 def _score_result(track: Track, result: dict) -> float:

@@ -383,9 +383,9 @@ class TestEarlyExit:
 
     def test_threshold_boundary_below_95_no_early_exit(self):
         """A score just below EARLY_EXIT_THRESHOLD should not trigger early exit."""
-        # Use a small duration mismatch to push score just below 95.
-        # Track: 300s, Result: 360s → 60s diff → 30s excess → 10 penalty → score ~90
-        sp = self._mock_sp([make_spotify_item("Vultora", "Solomun", "uri:1", duration_ms=360000)])
+        # Use a large duration mismatch to push score just below 95.
+        # Track: 300s, Result: 480s → 180s diff → 150s excess → 15 penalty (cap) → score ~85
+        sp = self._mock_sp([make_spotify_item("Vultora", "Solomun", "uri:1", duration_ms=480000)])
         track = make_track("Vultora (Original Mix)", "Solomun", duration=300)
         result = match_track(sp, track, threshold=80)
         assert result is not None
@@ -419,14 +419,14 @@ class TestDurationPenalty:
         assert _duration_penalty(300, 330000) == 0.0
 
     def test_penalty_beyond_30s(self):
-        # 60s diff = 30s excess -> 10 points
+        # 60s diff = 30s excess -> 5 points
         penalty = _duration_penalty(300, 360000)
-        assert penalty == pytest.approx(10.0)
+        assert penalty == pytest.approx(5.0)
 
-    def test_penalty_capped_at_30(self):
+    def test_penalty_capped_at_15(self):
         # 300s diff -> way beyond cap
         penalty = _duration_penalty(300, 600000)
-        assert penalty == 30.0
+        assert penalty == 15.0
 
     def test_duration_disambiguates_versions(self):
         """A track with known duration should score the closer-duration result higher."""
