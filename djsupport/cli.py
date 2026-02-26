@@ -352,6 +352,8 @@ DEFAULT_BEATPORT_STATE_PATH = ".djsupport_beatport_playlists.json"
 @click.option("--dry-run", is_flag=True, help="Preview without modifying Spotify.")
 @click.option("--threshold", "-t", default=80, show_default=True, help="Minimum match confidence (0-100).")
 @click.option("--no-cache", is_flag=True, help="Bypass match cache.")
+@click.option("--retry", is_flag=True, help="Force retry all previously failed matches.")
+@click.option("--retry-days", default=7, show_default=True, help="Auto-retry failures older than N days.")
 @click.option("--cache-path", default=DEFAULT_BEATPORT_CACHE_PATH, show_default=True, help="Path to Beatport match cache.")
 @click.option("--state-path", default=DEFAULT_BEATPORT_STATE_PATH, show_default=True, help="Path to Beatport playlist state.")
 @click.option("--report", "report_path", type=click.Path(), default=None, help="Save Markdown report.")
@@ -363,6 +365,8 @@ def beatport(
     dry_run: bool,
     threshold: int,
     no_cache: bool,
+    retry: bool,
+    retry_days: int,
     cache_path: str,
     state_path: str,
     report_path: str | None,
@@ -443,6 +447,8 @@ def beatport(
             dry_run=dry_run,
             incremental=incremental,
             prefix=actual_prefix,
+            retry_days=retry_days,
+            retry=retry,
             source_type="beatport",
         )
     except RateLimitError as e:

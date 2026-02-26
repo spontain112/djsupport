@@ -11,7 +11,7 @@ BEATPORT_CHART_URL_PREFIX = "beatport.com/chart/"
 BEATPORT_CHART_PATTERN = re.compile(
     r"^https://(www\.)?beatport\.com/chart/[\w-]+/\d+/?$"
 )
-USER_AGENT = "Mozilla/5.0 (compatible; djsupport/0.3.0)"
+USER_AGENT = "Mozilla/5.0 (compatible; djsupport/0.2.0)"
 REQUEST_TIMEOUT = (5, 30)  # (connect, read) seconds
 MAX_RESPONSE_SIZE = 5 * 1024 * 1024  # 5 MB
 
@@ -89,10 +89,10 @@ def fetch_chart(url: str) -> tuple[str, str, list[Track]]:
         )
 
     data = json.loads(match.group(1))
-    return _parse_chart_data(data, url)
+    return _parse_chart_data(data)
 
 
-def _parse_chart_data(data: dict, url: str) -> tuple[str, str, list[Track]]:
+def _parse_chart_data(data: dict) -> tuple[str, str, list[Track]]:
     """Extract chart info and tracks from __NEXT_DATA__ JSON."""
     try:
         queries = data["props"]["pageProps"]["dehydratedState"]["queries"]
@@ -115,7 +115,7 @@ def _parse_chart_data(data: dict, url: str) -> tuple[str, str, list[Track]]:
 
     if not track_query:
         raise BeatportParseError(
-            f"Could not locate track data in chart page queries. "
+            "Could not locate track data in chart page queries. "
             f"Found {len(queries)} queries but none contained track results."
         )
 

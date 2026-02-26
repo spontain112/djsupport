@@ -37,8 +37,6 @@ def _strip_mix_info(title: str) -> str:
          'What Is Real - Deep in the Playa Mix' -> 'What Is Real'
     """
     title = re.sub(r"\s*\(.*?(mix|remix|edit|version|dub|extended|radio|instrumental|short)\)", "", title, flags=re.IGNORECASE)
-    # Strip standalone version tags like (Extended), (Radio), (Instrumental)
-    title = re.sub(r"\s*\((extended|radio|instrumental|short)\)", "", title, flags=re.IGNORECASE)
     title = re.sub(r"\s*\[.*?\]", "", title)
     # Strip trailing hyphen descriptors like " - XYZ Remix" used by Spotify
     title = re.sub(r"\s+-\s+[^-]*\b(mix|remix|edit|version|dub)\b.*$", "", title, flags=re.IGNORECASE)
@@ -155,9 +153,12 @@ def _duration_penalty(track_duration_s: int, result_duration_ms: int) -> float:
     return min(15.0, (excess / 30) * 5)
 
 
-def _score_result(track: Track, result: dict) -> float:
+def _score_result(
+    track: Track, result: dict, components: dict[str, float] | None = None,
+) -> float:
     """Score a Spotify result against a Rekordbox track (0-100)."""
-    components = _score_components(track, result)
+    if components is None:
+        components = _score_components(track, result)
     artist_score = components["artist_score"]
     title_score = components["raw_title_score"]
     stripped_score = components["stripped_title_score"]
@@ -199,7 +200,7 @@ def _select_best(track: Track, results: list[dict], threshold: int) -> dict | No
     scored: list[tuple[dict, float, float, dict[str, float], str]] = []
     for r in unique:
         components = _score_components(track, r)
-        exact_score = _score_result(track, r)
+        exact_score = _score_result(track, r, components)
         base_score = components["artist_score"] * 0.4 + components["stripped_title_score"] * 0.6
         match_type = _classify_version_match(track, r)
         scored.append((r, exact_score, base_score, components, match_type))

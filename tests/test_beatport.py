@@ -178,25 +178,25 @@ class TestParseChartData:
 
     def test_extracts_chart_name_and_curator(self):
         data = self._make_chart_data(chart_name="Peak Time", curator="Ben UFO")
-        name, curator, tracks = _parse_chart_data(data, "https://example.com")
+        name, curator, tracks = _parse_chart_data(data)
         assert name == "Peak Time"
         assert curator == "Ben UFO"
 
     def test_extracts_tracks(self):
         data = self._make_chart_data()
-        _, _, tracks = _parse_chart_data(data, "https://example.com")
+        _, _, tracks = _parse_chart_data(data)
         assert len(tracks) == 1
         assert tracks[0].name == "Track One"
         assert tracks[0].artist == "Artist One"
 
     def test_missing_top_level_keys(self):
         with pytest.raises(BeatportParseError, match="missing key"):
-            _parse_chart_data({"props": {}}, "https://example.com")
+            _parse_chart_data({"props": {}})
 
     def test_empty_queries(self):
         data = {"props": {"pageProps": {"dehydratedState": {"queries": []}}}}
         with pytest.raises(BeatportParseError, match="Could not locate"):
-            _parse_chart_data(data, "https://example.com")
+            _parse_chart_data(data)
 
     def test_queries_without_track_results(self):
         data = {
@@ -211,13 +211,13 @@ class TestParseChartData:
             }
         }
         with pytest.raises(BeatportParseError, match="Could not locate"):
-            _parse_chart_data(data, "https://example.com")
+            _parse_chart_data(data)
 
     def test_missing_chart_metadata_uses_defaults(self):
         data = self._make_chart_data()
         # Remove chart metadata
         data["props"]["pageProps"].pop("chart", None)
-        name, curator, _ = _parse_chart_data(data, "https://example.com")
+        name, curator, _ = _parse_chart_data(data)
         assert name == "Unknown Chart"
         assert curator == "Unknown"
 
@@ -235,7 +235,7 @@ class TestParseChartData:
             for i in range(5)
         ]
         data = self._make_chart_data(tracks=tracks)
-        _, _, parsed = _parse_chart_data(data, "https://example.com")
+        _, _, parsed = _parse_chart_data(data)
         assert len(parsed) == 5
         assert [t.name for t in parsed] == ["Track 0", "Track 1", "Track 2", "Track 3", "Track 4"]
 
