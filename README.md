@@ -23,23 +23,18 @@ Sync your Rekordbox playlists to Spotify. Parses a Rekordbox XML library export,
 
 ## Installation
 
-Clone the repo and install from the **project root** (the folder that contains `pyproject.toml`):
+1. Clone or download the repo.
+2. `cd` into the project root — the folder that contains `pyproject.toml`.
+3. Install with pip:
 
 ```bash
-git clone <repo-url>
-cd djsupport
-pip install -e .
-```
-
-If you downloaded a zip from GitHub instead, the extracted folder is named
-`djsupport-main` — install from there:
-
-```bash
-cd djsupport-main
 pip install -e .
 ```
 
 > **Note:** Use `pip`, not `pipx` — `pipx` does not support editable installs (`-e`).
+> If you see "No pyproject.toml or setup.py found", you are in the wrong
+> directory. Look for the folder that contains `pyproject.toml` and run the
+> command there.
 
 ## Setup
 
