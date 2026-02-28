@@ -2,7 +2,7 @@
 
 ## Project overview
 
-djsupport syncs Rekordbox playlists and Beatport DJ charts to Spotify. It parses a Rekordbox XML export or scrapes a Beatport chart page, fuzzy-matches tracks against Spotify's catalog, and creates/updates Spotify playlists.
+djsupport syncs Rekordbox playlists, Beatport DJ charts, and Beatport record labels to Spotify. It parses a Rekordbox XML export, scrapes a Beatport chart or label page, fuzzy-matches tracks against Spotify's catalog, and creates/updates Spotify playlists.
 
 ## Tech stack
 
@@ -21,13 +21,14 @@ djsupport/
   cli.py        # Click CLI entry point
   rekordbox.py  # XML parser — Track and Playlist dataclasses
   beatport.py   # Beatport chart scraper — __NEXT_DATA__ extraction
+  label.py      # Beatport label scraper — paginated track fetching + label search
   matcher.py    # Fuzzy matching logic against Spotify search
   spotify.py    # Spotify client wrapper (spotipy + OAuth)
   config.py     # Local config (saved Rekordbox XML path)
   cache.py      # Persistent match cache with retry logic
   state.py      # Playlist ID mapping for incremental sync (source-agnostic)
   report.py     # Post-sync terminal + Markdown reports
-tests/          # pytest suite (216 tests)
+tests/          # pytest suite (280 tests)
 docs/           # Plans, reports, and solution docs
   solutions/    # Documented problem solutions (YAML frontmatter, searchable)
   plans/        # Implementation and feature plans
@@ -43,6 +44,7 @@ djsupport sync <xml> --dry-run  # Preview without modifying Spotify
 djsupport library set <xml>     # Save default Rekordbox XML path
 djsupport library show          # Show configured XML path
 djsupport beatport <url>        # Import Beatport chart to Spotify
+djsupport label <url-or-name>  # Import Beatport label to Spotify
 
 # Sync flags
 djsupport sync --playlist "My Playlist"  # Sync a single playlist
@@ -72,6 +74,21 @@ djsupport beatport <url> --no-prefix                 # No prefix
 djsupport beatport <url> --report report.md          # Save Markdown report
 djsupport beatport <url> --incremental               # Incremental updates (default)
 
+# Label flags
+djsupport label <url>                                # Import by Beatport label URL
+djsupport label "Drumcode"                           # Search Beatport by label name
+djsupport label <url-or-name> --dry-run              # Preview matches
+djsupport label <url-or-name> --threshold 90         # Minimum match confidence
+djsupport label <url-or-name> --no-cache             # Bypass label match cache
+djsupport label <url-or-name> --retry                # Retry previously failed matches
+djsupport label <url-or-name> --retry-days 3         # Auto-retry failures older than N days (default 7)
+djsupport label <url-or-name> --cache-path my.json   # Custom label cache file
+djsupport label <url-or-name> --state-path my.json   # Custom label state file
+djsupport label <url-or-name> --prefix "dj"          # Prefix for playlist name
+djsupport label <url-or-name> --no-prefix            # No prefix
+djsupport label <url-or-name> --report report.md     # Save Markdown report
+djsupport label <url-or-name> --incremental          # Incremental updates (default)
+
 # Testing
 pytest                     # Run all tests
 pytest --cov=djsupport     # Run with coverage
@@ -81,7 +98,7 @@ pytest --cov=djsupport     # Run with coverage
 
 - CLI entry point is `djsupport.cli:cli`
 - Spotify credentials come from `.env` (SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET, SPOTIPY_REDIRECT_URI)
-- `.env`, `*.xml`, `.spotipy_cache*`, `.djsupport_config.json`, `.djsupport_cache*`, `.djsupport_playlists*`, `.djsupport_beatport_cache.json`, `.djsupport_beatport_playlists.json` are gitignored — never commit these
+- `.env`, `*.xml`, `.spotipy_cache*`, `.djsupport_config.json`, `.djsupport_cache*`, `.djsupport_playlists*`, `.djsupport_beatport_cache*`, `.djsupport_beatport_playlists*`, `.djsupport_label_cache*`, `.djsupport_label_playlists*` are gitignored — never commit these
 - Version tracked in `pyproject.toml` (`version = "0.3.0"`)
 - Changelog follows Keep a Changelog format in `CHANGELOG.md`
 - `docs/` contains plans, test plans, and reports

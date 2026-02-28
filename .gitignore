@@ -18,6 +18,8 @@ build/
 .djsupport_playlists*
 .djsupport_beatport_cache*
 .djsupport_beatport_playlists*
+.djsupport_label_cache*
+.djsupport_label_playlists*
 .djsupport_config.json
 *.xml
 !tests/fixtures/*.xml

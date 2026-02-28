@@ -129,9 +129,9 @@ def _match_and_sync_playlist(
     matched_uris = unique_uris
 
     if not dry_run and matched_uris:
-        source_labels = {"rekordbox": "Rekordbox", "beatport": "Beatport"}
-        label = source_labels.get(source_type, source_type)
-        description = f"Synced from {label} by djsupport" if source_type == "rekordbox" else f"Imported from {label} by djsupport"
+        source_labels = {"rekordbox": "Rekordbox", "beatport": "Beatport", "label": "Beatport label"}
+        source_label = source_labels.get(source_type, source_type)
+        description = f"Synced from {source_label} by djsupport" if source_type == "rekordbox" else f"Imported from {source_label} by djsupport"
 
         if incremental:
             playlist_id, action, _diff = incremental_update_playlist(
@@ -474,6 +474,212 @@ def beatport(
         cache.save()
 
     # Save state
+    if not dry_run:
+        state_mgr.save()
+
+    print_report(report)
+    if report_path:
+        save_report(report, report_path)
+        click.echo(f"\nDetailed report saved to {report_path}")
+
+
+DEFAULT_LABEL_CACHE_PATH = ".djsupport_label_cache.json"
+DEFAULT_LABEL_STATE_PATH = ".djsupport_label_playlists.json"
+
+
+@cli.command()
+@click.argument("url_or_name")
+@click.option("--dry-run", is_flag=True, help="Preview without modifying Spotify.")
+@click.option("--threshold", "-t", default=80, show_default=True, help="Minimum match confidence (0-100).")
+@click.option("--no-cache", is_flag=True, help="Bypass match cache.")
+@click.option("--retry", is_flag=True, help="Force retry all previously failed matches.")
+@click.option("--retry-days", default=7, show_default=True, help="Auto-retry failures older than N days.")
+@click.option("--cache-path", default=DEFAULT_LABEL_CACHE_PATH, show_default=True, help="Path to label match cache.")
+@click.option("--state-path", default=DEFAULT_LABEL_STATE_PATH, show_default=True, help="Path to label playlist state.")
+@click.option("--report", "report_path", type=click.Path(), default=None, help="Save Markdown report.")
+@click.option("--prefix", default="djsupport", show_default=True, help="Prefix for Spotify playlist name.")
+@click.option("--no-prefix", is_flag=True, help="Disable playlist name prefix.")
+@click.option("--incremental/--no-incremental", default=True, show_default=True, help="Use incremental playlist updates.")
+def label(
+    url_or_name: str,
+    dry_run: bool,
+    threshold: int,
+    no_cache: bool,
+    retry: bool,
+    retry_days: int,
+    cache_path: str,
+    state_path: str,
+    report_path: str | None,
+    prefix: str,
+    no_prefix: bool,
+    incremental: bool,
+) -> None:
+    """Create a Spotify playlist from a Beatport record label.
+
+    URL_OR_NAME is either a Beatport label URL or a label name to search for.
+
+    \b
+    Examples:
+      djsupport label https://www.beatport.com/label/drumcode/1
+      djsupport label "Drumcode"
+    """
+    import requests
+
+    from djsupport.label import (
+        InvalidLabelURL,
+        LabelParseError,
+        deduplicate_tracks,
+        fetch_label_tracks,
+        search_labels,
+        validate_label_url,
+        LARGE_LABEL_THRESHOLD,
+    )
+
+    # Detect URL vs name
+    if "beatport.com/label/" in url_or_name:
+        try:
+            label_url = validate_label_url(url_or_name)
+        except InvalidLabelURL as e:
+            raise click.ClickException(str(e))
+    else:
+        # Search by name
+        click.echo(f"Searching Beatport for label '{url_or_name}'...")
+        try:
+            results = search_labels(url_or_name)
+        except LabelParseError as e:
+            raise click.ClickException(str(e))
+        except requests.RequestException as e:
+            raise click.ClickException(f"Failed to search Beatport: {e}")
+
+        if not results:
+            click.echo(f"No labels found matching '{url_or_name}'.")
+            return
+
+        click.echo(f"\nFound {len(results)} label(s):\n")
+        for i, r in enumerate(results, 1):
+            latest = f' — latest: "{r.latest_release}"' if r.latest_release else ""
+            date = f" ({r.latest_release_date})" if r.latest_release_date else ""
+            click.echo(f"  {i}. {r.name}{latest}{date}")
+            click.echo(f"     {r.url}")
+
+        if len(results) == 1:
+            label_url = results[0].url
+            click.echo(f"\nUsing: {results[0].name}")
+        else:
+            selection = click.prompt("\nSelect label", type=int, default=1)
+            if selection < 1 or selection > len(results):
+                raise click.ClickException(f"Invalid selection: {selection}")
+            label_url = results[selection - 1].url
+            click.echo(f"\nUsing: {results[selection - 1].name}")
+
+        # Re-validate URL constructed from search results
+        try:
+            label_url = validate_label_url(label_url)
+        except InvalidLabelURL as e:
+            raise click.ClickException(str(e))
+
+    # Fetch tracks with pagination
+    click.echo("Fetching tracks from Beatport label...")
+
+    def on_total(total: int) -> bool | None:
+        click.echo(f"Label has {total} tracks.")
+        if total > LARGE_LABEL_THRESHOLD:
+            if not click.confirm(
+                f"This label has {total} tracks (>{LARGE_LABEL_THRESHOLD}). Continue?"
+            ):
+                return False
+        return None
+
+    def on_page(page: int, total_pages: int) -> None:
+        click.echo(f"  Fetched page {page}/{total_pages}")
+
+    def on_page_error(page: int, total_pages: int, error: Exception) -> None:
+        click.echo(
+            f"\nWarning: Failed to fetch page {page}/{total_pages}: {error}",
+            err=True,
+        )
+
+    try:
+        label_name, tracks = fetch_label_tracks(
+            label_url, on_total=on_total, on_page=on_page,
+            on_page_error=on_page_error,
+        )
+    except LabelParseError as e:
+        raise click.ClickException(str(e))
+    except requests.RequestException as e:
+        if hasattr(e, "response") and e.response is not None and e.response.status_code == 404:
+            raise click.ClickException("Label not found — check the URL.")
+        raise click.ClickException(f"Failed to fetch label: {e}")
+
+    if not tracks:
+        click.echo(f"No tracks found for label '{label_name}'.")
+        return
+
+    # Deduplicate tracks across compilations
+    tracks, dupes_removed = deduplicate_tracks(tracks)
+    if dupes_removed:
+        click.echo(f"Removed {dupes_removed} duplicate tracks. {len(tracks)} unique tracks remaining.")
+    else:
+        click.echo(f"{len(tracks)} tracks (newest first).")
+
+    # Initialize cache
+    cache = None
+    if not no_cache:
+        from djsupport.cache import MatchCache
+        cache = MatchCache(cache_path)
+        cache.load()
+        if cache.entries:
+            click.echo(f"Loaded {len(cache.entries)} cached label matches from {cache_path}")
+
+    actual_prefix = None if no_prefix else prefix
+
+    from djsupport.state import PlaylistStateManager
+    state_mgr = PlaylistStateManager(state_path)
+    state_mgr.load()
+
+    sp = get_client()
+    existing = get_user_playlists(sp) if not dry_run else None
+
+    report = SyncReport(
+        timestamp=datetime.now(),
+        threshold=threshold,
+        dry_run=dry_run,
+        cache_enabled=cache is not None,
+        source_label="Beatport",
+    )
+
+    try:
+        pl_report = _match_and_sync_playlist(
+            tracks,
+            label_name,
+            label_url,
+            sp=sp,
+            cache=cache,
+            state_mgr=state_mgr,
+            existing_playlists=existing,
+            threshold=threshold,
+            dry_run=dry_run,
+            incremental=incremental,
+            prefix=actual_prefix,
+            retry_days=retry_days,
+            retry=retry,
+            source_type="label",
+        )
+    except RateLimitError as e:
+        click.echo(f"\n{e}", err=True)
+        if cache is not None:
+            cache.save()
+            click.echo(f"Cache saved to {cache_path} ({len(cache.entries)} entries).", err=True)
+        print_report(report)
+        if report_path:
+            save_report(report, report_path)
+        sys.exit(1)
+
+    report.playlists.append(pl_report)
+
+    if cache is not None:
+        cache.save()
+
     if not dry_run:
         state_mgr.save()
 
