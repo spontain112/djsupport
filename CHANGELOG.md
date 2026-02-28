@@ -21,6 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Label search now handles new Beatport search API response format (`label_id`/`label_name` under `data` key) alongside old format
+- Label scraper no longer imports `click` — pagination errors communicated via `on_page_error` callback, keeping library decoupled from CLI
+- Search result URLs are re-validated before fetching, closing a trust boundary gap
+- Pagination capped at 100 pages (15,000 tracks) to prevent runaway requests from corrupted server responses
+- URL validation now strips `#` fragments (browser-pasted URLs with anchors no longer rejected)
+- Invalid JSON in `__NEXT_DATA__` now raises `LabelParseError` instead of raw `JSONDecodeError`
 - Matcher now recognizes "Original" as a standalone version descriptor — Spotify uses " - Original" suffix on many tracks, previously causing match failures
 - Matcher now recognizes "Interpretation" as a version descriptor — handles tracks like "Selderv Interpretation" common in electronic music
 

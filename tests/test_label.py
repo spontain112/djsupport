@@ -12,11 +12,13 @@ from djsupport.label import (
     deduplicate_tracks,
     _parse_label_page,
     _parse_label_track,
+    _extract_next_data,
     _slugify,
     LabelParseError,
     InvalidLabelURL,
     LabelResult,
     PER_PAGE,
+    MAX_PAGES,
     LARGE_LABEL_THRESHOLD,
 )
 from djsupport.rekordbox import Track
@@ -775,3 +777,183 @@ class TestSlugify:
 
     def test_already_slugified(self):
         assert _slugify("drumcode-limited") == "drumcode-limited"
+
+
+class TestValidateLabelUrlFragment:
+    def test_strips_fragment(self):
+        result = validate_label_url("https://www.beatport.com/label/test/123#section")
+        assert result == "https://www.beatport.com/label/test/123"
+
+    def test_strips_fragment_with_query(self):
+        result = validate_label_url("https://www.beatport.com/label/test/123?page=1#top")
+        assert result == "https://www.beatport.com/label/test/123"
+
+
+class TestExtractNextDataErrors:
+    def test_invalid_json_raises_parse_error(self):
+        html = '<html><script id="__NEXT_DATA__" type="application/json">{not valid json}</script></html>'
+        with pytest.raises(LabelParseError, match="Invalid JSON"):
+            _extract_next_data(html)
+
+
+class TestMaxPagesLimit:
+    @patch("djsupport.label.requests.get")
+    def test_pagination_capped_at_max_pages(self, mock_get):
+        """Verify that pagination is capped at MAX_PAGES even if count is huge."""
+        tracks = [
+            {
+                "id": 1,
+                "name": "Track 1",
+                "mix_name": "Original Mix",
+                "artists": [{"name": "Artist"}],
+                "release": {"name": "", "label": {"name": ""}},
+                "genre": {"name": ""},
+                "length": "3:00",
+                "publish_date": "2026-02-01",
+            },
+        ]
+        # Claim 1 million tracks but only return 1
+        data = {
+            "props": {
+                "pageProps": {
+                    "label": {"name": "Huge Label"},
+                    "dehydratedState": {
+                        "queries": [
+                            {
+                                "state": {
+                                    "data": {
+                                        "results": tracks,
+                                        "count": 1_000_000,
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                }
+            }
+        }
+        html = f'<html><script id="__NEXT_DATA__" type="application/json">{json.dumps(data)}</script></html>'
+
+        mock_resp = MagicMock()
+        mock_resp.iter_content.return_value = [html.encode()]
+        mock_resp.encoding = "utf-8"
+        mock_resp.url = "https://www.beatport.com/label/test/123/tracks"
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.close = MagicMock()
+
+        # First call succeeds, subsequent calls fail — we just need to verify
+        # it doesn't try 6,666 pages
+        import requests as req
+        mock_get.side_effect = [mock_resp] + [req.RequestException("stop")] * MAX_PAGES
+
+        pages_called = []
+        fetch_label_tracks(
+            "https://www.beatport.com/label/test/123",
+            on_total=lambda total: None,
+            on_page=lambda p, t: pages_called.append((p, t)),
+        )
+        # Total pages should be capped at MAX_PAGES, not 6667
+        if pages_called:
+            _, total_pages = pages_called[0]
+            assert total_pages == MAX_PAGES
+
+
+class TestOnPageErrorCallback:
+    @patch("djsupport.label.requests.get")
+    def test_on_page_error_called_on_failure(self, mock_get):
+        import requests as req
+
+        tracks = [
+            {
+                "id": i,
+                "name": f"Track {i}",
+                "mix_name": "Original Mix",
+                "artists": [{"name": "Artist"}],
+                "release": {"name": "", "label": {"name": ""}},
+                "genre": {"name": ""},
+                "length": "3:00",
+                "publish_date": "2026-02-01",
+            }
+            for i in range(3)
+        ]
+        data = {
+            "props": {
+                "pageProps": {
+                    "label": {"name": "Test Label"},
+                    "dehydratedState": {
+                        "queries": [
+                            {
+                                "state": {
+                                    "data": {
+                                        "results": tracks,
+                                        "count": PER_PAGE + 10,
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                }
+            }
+        }
+        html = f'<html><script id="__NEXT_DATA__" type="application/json">{json.dumps(data)}</script></html>'
+
+        mock_resp = MagicMock()
+        mock_resp.iter_content.return_value = [html.encode()]
+        mock_resp.encoding = "utf-8"
+        mock_resp.url = "https://www.beatport.com/label/test/123/tracks"
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.close = MagicMock()
+
+        mock_get.side_effect = [mock_resp, req.RequestException("Network error")]
+
+        errors = []
+        name, tracks = fetch_label_tracks(
+            "https://www.beatport.com/label/test/123",
+            on_page_error=lambda p, t, e: errors.append((p, t, str(e))),
+        )
+        assert len(tracks) == 3  # Only page 1
+        assert len(errors) == 1
+        assert errors[0][0] == 2  # page 2
+        assert "Network error" in errors[0][2]
+
+    @patch("djsupport.label.requests.get")
+    def test_pagination_failure_without_callback(self, mock_get):
+        """Pagination failure still returns partial results when no callback."""
+        import requests as req
+
+        tracks = [
+            {
+                "id": 1,
+                "name": "Track 1",
+                "mix_name": "Original Mix",
+                "artists": [{"name": "Artist"}],
+                "release": {"name": "", "label": {"name": ""}},
+                "genre": {"name": ""},
+                "length": "3:00",
+                "publish_date": "2026-02-01",
+            },
+        ]
+        data = {
+            "props": {
+                "pageProps": {
+                    "label": {"name": "Test"},
+                    "dehydratedState": {
+                        "queries": [
+                            {"state": {"data": {"results": tracks, "count": PER_PAGE + 10}}}
+                        ]
+                    },
+                }
+            }
+        }
+        html = f'<html><script id="__NEXT_DATA__" type="application/json">{json.dumps(data)}</script></html>'
+
+        mock_resp = MagicMock()
+        mock_resp.iter_content.return_value = [html.encode()]
+        mock_resp.encoding = "utf-8"
+        mock_resp.url = "https://www.beatport.com/label/test/123/tracks"
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.close = MagicMock()
+
+        mock_get.side_effect = [mock_resp, req.RequestException("fail")]
+        name, tracks = fetch_label_tracks("https://www.beatport.com/label/test/123")
+        assert len(tracks) == 1

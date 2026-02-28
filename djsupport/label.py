@@ -17,6 +17,7 @@ BEATPORT_LABEL_PATTERN = re.compile(
     r"^https://(www\.)?beatport\.com/label/[\w-]+/\d+(/tracks)?/?$"
 )
 PER_PAGE = 150
+MAX_PAGES = 100  # Hard cap: 100 * 150 = 15,000 tracks maximum
 LARGE_LABEL_THRESHOLD = 1000
 
 
@@ -46,7 +47,7 @@ def validate_label_url(url: str) -> str:
 
     Raises InvalidLabelURL if the URL doesn't match the expected pattern.
     """
-    url = url.split("?")[0].rstrip("/")
+    url = url.split("?")[0].split("#")[0].rstrip("/")
     if not BEATPORT_LABEL_PATTERN.match(url):
         raise InvalidLabelURL(
             f"Not a valid Beatport label URL: {url}\n"
@@ -106,7 +107,13 @@ def _extract_next_data(html: str) -> dict:
             "Could not find label data on page. "
             "Beatport may have changed their page structure."
         )
-    return json.loads(match.group(1))
+    try:
+        return json.loads(match.group(1))
+    except json.JSONDecodeError as e:
+        raise LabelParseError(
+            f"Invalid JSON in page data: {e}. "
+            "Beatport may have changed their page structure."
+        ) from e
 
 
 def _parse_label_page(data: dict) -> tuple[str, list[Track], int]:
@@ -217,8 +224,9 @@ def deduplicate_tracks(tracks: list[Track]) -> tuple[list[Track], int]:
 def fetch_label_tracks(
     url: str,
     *,
-    on_total: Callable | None = None,
-    on_page: Callable | None = None,
+    on_total: Callable[[int], bool | None] | None = None,
+    on_page: Callable[[int, int], None] | None = None,
+    on_page_error: Callable[[int, int, Exception], None] | None = None,
 ) -> tuple[str, list[Track]]:
     """Fetch all tracks from a Beatport label page with pagination.
 
@@ -239,7 +247,7 @@ def fetch_label_tracks(
     if not tracks:
         return label_name, []
 
-    total_pages = math.ceil(total_count / PER_PAGE)
+    total_pages = min(math.ceil(total_count / PER_PAGE), MAX_PAGES)
 
     # Allow caller to abort (e.g., >1000 track warning)
     if on_total and on_total(total_count) is False:
@@ -256,12 +264,8 @@ def fetch_label_tracks(
             _, page_tracks, _ = _parse_label_page(data)
             tracks.extend(page_tracks)
         except (LabelParseError, requests.RequestException) as e:
-            # Partial failure: return what we have with a warning
-            import click
-            click.echo(
-                f"\nWarning: Failed to fetch page {page}/{total_pages}: {e}",
-                err=True,
-            )
+            if on_page_error:
+                on_page_error(page, total_pages, e)
             break
 
         if on_page:

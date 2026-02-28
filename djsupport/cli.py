@@ -572,6 +572,12 @@ def label(
             label_url = results[selection - 1].url
             click.echo(f"\nUsing: {results[selection - 1].name}")
 
+        # Re-validate URL constructed from search results
+        try:
+            label_url = validate_label_url(label_url)
+        except InvalidLabelURL as e:
+            raise click.ClickException(str(e))
+
     # Fetch tracks with pagination
     click.echo("Fetching tracks from Beatport label...")
 
@@ -587,9 +593,16 @@ def label(
     def on_page(page: int, total_pages: int) -> None:
         click.echo(f"  Fetched page {page}/{total_pages}")
 
+    def on_page_error(page: int, total_pages: int, error: Exception) -> None:
+        click.echo(
+            f"\nWarning: Failed to fetch page {page}/{total_pages}: {error}",
+            err=True,
+        )
+
     try:
         label_name, tracks = fetch_label_tracks(
             label_url, on_total=on_total, on_page=on_page,
+            on_page_error=on_page_error,
         )
     except LabelParseError as e:
         raise click.ClickException(str(e))
