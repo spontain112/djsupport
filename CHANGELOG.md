@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `djsupport label <url-or-name>` command — import tracks from a Beatport record label into a Spotify playlist
+- Label name search with interactive selection — `djsupport label "Drumcode"` searches Beatport and presents matching labels with latest release info
+- Paginated label fetching with `per_page=150` for efficient large label imports
+- Track deduplication across compilations — same track on multiple releases is imported only once (newest first)
+- Warning prompt when a label has >1000 tracks before proceeding
+- `djsupport/label.py` module — Beatport label page scraper with URL validation, pagination, deduplication, and search
+- Label-specific cache (`.djsupport_label_cache.json`) and state (`.djsupport_label_playlists.json`), isolated from chart and Rekordbox data
+- 53 new tests for label module (URL validation, track parsing, pagination, deduplication, search, error handling)
 - Playlist descriptions on sync — Rekordbox playlists show "Synced from Rekordbox by djsupport", Beatport playlists show "Imported from Beatport by djsupport"
 
 ## [0.3.0] - 2026-02-26
