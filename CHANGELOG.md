@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - 53 new tests for label module (URL validation, track parsing, pagination, deduplication, search, error handling)
 - Playlist descriptions on sync — Rekordbox playlists show "Synced from Rekordbox by djsupport", Beatport playlists show "Imported from Beatport by djsupport"
 
+### Fixed
+
+- Matcher now recognizes "Original" as a standalone version descriptor — Spotify uses " - Original" suffix on many tracks, previously causing match failures
+- Matcher now recognizes "Interpretation" as a version descriptor — handles tracks like "Selderv Interpretation" common in electronic music
+
 ## [0.3.0] - 2026-02-26
 
 ### Added
