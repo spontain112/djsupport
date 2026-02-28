@@ -109,6 +109,21 @@ class TestParseLabelTrack:
         assert track.duration == 210
         assert track.date_added == "2026-01-10"
 
+    def test_original_mix_name_omitted(self):
+        """Label pages use 'Original' instead of 'Original Mix' — both should be omitted."""
+        item = {
+            "id": 1,
+            "name": "Contra Natura",
+            "mix_name": "Original",
+            "artists": [{"name": "VALON (SE)"}],
+            "release": {"name": "EP", "label": {"name": "Label"}},
+            "genre": {"name": "Techno"},
+            "length": "5:00",
+            "publish_date": "2025-11-21",
+        }
+        track = _parse_label_track(item, 0)
+        assert track.name == "Contra Natura"  # "Original" omitted just like "Original Mix"
+
     def test_missing_publish_date_uses_new_release_date(self):
         item = {
             "id": 1,

@@ -177,7 +177,7 @@ def _parse_label_track(item: dict, position: int) -> Track:
     mix_name = item.get("mix_name", "")
     title = item.get("name", "")
 
-    if mix_name and mix_name != "Original Mix":
+    if mix_name and mix_name not in ("Original Mix", "Original"):
         title = f"{title} ({mix_name})"
 
     # Use publish_date or new_release_date for chronological ordering
