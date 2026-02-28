@@ -270,6 +270,12 @@ def fetch_label_tracks(
     return label_name, tracks
 
 
+def _slugify(name: str) -> str:
+    """Convert a label name to a URL slug (lowercase, hyphens for spaces)."""
+    slug = re.sub(r"[^\w\s-]", "", name.lower())
+    return re.sub(r"[\s_]+", "-", slug).strip("-")
+
+
 def search_labels(query: str) -> list[LabelResult]:
     """Search Beatport for labels matching a name.
 
@@ -309,23 +315,26 @@ def search_labels(query: str) -> list[LabelResult]:
             f"Unexpected search page structure (missing key: {e})."
         ) from e
 
-    # Find the query containing label results
-    results = []
+    # Find the query containing label results.
+    # Beatport returns results under "data" (new format) or "results" (old format).
+    items: list[dict] = []
     for q in queries:
         if not isinstance(q, dict):
             continue
         state_data = q.get("state", {}).get("data", {})
-        items = state_data.get("results")
-        if isinstance(items, list) and items and isinstance(items[0], dict):
-            if "name" in items[0] and "slug" in items[0]:
-                results = items
+        # New format: nested under "data" key with label_name/label_id fields
+        candidates = state_data.get("data") or state_data.get("results")
+        if isinstance(candidates, list) and candidates and isinstance(candidates[0], dict):
+            if "label_name" in candidates[0] or "name" in candidates[0]:
+                items = candidates
                 break
 
     label_results = []
-    for item in results:
-        label_id = item.get("id", "")
-        slug = item.get("slug", "")
-        name = item.get("name", "Unknown")
+    for item in items:
+        # Support both new (label_id/label_name) and old (id/name/slug) formats
+        label_id = item.get("label_id") or item.get("id", "")
+        name = item.get("label_name") or item.get("name", "Unknown")
+        slug = item.get("slug") or _slugify(name)
 
         # Extract latest release info if available
         last_release = item.get("last_release", {}) or {}

@@ -12,6 +12,7 @@ from djsupport.label import (
     deduplicate_tracks,
     _parse_label_page,
     _parse_label_track,
+    _slugify,
     LabelParseError,
     InvalidLabelURL,
     LabelResult,
@@ -698,3 +699,79 @@ class TestSearchLabels:
         mock_get.return_value = self._mock_response("<html>/human-test/start</html>")
         with pytest.raises(LabelParseError, match="anti-bot"):
             search_labels("Drumcode")
+
+    def _make_search_html_new_format(self, labels=None):
+        """Build search HTML using the new Beatport format (label_id/label_name under data)."""
+        if labels is None:
+            labels = [
+                {
+                    "label_id": 43599,
+                    "label_name": "Blindfold Recordings",
+                    "update_date": "2025-11-21T07:12:58",
+                },
+            ]
+        data = {
+            "props": {
+                "pageProps": {
+                    "dehydratedState": {
+                        "queries": [
+                            {
+                                "state": {
+                                    "data": {
+                                        "data": labels,
+                                    }
+                                }
+                            }
+                        ]
+                    },
+                }
+            }
+        }
+        return f'<html><script id="__NEXT_DATA__" type="application/json">{json.dumps(data)}</script></html>'
+
+    @patch("djsupport.label.requests.get")
+    def test_search_new_format(self, mock_get):
+        html = self._make_search_html_new_format()
+        mock_get.return_value = self._mock_response(html)
+
+        results = search_labels("Blindfold Recordings")
+        assert len(results) == 1
+        assert results[0].name == "Blindfold Recordings"
+        assert results[0].url == "https://www.beatport.com/label/blindfold-recordings/43599"
+
+    @patch("djsupport.label.requests.get")
+    def test_search_new_format_multiple(self, mock_get):
+        labels = [
+            {"label_id": 43599, "label_name": "Blindfold Recordings"},
+            {"label_id": 60772, "label_name": "Revealed Recordings"},
+        ]
+        html = self._make_search_html_new_format(labels=labels)
+        mock_get.return_value = self._mock_response(html)
+
+        results = search_labels("Blindfold")
+        assert len(results) == 2
+        assert results[0].name == "Blindfold Recordings"
+        assert results[1].name == "Revealed Recordings"
+        assert results[1].url == "https://www.beatport.com/label/revealed-recordings/60772"
+
+    @patch("djsupport.label.requests.get")
+    def test_search_new_format_no_results(self, mock_get):
+        html = self._make_search_html_new_format(labels=[])
+        mock_get.return_value = self._mock_response(html)
+
+        results = search_labels("nonexistent")
+        assert results == []
+
+
+class TestSlugify:
+    def test_simple_name(self):
+        assert _slugify("Drumcode") == "drumcode"
+
+    def test_multi_word(self):
+        assert _slugify("Blindfold Recordings") == "blindfold-recordings"
+
+    def test_special_characters(self):
+        assert _slugify("Suara (Music)") == "suara-music"
+
+    def test_already_slugified(self):
+        assert _slugify("drumcode-limited") == "drumcode-limited"
