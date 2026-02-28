@@ -35,11 +35,12 @@ def _strip_mix_info(title: str) -> str:
          'Night Drive (Extended)' -> 'Night Drive'
          'Today [Permanent Vacation]' -> 'Today'
          'What Is Real - Deep in the Playa Mix' -> 'What Is Real'
+         'With Me - Original' -> 'With Me'
     """
-    title = re.sub(r"\s*\(.*?(mix|remix|edit|version|dub|extended|radio|instrumental|short)\)", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"\s*\(.*?(mix|remix|edit|version|dub|original|extended|radio|instrumental|short)\)", "", title, flags=re.IGNORECASE)
     title = re.sub(r"\s*\[.*?\]", "", title)
-    # Strip trailing hyphen descriptors like " - XYZ Remix" used by Spotify
-    title = re.sub(r"\s+-\s+[^-]*\b(mix|remix|edit|version|dub)\b.*$", "", title, flags=re.IGNORECASE)
+    # Strip trailing hyphen descriptors like " - XYZ Remix" or " - Original" used by Spotify
+    title = re.sub(r"\s+-\s+[^-]*\b(mix|remix|edit|version|dub|original)\b.*$", "", title, flags=re.IGNORECASE)
     return title.strip()
 
 
@@ -54,11 +55,11 @@ def _extract_mix_descriptors(title: str) -> list[str]:
     descriptors: list[str] = []
     candidates = re.findall(r"[\(\[]([^\)\]]+)[\)\]]", title)
     for c in candidates:
-        if re.search(r"\b(mix|remix|edit|version|dub|extended|radio|instrumental|short)\b", c, flags=re.IGNORECASE):
+        if re.search(r"\b(mix|remix|edit|version|dub|original|extended|radio|instrumental|short)\b", c, flags=re.IGNORECASE):
             descriptors.append(_normalize(c))
     # Spotify often uses "Track Name - XYZ Remix" instead of parentheses
     hyphen_match = re.search(
-        r"\s+-\s+([^-]*\b(mix|remix|edit|version|dub)\b.*)$",
+        r"\s+-\s+([^-]*\b(mix|remix|edit|version|dub|original)\b.*)$",
         title,
         flags=re.IGNORECASE,
     )
