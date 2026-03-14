@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import queue
+import threading
 import uuid
-from dataclasses import asdict
 from pathlib import Path
 from threading import Lock
 
@@ -136,7 +136,8 @@ def start_sync(req: SyncRequest):
         _current_job = job
 
     # Run sync in background thread
-    asyncio.get_event_loop().run_in_executor(None, _run_sync, job, url_type)
+    thread = threading.Thread(target=_run_sync, args=(job, url_type), daemon=True)
+    thread.start()
     return {"job_id": job_id, "url_type": url_type}
 
 
