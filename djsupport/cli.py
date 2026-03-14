@@ -8,22 +8,18 @@ import click
 from dotenv import load_dotenv
 
 from djsupport.config import ConfigManager, validate_rekordbox_xml
-from djsupport.matcher import match_track, match_track_cached
 from djsupport.rekordbox import Track, parse_xml
 from djsupport.report import (
-    MatchedTrack,
     PlaylistReport,
     SyncReport,
     print_report,
     save_report,
 )
+from djsupport.service import ProgressEvent, match_and_sync_playlist
 from djsupport.spotify import (
     RateLimitError,
-    create_or_update_playlist,
-    format_playlist_name,
     get_client,
     get_user_playlists,
-    incremental_update_playlist,
 )
 
 
@@ -58,103 +54,32 @@ def _resolve_xml_path(explicit_xml_path: str | None) -> str:
     return str(p)
 
 
-def _match_and_sync_playlist(
+def _cli_match_and_sync(
     tracks: list[Track],
     playlist_name: str,
     playlist_path: str,
-    *,
-    sp,
-    cache,
-    state_mgr,
-    existing_playlists: dict[str, str] | None,
-    threshold: int,
-    dry_run: bool,
-    incremental: bool,
-    prefix: str | None,
-    retry_days: int = 7,
-    retry: bool = False,
-    source_type: str = "rekordbox",
+    **kwargs,
 ) -> PlaylistReport:
-    """Match tracks to Spotify and create/update a playlist.
-
-    Returns a PlaylistReport. Raises RateLimitError if Spotify rate limit
-    is exceeded — caller should save cache and handle the abort.
-    """
-    pl_report = PlaylistReport(name=playlist_name, path=playlist_path)
-    matched_uris: list[str] = []
-
-    with click.progressbar(
-        tracks,
+    """CLI wrapper around service.match_and_sync_playlist with a Click progress bar."""
+    # Set up a Click progress bar driven by service callbacks
+    bar_ctx = click.progressbar(
+        length=len(tracks),
         label=f"Matching: {playlist_name}",
         show_eta=True,
         show_percent=True,
         show_pos=True,
-        item_show_func=lambda t: t.display[:50] if t else "",
-    ) as bar:
-        for track in bar:
-            if cache is not None:
-                result, source = match_track_cached(
-                    sp, track, cache, threshold=threshold,
-                    retry_days=retry_days, force_retry=retry,
-                )
-                if source == "cache":
-                    pl_report.cache_hits += 1
-                elif source == "retry":
-                    pl_report.retried += 1
-                else:
-                    pl_report.api_lookups += 1
-            else:
-                result = match_track(sp, track, threshold=threshold)
-                pl_report.api_lookups += 1
+        item_show_func=lambda s: s[:50] if s else "",
+    )
 
-            if result:
-                matched_uris.append(result["uri"])
-                pl_report.matched.append(MatchedTrack(
-                    source_name=track.display,
-                    spotify_name=result["name"],
-                    spotify_artist=result["artist"],
-                    score=result["score"],
-                    match_type=result.get("match_type", "exact"),
-                ))
-            else:
-                pl_report.unmatched.append(track.display)
+    with bar_ctx as bar:
+        def _on_progress(event: ProgressEvent) -> None:
+            if event.phase == "matching":
+                bar.update(1, event.detail)
 
-    # Deduplicate URIs (different source tracks can resolve to the same Spotify track)
-    seen_uris: set[str] = set()
-    unique_uris: list[str] = []
-    for uri in matched_uris:
-        if uri not in seen_uris:
-            seen_uris.add(uri)
-            unique_uris.append(uri)
-    matched_uris = unique_uris
-
-    if not dry_run and matched_uris:
-        source_labels = {"rekordbox": "Rekordbox", "beatport": "Beatport", "label": "Beatport label"}
-        source_label = source_labels.get(source_type, source_type)
-        description = f"Synced from {source_label} by djsupport" if source_type == "rekordbox" else f"Imported from {source_label} by djsupport"
-
-        if incremental:
-            playlist_id, action, _diff = incremental_update_playlist(
-                sp, playlist_name, matched_uris, existing_playlists,
-                prefix=prefix, state_manager=state_mgr,
-                source_path=playlist_path, source_type=source_type,
-                description=description,
-            )
-        else:
-            playlist_id, action = create_or_update_playlist(
-                sp, playlist_name, matched_uris, existing_playlists,
-                prefix=prefix, state_manager=state_mgr,
-                source_path=playlist_path, source_type=source_type,
-                description=description,
-            )
-        pl_report.action = action
-        if existing_playlists is not None:
-            formatted = format_playlist_name(playlist_name, prefix)
-            existing_playlists[formatted] = playlist_id
-    elif dry_run:
-        pl_report.action = "dry-run"
-
-    return pl_report
+        return match_and_sync_playlist(
+            tracks, playlist_name, playlist_path,
+            on_progress=_on_progress, **kwargs,
+        )
 
 
 @cli.group()
@@ -297,7 +222,7 @@ def sync(
         pl_tracks = [tracks[tid] for tid in pl.track_ids if tid in tracks]
 
         try:
-            pl_report = _match_and_sync_playlist(
+            pl_report = _cli_match_and_sync(
                 pl_tracks,
                 pl.name,
                 pl.path,
@@ -441,7 +366,7 @@ def beatport(
     )
 
     try:
-        pl_report = _match_and_sync_playlist(
+        pl_report = _cli_match_and_sync(
             tracks,
             chart_name,
             url,
@@ -649,7 +574,7 @@ def label(
     )
 
     try:
-        pl_report = _match_and_sync_playlist(
+        pl_report = _cli_match_and_sync(
             tracks,
             label_name,
             label_url,

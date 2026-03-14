@@ -20,6 +20,7 @@ class PlaylistReport:
     matched: list[MatchedTrack] = field(default_factory=list)
     unmatched: list[str] = field(default_factory=list)
     action: str = "dry-run"  # "created", "updated", "unchanged", or "dry-run"
+    spotify_playlist_id: str | None = None
     cache_hits: int = 0
     api_lookups: int = 0
     retried: int = 0

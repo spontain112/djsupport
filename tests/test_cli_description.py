@@ -1,8 +1,8 @@
-"""Tests for playlist description threading in CLI sync."""
+"""Tests for playlist description threading in sync service."""
 
 from unittest.mock import MagicMock, patch
 
-from djsupport.cli import _match_and_sync_playlist
+from djsupport.service import match_and_sync_playlist
 from djsupport.rekordbox import Track
 
 
@@ -24,11 +24,11 @@ def _make_match_result():
 
 
 class TestMatchAndSyncDescription:
-    @patch("djsupport.cli.incremental_update_playlist", return_value=("pl_id", "created", {"added": 1, "removed": 0, "unchanged": 0}))
-    @patch("djsupport.cli.match_track", return_value=_make_match_result())
+    @patch("djsupport.service.incremental_update_playlist", return_value=("pl_id", "created", {"added": 1, "removed": 0, "unchanged": 0}))
+    @patch("djsupport.service.match_track", return_value=_make_match_result())
     def test_rekordbox_description(self, _match, mock_sync):
         sp = MagicMock()
-        _match_and_sync_playlist(
+        match_and_sync_playlist(
             [_make_track()], "My Playlist", "/path",
             sp=sp, cache=None, state_mgr=None,
             existing_playlists={}, threshold=80,
@@ -38,11 +38,11 @@ class TestMatchAndSyncDescription:
         mock_sync.assert_called_once()
         assert mock_sync.call_args.kwargs["description"] == "Synced from Rekordbox by djsupport"
 
-    @patch("djsupport.cli.incremental_update_playlist", return_value=("pl_id", "created", {"added": 1, "removed": 0, "unchanged": 0}))
-    @patch("djsupport.cli.match_track", return_value=_make_match_result())
+    @patch("djsupport.service.incremental_update_playlist", return_value=("pl_id", "created", {"added": 1, "removed": 0, "unchanged": 0}))
+    @patch("djsupport.service.match_track", return_value=_make_match_result())
     def test_beatport_description(self, _match, mock_sync):
         sp = MagicMock()
-        _match_and_sync_playlist(
+        match_and_sync_playlist(
             [_make_track()], "My Chart", "https://beatport.com/chart/1",
             sp=sp, cache=None, state_mgr=None,
             existing_playlists={}, threshold=80,
@@ -52,11 +52,11 @@ class TestMatchAndSyncDescription:
         mock_sync.assert_called_once()
         assert mock_sync.call_args.kwargs["description"] == "Imported from Beatport by djsupport"
 
-    @patch("djsupport.cli.create_or_update_playlist", return_value=("pl_id", "created"))
-    @patch("djsupport.cli.match_track", return_value=_make_match_result())
+    @patch("djsupport.service.create_or_update_playlist", return_value=("pl_id", "created"))
+    @patch("djsupport.service.match_track", return_value=_make_match_result())
     def test_non_incremental_passes_description(self, _match, mock_sync):
         sp = MagicMock()
-        _match_and_sync_playlist(
+        match_and_sync_playlist(
             [_make_track()], "My Playlist", "/path",
             sp=sp, cache=None, state_mgr=None,
             existing_playlists={}, threshold=80,
@@ -66,10 +66,10 @@ class TestMatchAndSyncDescription:
         mock_sync.assert_called_once()
         assert mock_sync.call_args.kwargs["description"] == "Synced from Rekordbox by djsupport"
 
-    @patch("djsupport.cli.match_track", return_value=_make_match_result())
+    @patch("djsupport.service.match_track", return_value=_make_match_result())
     def test_dry_run_skips_description(self, _match):
         sp = MagicMock()
-        report = _match_and_sync_playlist(
+        report = match_and_sync_playlist(
             [_make_track()], "My Playlist", "/path",
             sp=sp, cache=None, state_mgr=None,
             existing_playlists={}, threshold=80,
