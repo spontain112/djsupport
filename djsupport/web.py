@@ -13,6 +13,7 @@ from html import escape
 from pathlib import Path
 from threading import Lock
 from typing import Any
+from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
@@ -109,13 +110,26 @@ def auth_callback(code: str | None = None, error: str | None = None):
 
 class SyncRequest(BaseModel):
     url: str
+    threshold: int = 80
+    dry_run: bool = False
+    prefix: str | None = "djsupport"
+    retry: bool = False
+    retry_days: int = 7
+    no_cache: bool = False
 
 
 def _detect_url_type(url: str) -> str:
     """Return 'chart', 'label', or raise ValueError."""
-    if "beatport.com/chart/" in url:
+    parsed = urlparse(url)
+    if parsed.hostname not in ("beatport.com", "www.beatport.com"):
+        raise ValueError(
+            "URL must be a Beatport chart or label URL "
+            "(e.g. https://www.beatport.com/chart/name/123 "
+            "or https://www.beatport.com/label/name/1)"
+        )
+    if "/chart/" in parsed.path:
         return "chart"
-    if "beatport.com/label/" in url:
+    if "/label/" in parsed.path:
         return "label"
     raise ValueError(
         "URL must be a Beatport chart or label URL "
@@ -150,12 +164,14 @@ def start_sync(req: SyncRequest):
         _current_job = job
 
     # Run sync in background thread
-    thread = threading.Thread(target=_run_sync, args=(job, url_type), daemon=True)
+    thread = threading.Thread(
+        target=_run_sync, args=(job, url_type, req), daemon=True,
+    )
     thread.start()
     return {"job_id": job_id, "url_type": url_type}
 
 
-def _run_sync(job: SyncJob, url_type: str) -> None:
+def _run_sync(job: SyncJob, url_type: str, req: SyncRequest) -> None:
     """Execute the sync in a background thread."""
     from djsupport.cache import MatchCache
     from djsupport.spotify import get_client
@@ -170,8 +186,9 @@ def _run_sync(job: SyncJob, url_type: str) -> None:
         else ".djsupport_label_playlists.json"
     )
 
-    cache = MatchCache(cache_path)
-    cache.load()
+    cache = None if req.no_cache else MatchCache(cache_path)
+    if cache is not None:
+        cache.load()
     state_mgr = PlaylistStateManager(state_path)
     state_mgr.load()
 
@@ -181,25 +198,32 @@ def _run_sync(job: SyncJob, url_type: str) -> None:
         except queue.Full:
             pass  # drop event if consumer is too slow
 
-    try:
-        sp = get_client()
-        if url_type == "chart":
-            report = sync_beatport_chart(
-                job.url, sp=sp, cache=cache, state_mgr=state_mgr,
-                on_progress=_on_progress,
-            )
-        else:
-            report = sync_beatport_label(
-                job.url, sp=sp, cache=cache, state_mgr=state_mgr,
-                on_progress=_on_progress,
-            )
+    sync_kwargs: dict[str, Any] = {
+        "sp": get_client(),
+        "cache": cache,
+        "state_mgr": state_mgr,
+        "on_progress": _on_progress,
+        "threshold": req.threshold,
+        "dry_run": req.dry_run,
+        "prefix": req.prefix,
+        "retry": req.retry,
+        "retry_days": req.retry_days,
+    }
 
-        cache.save()
+    try:
+        if url_type == "chart":
+            report = sync_beatport_chart(job.url, **sync_kwargs)
+        else:
+            report = sync_beatport_label(job.url, **sync_kwargs)
+
+        if cache is not None:
+            cache.save()
         state_mgr.save()
 
         job.result = _report_to_dict(report)
     except RateLimitError as e:
-        cache.save()
+        if cache is not None:
+            cache.save()
         job.error = str(e)
         _on_progress(ProgressEvent(phase="error", detail=str(e)))
     except Exception as e:

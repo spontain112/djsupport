@@ -4,84 +4,474 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>djsupport</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=Inter:wght@800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+    <noscript><link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=Inter:wght@800&display=swap" rel="stylesheet"></noscript>
     <style>
-        body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+        :root {
+            --bg: #111111;
+            --surface: #18181B;
+            --border: #2A2A2E;
+            --border-strong: #3A3A3E;
+            --accent: #C4F82A;
+            --accent-dim: #C4F82A44;
+            --text-primary: #E8E4DE;
+            --text-secondary: #A1A1AA;
+            --text-muted: #71717A;
+            --text-dim: #52525B;
+            --error: #F87171;
+            --score-text: #9CA3AF;
+        }
+        body {
+            font-family: 'IBM Plex Mono', monospace;
+            background: var(--bg);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
         .fade-in { animation: fadeIn 0.3s ease-in; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        /* Layout */
+        .container {
+            max-width: 560px;
+            padding: 80px 24px 60px;
+        }
+        .container--left {
+            margin-left: max(24px, calc((100vw - 560px) / 2 - 180px));
+        }
+        .container--center {
+            margin: 0 auto;
+            text-align: center;
+        }
+
+        /* Logo */
+        .logo {
+            font-family: 'Inter', sans-serif;
+            font-weight: 800;
+            font-size: 32px;
+            letter-spacing: 3px;
+            color: var(--text-primary);
+        }
+        .logo--accent { color: var(--accent); letter-spacing: 4px; }
+        .subtitle {
+            margin-top: 12px;
+            font-size: 12px;
+            letter-spacing: 2.5px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+        }
+        .subtitle--center {
+            margin-top: 4px;
+            font-size: 11px;
+            letter-spacing: 3px;
+        }
+
+        /* Status row */
+        .status-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 32px;
+        }
+        .status-row--center { justify-content: center; margin-top: 24px; margin-bottom: 40px; }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent);
+            flex-shrink: 0;
+        }
+        .status-dot--warn { background: #FBBF24; }
+        .status-dot--error { background: var(--error); }
+        .status-text {
+            font-size: 12px;
+            letter-spacing: 2px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+        }
+        .status-text a {
+            color: #FBBF24;
+            text-decoration: none;
+        }
+        .status-text a:hover { text-decoration: underline; }
+
+        /* Input field */
+        .field { margin-top: 48px; }
+        .field-label {
+            font-size: 11px;
+            letter-spacing: 2.5px;
+            color: var(--accent);
+            text-transform: uppercase;
+            margin-bottom: 10px;
+        }
+        .field-label--inactive { color: var(--text-secondary); }
+        .input-box {
+            width: 100%;
+            background: var(--surface);
+            border: 1px solid var(--accent-dim);
+            border-radius: 6px;
+            padding: 12px 14px;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 14px;
+            color: var(--text-primary);
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .input-box::placeholder { color: var(--text-muted); }
+        .input-box:focus { border-color: var(--accent); }
+
+        /* Underline input (URL entered state) */
+        .input-underline {
+            width: 100%;
+            background: transparent;
+            border: none;
+            border-bottom: 1px solid var(--accent);
+            padding: 0 0 12px 0;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 14px;
+            color: var(--text-primary);
+            outline: none;
+        }
+
+        /* Detection hint */
+        .detect-hint {
+            margin-top: 8px;
+            font-size: 12px;
+            letter-spacing: 2px;
+            color: var(--accent);
+            text-transform: uppercase;
+        }
+        .detect-hint--warn { color: #FBBF24; }
+
+        /* Buttons */
+        .btn {
+            display: inline-block;
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 12px;
+            font-weight: 500;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            padding: 14px 36px;
+            border: none;
+            cursor: pointer;
+            transition: opacity 0.2s;
+        }
+        .btn:hover { opacity: 0.85; }
+        .btn--disabled {
+            background: #1E1E22;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-strong);
+            cursor: not-allowed;
+        }
+        .btn--disabled:hover { opacity: 1; }
+        .btn--accent {
+            background: var(--accent);
+            color: var(--bg);
+            font-weight: 700;
+        }
+        .btn--ghost {
+            background: transparent;
+            color: var(--text-muted);
+            font-weight: normal;
+            font-size: 11px;
+            padding: 12px 0;
+        }
+        .btn-wrap { margin-top: 32px; }
+
+        /* Error block */
+        .error-block {
+            border-left: 2px solid var(--error);
+            padding: 16px 16px 16px 20px;
+            margin-top: 48px;
+        }
+        .error-title {
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            color: var(--error);
+            text-transform: uppercase;
+        }
+        .error-desc {
+            font-size: 13px;
+            color: var(--error);
+            margin-top: 8px;
+        }
+        .error-url {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 8px;
+            word-break: break-all;
+        }
+
+        /* Progress bar */
+        .prog-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .prog-label {
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            color: var(--text-primary);
+            text-transform: uppercase;
+        }
+        .prog-count {
+            font-size: 12px;
+            font-weight: 700;
+            color: var(--accent);
+        }
+        .bar-bg {
+            width: 100%;
+            height: 4px;
+            background: var(--border);
+            margin-top: 16px;
+            overflow: hidden;
+        }
+        .bar-fill {
+            height: 4px;
+            background: var(--accent);
+            transition: width 0.3s;
+            width: 0%;
+        }
+        .prog-detail {
+            font-size: 12px;
+            color: var(--score-text);
+            margin-top: 16px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .prog-divider {
+            width: 100%;
+            height: 1px;
+            background: var(--border);
+            margin-top: 16px;
+        }
+        .recent-label {
+            font-size: 10px;
+            letter-spacing: 2px;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            margin-top: 12px;
+        }
+        .recent-track {
+            font-size: 11px;
+            color: var(--text-dim);
+            margin-top: 6px;
+        }
+
+        /* Results */
+        .result-info {
+            border-left: 2px solid var(--accent);
+            padding-left: 16px;
+        }
+        .result-name {
+            font-family: 'Inter', sans-serif;
+            font-size: 20px;
+            font-weight: 800;
+            color: var(--text-primary);
+        }
+        .result-stats {
+            font-size: 11px;
+            letter-spacing: 2px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            margin-top: 8px;
+        }
+        .result-open-btn {
+            margin-top: 8px;
+        }
+        .divider {
+            width: 100%;
+            height: 1px;
+            background: var(--border);
+            margin: 16px 0;
+        }
+
+        /* Collapsible sections */
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 0;
+            cursor: pointer;
+            user-select: none;
+        }
+        .section-arrow {
+            font-size: 10px;
+            color: var(--text-secondary);
+            transition: transform 0.2s;
+        }
+        .section-arrow--red { color: var(--error); }
+        .section-arrow--green { color: var(--accent); }
+        .section-label {
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            color: var(--text-primary);
+            text-transform: uppercase;
+        }
+        .section-label--red { color: var(--error); }
+
+        /* Results table */
+        .results-table { width: 100%; border-collapse: collapse; }
+        .results-table th {
+            font-size: 10px;
+            letter-spacing: 2px;
+            color: var(--score-text);
+            text-transform: uppercase;
+            text-align: left;
+            padding: 8px 0;
+            font-weight: normal;
+        }
+        .results-table th:last-child { text-align: right; }
+        .results-table td {
+            font-size: 11px;
+            color: var(--text-primary);
+            padding: 10px 8px 10px 0;
+            border-top: 1px solid var(--border);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 200px;
+        }
+        .results-table td:last-child {
+            text-align: right;
+            color: var(--accent);
+            font-weight: 700;
+            padding-right: 0;
+            max-width: none;
+        }
+        .results-table thead th { border-bottom: 1px solid var(--border); }
+
+        .unmatched-track {
+            font-size: 11px;
+            color: var(--score-text);
+            margin-top: 12px;
+        }
+
+        .section-content { overflow: hidden; }
+        .section-content--hidden { display: none; }
+
+        .hidden { display: none !important; }
+
+        /* Mobile */
+        @media (max-width: 640px) {
+            .container { padding: 56px 24px 40px; }
+            .container--left { margin-left: 0; }
+            .logo { font-size: 24px; }
+            .input-box, .input-underline { font-size: 13px; }
+            .results-table td { font-size: 10px; max-width: 120px; }
+        }
     </style>
 </head>
-<body class="bg-gray-950 text-gray-100 min-h-screen">
-    <div class="max-w-2xl mx-auto px-4 py-12">
-        <!-- Header -->
-        <div class="mb-10 text-center">
-            <h1 class="text-3xl font-bold tracking-tight">djsupport</h1>
-            <p class="text-gray-400 mt-2">Sync Beatport playlists to Spotify</p>
-            <div id="auth-status" class="mt-3"></div>
-        </div>
+<body>
+    <!-- ===== INPUT STATE ===== -->
+    <div id="input-section" class="container container--center">
+        <div class="logo">DJSUPPORT</div>
+        <div class="subtitle">SYNC BEATPORT PLAYLISTS TO SPOTIFY</div>
+        <div id="auth-status" class="status-row"></div>
 
-        <!-- Input State -->
-        <div id="input-section" class="space-y-4">
-            <div>
-                <label for="url-input" class="block text-sm font-medium text-gray-400 mb-2">Beatport URL</label>
-                <input
-                    id="url-input"
-                    type="url"
-                    placeholder="https://www.beatport.com/chart/name/123"
-                    class="w-full px-4 py-3 bg-gray-900 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
-                />
-                <p id="url-hint" class="mt-1.5 text-sm text-gray-500 hidden"></p>
-                <p id="url-error" class="mt-1.5 text-sm text-red-400 hidden"></p>
-            </div>
-            <button
-                id="sync-btn"
-                onclick="startSync()"
-                disabled
-                class="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-medium rounded-lg transition disabled:cursor-not-allowed"
-            >
-                Sync to Spotify
+        <div class="field" style="text-align:left;">
+            <div id="field-label" class="field-label">BEATPORT URL</div>
+            <input
+                id="url-input"
+                type="url"
+                placeholder="paste beatport chart or label url..."
+                class="input-box"
+            />
+            <p id="url-hint" class="detect-hint hidden"></p>
+        </div>
+        <div class="btn-wrap">
+            <button id="sync-btn" onclick="startSync()" disabled class="btn btn--disabled">
+                SYNC TO SPOTIFY
             </button>
         </div>
+    </div>
 
-        <!-- Progress State -->
-        <div id="progress-section" class="hidden fade-in space-y-4">
-            <div class="bg-gray-900 border border-gray-800 rounded-lg p-6">
-                <div class="flex justify-between text-sm text-gray-400 mb-2">
-                    <span id="progress-phase">Fetching...</span>
-                    <span id="progress-count"></span>
-                </div>
-                <div class="w-full bg-gray-800 rounded-full h-2.5">
-                    <div id="progress-bar" class="bg-indigo-500 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
-                </div>
-                <p id="progress-detail" class="mt-3 text-sm text-gray-500 truncate"></p>
-            </div>
+    <!-- ===== PROGRESS STATE ===== -->
+    <div id="progress-section" class="container container--center hidden fade-in">
+        <div class="logo logo--accent">DJSUPPORT</div>
+        <div class="subtitle subtitle--center">SYNC BEATPORT PLAYLISTS TO SPOTIFY</div>
+        <div class="status-row status-row--center">
+            <span class="status-dot"></span>
+            <span class="status-text" id="progress-auth-status">CONNECTED TO SPOTIFY</span>
         </div>
 
-        <!-- Results State -->
-        <div id="results-section" class="hidden fade-in space-y-6">
-            <div id="results-summary" class="bg-gray-900 border border-gray-800 rounded-lg p-6"></div>
-            <div id="results-matched" class="hidden"></div>
-            <div id="results-unmatched" class="hidden"></div>
-            <button
-                onclick="resetUI()"
-                class="w-full py-3 px-4 bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium rounded-lg transition"
-            >
-                Sync Another
-            </button>
+        <div style="text-align:left;">
+            <div class="prog-header">
+                <span id="progress-phase" class="prog-label">MATCHING TRACKS</span>
+                <span id="progress-count" class="prog-count"></span>
+            </div>
+            <div class="bar-bg">
+                <div id="progress-bar" class="bar-fill"></div>
+            </div>
+            <p id="progress-detail" class="prog-detail"></p>
+            <div class="prog-divider"></div>
+            <div id="recent-matches">
+                <p class="recent-label">RECENTLY MATCHED</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== RESULTS STATE ===== -->
+    <div id="results-section" class="container container--center hidden fade-in">
+        <div class="logo logo--accent">DJSUPPORT</div>
+        <div class="subtitle subtitle--center">SYNC BEATPORT PLAYLISTS TO SPOTIFY</div>
+        <div class="status-row status-row--center">
+            <span class="status-dot"></span>
+            <span class="status-text">CONNECTED TO SPOTIFY</span>
         </div>
 
-        <!-- Error State -->
-        <div id="error-section" class="hidden fade-in">
-            <div class="bg-red-900/30 border border-red-800 rounded-lg p-6">
-                <p class="text-red-300 font-medium">Sync Failed</p>
-                <p id="error-message" class="text-red-400 text-sm mt-1"></p>
-                <button
-                    onclick="resetUI()"
-                    class="mt-4 py-2 px-4 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg transition"
-                >
-                    Try Again
-                </button>
+        <div style="text-align:left;">
+            <div id="results-summary" class="result-info"></div>
+            <div class="divider"></div>
+
+            <!-- Matched tracks -->
+            <div id="results-matched" class="hidden">
+                <div class="section-header" onclick="toggleSection('matched')">
+                    <span id="matched-arrow" class="section-arrow section-arrow--green">&#9654;</span>
+                    <span id="matched-label" class="section-label"></span>
+                </div>
+                <div id="matched-content" class="section-content section-content--hidden"></div>
+                <div class="divider"></div>
             </div>
+
+            <!-- Unmatched tracks -->
+            <div id="results-unmatched" class="hidden">
+                <div class="section-header" onclick="toggleSection('unmatched')">
+                    <span id="unmatched-arrow" class="section-arrow section-arrow--red">&#9654;</span>
+                    <span id="unmatched-label" class="section-label section-label--red"></span>
+                </div>
+                <div id="unmatched-content" class="section-content section-content--hidden"></div>
+                <div class="divider"></div>
+            </div>
+
+            <div style="text-align:center;">
+                <button onclick="resetUI()" class="btn btn--ghost">SYNC ANOTHER</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== ERROR STATE ===== -->
+    <div id="error-section" class="container container--left hidden fade-in">
+        <div class="logo">DJSUPPORT</div>
+        <div class="subtitle">SYNC BEATPORT PLAYLISTS TO SPOTIFY</div>
+        <div class="status-row">
+            <span class="status-dot"></span>
+            <span class="status-text">SPOTIFY CONNECTED</span>
+        </div>
+
+        <div class="error-block">
+            <div class="error-title">SYNC FAILED</div>
+            <p id="error-message" class="error-desc"></p>
+            <p id="error-url" class="error-url"></p>
+        </div>
+        <div class="btn-wrap" style="margin-top:24px;">
+            <button onclick="resetUI()" class="btn btn--accent">RETRY SYNC</button>
         </div>
     </div>
 
@@ -89,15 +479,18 @@
         const urlInput = document.getElementById('url-input');
         const syncBtn = document.getElementById('sync-btn');
         const urlHint = document.getElementById('url-hint');
-        const urlError = document.getElementById('url-error');
+        const fieldLabel = document.getElementById('field-label');
 
-        let currentJobId = null;
+        let recentMatches = [];
 
         // HTML escape helper to prevent XSS from Beatport data
         function esc(s) {
-            const d = document.createElement('div');
-            d.textContent = s;
-            return d.innerHTML;
+            return String(s)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
 
         // Check auth on load
@@ -107,12 +500,13 @@
                 const data = await res.json();
                 const el = document.getElementById('auth-status');
                 if (data.authenticated) {
-                    el.innerHTML = '<span class="inline-flex items-center gap-1.5 text-sm text-green-400"><span class="w-2 h-2 bg-green-400 rounded-full"></span>Connected to Spotify</span>';
+                    el.innerHTML = '<span class="status-dot"></span><span class="status-text">SPOTIFY CONNECTED</span>';
                 } else {
-                    el.innerHTML = '<a href="/auth/login" class="inline-flex items-center gap-1.5 text-sm text-yellow-400 hover:text-yellow-300"><span class="w-2 h-2 bg-yellow-400 rounded-full"></span>Connect to Spotify</a>';
+                    el.innerHTML = '<span class="status-dot status-dot--warn"></span><span class="status-text"><a href="/auth/login">CONNECT TO SPOTIFY</a></span>';
                 }
             } catch {
-                document.getElementById('auth-status').innerHTML = '<span class="text-sm text-red-400">Could not check auth status</span>';
+                const el = document.getElementById('auth-status');
+                el.innerHTML = '<span class="status-dot status-dot--error"></span><span class="status-text" style="color:var(--error)">COULD NOT CHECK AUTH</span>';
             }
         }
         checkAuth();
@@ -120,26 +514,32 @@
         // URL validation
         urlInput.addEventListener('input', () => {
             const url = urlInput.value.trim();
-            urlError.classList.add('hidden');
 
             if (!url) {
                 urlHint.classList.add('hidden');
                 syncBtn.disabled = true;
+                syncBtn.className = 'btn btn--disabled';
+                urlInput.className = 'input-box';
+                fieldLabel.className = 'field-label';
                 return;
             }
 
-            if (url.includes('beatport.com/chart/')) {
-                urlHint.textContent = 'Detected: Beatport chart';
-                urlHint.className = 'mt-1.5 text-sm text-indigo-400';
+            const isChart = url.includes('beatport.com/chart/');
+            const isLabel = url.includes('beatport.com/label/');
+            if (isChart || isLabel) {
+                urlHint.textContent = isChart ? 'DETECTED: BEATPORT CHART' : 'DETECTED: BEATPORT LABEL';
+                urlHint.className = 'detect-hint';
                 syncBtn.disabled = false;
-            } else if (url.includes('beatport.com/label/')) {
-                urlHint.textContent = 'Detected: Beatport label';
-                urlHint.className = 'mt-1.5 text-sm text-indigo-400';
-                syncBtn.disabled = false;
+                syncBtn.className = 'btn btn--accent';
+                urlInput.className = 'input-underline';
+                fieldLabel.className = 'field-label field-label--inactive';
             } else {
-                urlHint.textContent = 'Enter a Beatport chart or label URL';
-                urlHint.className = 'mt-1.5 text-sm text-yellow-400';
+                urlHint.textContent = 'ENTER A BEATPORT CHART OR LABEL URL';
+                urlHint.className = 'detect-hint detect-hint--warn';
                 syncBtn.disabled = true;
+                syncBtn.className = 'btn btn--disabled';
+                urlInput.className = 'input-box';
+                fieldLabel.className = 'field-label';
             }
         });
 
@@ -147,8 +547,7 @@
             const url = urlInput.value.trim();
             if (!url) return;
 
-            matchedTotal = 0;
-            unmatchedTotal = 0;
+            recentMatches = [];
 
             // Switch to progress state
             document.getElementById('input-section').classList.add('hidden');
@@ -169,7 +568,6 @@
                 }
 
                 const data = await res.json();
-                currentJobId = data.job_id;
                 listenProgress(data.job_id);
             } catch (e) {
                 showError(e.message);
@@ -195,10 +593,11 @@
                 }
 
                 // Update progress UI
-                document.getElementById('progress-phase').textContent =
-                    data.phase === 'fetching' ? 'Fetching from Beatport...' :
-                    data.phase === 'matching' ? 'Matching tracks...' :
-                    data.phase === 'syncing' ? 'Updating Spotify playlist...' : data.phase;
+                const phaseLabel =
+                    data.phase === 'fetching' ? 'FETCHING TRACKS' :
+                    data.phase === 'matching' ? 'MATCHING TRACKS' :
+                    data.phase === 'syncing' ? 'UPDATING PLAYLIST' : data.phase.toUpperCase();
+                document.getElementById('progress-phase').textContent = phaseLabel;
 
                 if (data.total > 0) {
                     const pct = Math.round((data.current / data.total) * 100);
@@ -206,13 +605,28 @@
                     document.getElementById('progress-count').textContent = `${data.current}/${data.total}`;
                 }
 
-                document.getElementById('progress-detail').textContent = data.detail;
+                if (data.detail) {
+                    document.getElementById('progress-detail').textContent = data.detail;
+
+                    // Track recent matches for display
+                    if (data.phase === 'matching') {
+                        recentMatches.unshift(data.detail);
+                        if (recentMatches.length > 3) recentMatches.pop();
+                        updateRecentMatches();
+                    }
+                }
             };
 
             evtSource.onerror = () => {
                 evtSource.close();
                 showError('Lost connection to server');
             };
+        }
+
+        function updateRecentMatches() {
+            const el = document.getElementById('recent-matches');
+            el.innerHTML = '<p class="recent-label">RECENTLY MATCHED</p>' +
+                recentMatches.map(t => `<p class="recent-track">\u2713 ${esc(t)}</p>`).join('');
         }
 
         async function fetchResult(jobId) {
@@ -238,70 +652,53 @@
             const pl = data.playlists[0];
             if (!pl) return;
 
-            const spotifyLink = pl.spotify_url
-                ? `<a href="${esc(pl.spotify_url)}" target="_blank" class="inline-flex items-center gap-2 mt-4 py-2 px-4 bg-green-600 hover:bg-green-500 text-white text-sm font-medium rounded-lg transition">Open in Spotify</a>`
+            const openBtn = pl.spotify_url
+                ? `<a href="${esc(pl.spotify_url)}" target="_blank" class="btn btn--accent result-open-btn" style="display:inline-block;padding:12px 24px;text-decoration:none;">OPEN IN SPOTIFY</a>`
                 : '';
 
-            document.getElementById('results-summary').innerHTML = `
-                <div class="flex justify-between items-start">
-                    <div>
-                        <h2 class="text-lg font-semibold">${esc(pl.name)}</h2>
-                        <p class="text-sm text-gray-400 mt-1">${esc(pl.action)} &middot; ${pl.total} tracks &middot; ${pl.match_rate.toFixed(1)}% matched</p>
-                    </div>
-                    <div class="text-right">
-                        <span class="text-2xl font-bold text-green-400">${pl.matched.length}</span>
-                        <span class="text-gray-500 text-sm">/ ${pl.total}</span>
-                    </div>
-                </div>
-                ${spotifyLink}
-            `;
+            document.getElementById('results-summary').innerHTML =
+                `<div class="result-name">${esc(pl.name)}</div>
+                 <div class="result-stats">${esc(pl.action)} &middot; ${pl.total} TRACKS &middot; ${pl.match_rate.toFixed(1)}% MATCHED</div>
+                 ${openBtn}`;
 
             // Matched tracks
             if (pl.matched.length > 0) {
                 const matchedEl = document.getElementById('results-matched');
                 matchedEl.classList.remove('hidden');
-                matchedEl.innerHTML = `
-                    <details class="bg-gray-900 border border-gray-800 rounded-lg">
-                        <summary class="px-6 py-4 cursor-pointer text-sm font-medium text-gray-300 hover:text-gray-100">
-                            Matched Tracks (${pl.matched.length})
-                        </summary>
-                        <div class="px-6 pb-4 max-h-80 overflow-y-auto">
-                            <table class="w-full text-sm">
-                                <thead class="text-gray-500 text-left">
-                                    <tr><th class="pb-2">Source</th><th class="pb-2">Spotify Match</th><th class="pb-2 text-right">Score</th></tr>
-                                </thead>
-                                <tbody class="text-gray-300">
-                                    ${pl.matched.map(m => `
-                                        <tr class="border-t border-gray-800">
-                                            <td class="py-2 pr-3 truncate max-w-[200px]">${esc(m.source_name)}</td>
-                                            <td class="py-2 pr-3 truncate max-w-[200px]">${esc(m.spotify_artist)} - ${esc(m.spotify_name)}</td>
-                                            <td class="py-2 text-right ${m.score >= 90 ? 'text-green-400' : 'text-yellow-400'}">${m.score.toFixed(0)}</td>
-                                        </tr>
-                                    `).join('')}
-                                </tbody>
-                            </table>
-                        </div>
-                    </details>
-                `;
+                document.getElementById('matched-label').textContent = `MATCHED TRACKS (${pl.matched.length})`;
+
+                document.getElementById('matched-content').innerHTML =
+                    `<table class="results-table">
+                        <thead><tr><th>SOURCE</th><th>SPOTIFY MATCH</th><th>SCORE</th></tr></thead>
+                        <tbody>
+                            ${pl.matched.map(m =>
+                                `<tr>
+                                    <td>${esc(m.source_name)}</td>
+                                    <td>${esc(m.spotify_artist)} \u2014 ${esc(m.spotify_name)}</td>
+                                    <td>${m.score.toFixed(0)}</td>
+                                </tr>`
+                            ).join('')}
+                        </tbody>
+                    </table>`;
             }
 
             // Unmatched tracks
             if (pl.unmatched.length > 0) {
                 const unmatchedEl = document.getElementById('results-unmatched');
                 unmatchedEl.classList.remove('hidden');
-                unmatchedEl.innerHTML = `
-                    <details class="bg-gray-900 border border-gray-800 rounded-lg">
-                        <summary class="px-6 py-4 cursor-pointer text-sm font-medium text-red-400 hover:text-red-300">
-                            Unmatched Tracks (${pl.unmatched.length})
-                        </summary>
-                        <div class="px-6 pb-4 max-h-60 overflow-y-auto">
-                            <ul class="text-sm text-gray-400 space-y-1">
-                                ${pl.unmatched.map(t => `<li>- ${esc(t)}</li>`).join('')}
-                            </ul>
-                        </div>
-                    </details>
-                `;
+                document.getElementById('unmatched-label').textContent = `UNMATCHED TRACKS (${pl.unmatched.length})`;
+
+                document.getElementById('unmatched-content').innerHTML =
+                    pl.unmatched.map(t => `<p class="unmatched-track">\u2014 ${esc(t)}</p>`).join('');
             }
+        }
+
+        function toggleSection(name) {
+            const content = document.getElementById(name + '-content');
+            const arrow = document.getElementById(name + '-arrow');
+            const isHidden = content.classList.contains('section-content--hidden');
+            content.classList.toggle('section-content--hidden');
+            arrow.innerHTML = isHidden ? '&#9660;' : '&#9654;';
         }
 
         function showError(message) {
@@ -310,6 +707,7 @@
             document.getElementById('results-section').classList.add('hidden');
             document.getElementById('error-section').classList.remove('hidden');
             document.getElementById('error-message').textContent = message;
+            document.getElementById('error-url').textContent = urlInput.value.trim();
         }
 
         function resetUI() {
@@ -319,10 +717,15 @@
             document.getElementById('error-section').classList.add('hidden');
             document.getElementById('results-matched').classList.add('hidden');
             document.getElementById('results-unmatched').classList.add('hidden');
+            document.getElementById('matched-content').classList.add('section-content--hidden');
+            document.getElementById('unmatched-content').classList.add('section-content--hidden');
+            document.getElementById('matched-arrow').innerHTML = '&#9654;';
+            document.getElementById('unmatched-arrow').innerHTML = '&#9654;';
             document.getElementById('progress-bar').style.width = '0%';
             document.getElementById('progress-count').textContent = '';
             document.getElementById('progress-detail').textContent = '';
-            currentJobId = null;
+            document.getElementById('recent-matches').innerHTML = '<p class="recent-label">RECENTLY MATCHED</p>';
+            recentMatches = [];
         }
     </script>
 </body>
