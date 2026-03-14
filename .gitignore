@@ -37,6 +37,11 @@ compound-engineering.local.md
 *.swo
 *~
 
+# Generated artifacts
+.playwright-cli/
+design-exports/
+screenshots/
+
 # OS artifacts
 .DS_Store
 Thumbs.db

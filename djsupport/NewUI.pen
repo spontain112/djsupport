@@ -1,0 +1,1935 @@
+{
+  "version": "2.8",
+  "children": [
+    {
+      "type": "frame",
+      "id": "qGne9",
+      "x": -2821,
+      "y": 85,
+      "name": "V2 - 01 Main Input",
+      "width": 1280,
+      "height": 720,
+      "fill": "#111111",
+      "layout": "vertical",
+      "padding": [
+        80,
+        0,
+        0,
+        360
+      ],
+      "children": [
+        {
+          "type": "frame",
+          "id": "m59kW",
+          "name": "content1",
+          "width": 560,
+          "layout": "vertical",
+          "children": [
+            {
+              "type": "text",
+              "id": "BpoyN",
+              "name": "logo1",
+              "fill": "#E8E4DE",
+              "content": "DJSUPPORT",
+              "fontFamily": "Inter",
+              "fontSize": 32,
+              "fontWeight": "800",
+              "letterSpacing": 3
+            },
+            {
+              "type": "frame",
+              "id": "VZr0E",
+              "name": "subtitle1",
+              "width": "fill_container",
+              "padding": [
+                12,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "Ynj0S",
+                  "name": "subtext1",
+                  "fill": "#A1A1AA",
+                  "content": "SYNC BEATPORT PLAYLISTS TO SPOTIFY",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 12,
+                  "fontWeight": "normal",
+                  "letterSpacing": 2.5
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "rslT8",
+              "name": "statusRow1",
+              "width": "fill_container",
+              "gap": 8,
+              "padding": [
+                32,
+                0,
+                0,
+                0
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "ellipse",
+                  "id": "fxhl7",
+                  "name": "dot1",
+                  "fill": "#C4F82A",
+                  "width": 8,
+                  "height": 8
+                },
+                {
+                  "type": "text",
+                  "id": "dc1WI",
+                  "name": "statusText1",
+                  "fill": "#A1A1AA",
+                  "content": "SPOTIFY CONNECTED",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 12,
+                  "fontWeight": "normal",
+                  "letterSpacing": 2
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "x5TlB",
+              "name": "labelWrap1",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 10,
+              "padding": [
+                48,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "V3e5H",
+                  "name": "label1",
+                  "fill": "#C4F82A",
+                  "content": "BEATPORT URL",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 11,
+                  "fontWeight": "normal",
+                  "letterSpacing": 2.5
+                },
+                {
+                  "type": "frame",
+                  "id": "iCLlZ",
+                  "name": "inputFrame1",
+                  "width": "fill_container",
+                  "fill": "#18181B",
+                  "cornerRadius": 6,
+                  "stroke": {
+                    "align": "inside",
+                    "thickness": 1,
+                    "fill": "#C4F82A44"
+                  },
+                  "layout": "vertical",
+                  "padding": [
+                    12,
+                    14
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "daCj0",
+                      "name": "placeholder1",
+                      "fill": "#71717A",
+                      "content": "paste beatport chart or label url...",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "pBRS0",
+              "name": "btnWrap1",
+              "width": "fill_container",
+              "padding": [
+                32,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "LM0rw",
+                  "name": "btn1",
+                  "fill": "#1E1E22",
+                  "stroke": {
+                    "align": "inside",
+                    "thickness": 1,
+                    "fill": "#3A3A3E"
+                  },
+                  "padding": [
+                    14,
+                    32
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "0HS7c",
+                      "name": "btnText1",
+                      "fill": "#A1A1AA",
+                      "content": "SYNC TO SPOTIFY",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500",
+                      "letterSpacing": 2
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "1cRNd",
+      "x": -1441,
+      "y": 85,
+      "name": "V2 - 02 URL Entered",
+      "width": 1280,
+      "height": 720,
+      "fill": "#111111",
+      "layout": "vertical",
+      "padding": [
+        80,
+        0,
+        0,
+        360
+      ],
+      "children": [
+        {
+          "type": "frame",
+          "id": "wG8kj",
+          "name": "c2",
+          "width": 560,
+          "layout": "vertical",
+          "children": [
+            {
+              "type": "text",
+              "id": "khHxp",
+              "name": "lg2",
+              "fill": "#E8E4DE",
+              "content": "DJSUPPORT",
+              "fontFamily": "Inter",
+              "fontSize": 32,
+              "fontWeight": "800",
+              "letterSpacing": 3
+            },
+            {
+              "type": "frame",
+              "id": "Slk7v",
+              "name": "st2",
+              "width": "fill_container",
+              "padding": [
+                12,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "pjPcw",
+                  "name": "stt2",
+                  "fill": "#A1A1AA",
+                  "content": "SYNC BEATPORT PLAYLISTS TO SPOTIFY",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 12,
+                  "fontWeight": "normal",
+                  "letterSpacing": 2.5
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "hYDS8",
+              "name": "sr2",
+              "width": "fill_container",
+              "gap": 8,
+              "padding": [
+                32,
+                0,
+                0,
+                0
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "ellipse",
+                  "id": "U1RgL",
+                  "name": "d2",
+                  "fill": "#C4F82A",
+                  "width": 8,
+                  "height": 8
+                },
+                {
+                  "type": "text",
+                  "id": "aH9oB",
+                  "name": "sxt2",
+                  "fill": "#A1A1AA",
+                  "content": "SPOTIFY CONNECTED",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 12,
+                  "fontWeight": "normal",
+                  "letterSpacing": 2
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "CtDr5",
+              "name": "lw2",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 10,
+              "padding": [
+                48,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "Wtj9N",
+                  "name": "lb2",
+                  "fill": "#A1A1AA",
+                  "content": "BEATPORT URL",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 12,
+                  "fontWeight": "normal",
+                  "letterSpacing": 2.5
+                },
+                {
+                  "type": "frame",
+                  "id": "CiVwY",
+                  "name": "if2",
+                  "width": "fill_container",
+                  "stroke": {
+                    "align": "inside",
+                    "thickness": {
+                      "bottom": 1
+                    },
+                    "fill": "#C4F82A"
+                  },
+                  "layout": "vertical",
+                  "padding": [
+                    0,
+                    0,
+                    12,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "FQ44l",
+                      "name": "val2",
+                      "fill": "#E8E4DE",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "https://www.beatport.com/chart/techno-essentials/893421",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "8cwKx",
+                  "name": "det2",
+                  "width": "fill_container",
+                  "padding": [
+                    8,
+                    0,
+                    0,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "XlRWV",
+                      "name": "detxt2",
+                      "fill": "#C4F82A",
+                      "content": "DETECTED: BEATPORT CHART",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal",
+                      "letterSpacing": 2
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "ccOnU",
+              "name": "bw2",
+              "width": "fill_container",
+              "padding": [
+                32,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "GtZJM",
+                  "name": "bt2",
+                  "fill": "#C4F82A",
+                  "padding": [
+                    14,
+                    36
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "YMjlg",
+                      "name": "btx2",
+                      "fill": "#111111",
+                      "content": "SYNC TO SPOTIFY",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 12,
+                      "fontWeight": "500",
+                      "letterSpacing": 2
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "TgUHH",
+      "x": -61,
+      "y": 85,
+      "name": "V2 - 03 Error State",
+      "width": 1280,
+      "height": 720,
+      "fill": "#111111",
+      "layout": "vertical",
+      "padding": [
+        80,
+        0,
+        0,
+        360
+      ],
+      "children": [
+        {
+          "type": "frame",
+          "id": "rj93c",
+          "name": "c3",
+          "width": 560,
+          "layout": "vertical",
+          "children": [
+            {
+              "type": "text",
+              "id": "QYCYR",
+              "name": "lg3",
+              "fill": "#E8E4DE",
+              "content": "DJSUPPORT",
+              "fontFamily": "Inter",
+              "fontSize": 32,
+              "fontWeight": "800",
+              "letterSpacing": 3
+            },
+            {
+              "type": "frame",
+              "id": "yRybE",
+              "name": "st3",
+              "width": "fill_container",
+              "padding": [
+                12,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "M7q2W",
+                  "name": "stt3",
+                  "fill": "#A1A1AA",
+                  "content": "SYNC BEATPORT PLAYLISTS TO SPOTIFY",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 12,
+                  "fontWeight": "normal",
+                  "letterSpacing": 2.5
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "CXn36",
+              "name": "sr3",
+              "width": "fill_container",
+              "gap": 8,
+              "padding": [
+                32,
+                0,
+                0,
+                0
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "ellipse",
+                  "id": "PzXqT",
+                  "name": "d3",
+                  "fill": "#C4F82A",
+                  "width": 8,
+                  "height": 8
+                },
+                {
+                  "type": "text",
+                  "id": "n8GCV",
+                  "name": "sxt3",
+                  "fill": "#A1A1AA",
+                  "content": "SPOTIFY CONNECTED",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 12,
+                  "fontWeight": "normal",
+                  "letterSpacing": 2
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "0KAHk",
+              "name": "errWrap3",
+              "width": "fill_container",
+              "layout": "vertical",
+              "padding": [
+                48,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "pteNk",
+                  "name": "errBlock3",
+                  "width": "fill_container",
+                  "stroke": {
+                    "align": "inside",
+                    "thickness": {
+                      "left": 2
+                    },
+                    "fill": "#F87171"
+                  },
+                  "layout": "vertical",
+                  "gap": 8,
+                  "padding": [
+                    16,
+                    0,
+                    16,
+                    20
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "e9Csq",
+                      "name": "errTitle3",
+                      "fill": "#F87171",
+                      "content": "SYNC FAILED",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 14,
+                      "fontWeight": "700",
+                      "letterSpacing": 2
+                    },
+                    {
+                      "type": "text",
+                      "id": "S4fJe",
+                      "name": "errDesc3",
+                      "fill": "#F87171",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "unable to reach spotify api. check your connection and try again.",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 13,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "gKGUi",
+                      "name": "urlText",
+                      "fill": "#71717A",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "https://www.beatport.com/chart/techno-essentials/893421",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "0xQ3q",
+                  "name": "bw3",
+                  "width": "fill_container",
+                  "padding": [
+                    24,
+                    0,
+                    0,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "7VlVL",
+                      "name": "bt3",
+                      "fill": "#C4F82A",
+                      "padding": [
+                        14,
+                        32
+                      ],
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "o00pE",
+                          "name": "btx3",
+                          "fill": "#111111",
+                          "content": "RETRY SYNC",
+                          "fontFamily": "IBM Plex Mono",
+                          "fontSize": 12,
+                          "fontWeight": "500",
+                          "letterSpacing": 2
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "aRNJW",
+      "x": -2821,
+      "y": 905,
+      "name": "V2 - 04 Progress State",
+      "width": 1280,
+      "height": 720,
+      "fill": "#111111",
+      "layout": "vertical",
+      "padding": [
+        80,
+        0,
+        0,
+        0
+      ],
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "frame",
+          "id": "XTYL2",
+          "name": "logoWrap4",
+          "width": 560,
+          "layout": "vertical",
+          "gap": 4,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "FZA8A",
+              "name": "logo4",
+              "fill": "#C4F82A",
+              "content": "DJSUPPORT",
+              "fontFamily": "Inter",
+              "fontSize": 32,
+              "fontWeight": "800",
+              "letterSpacing": 4
+            },
+            {
+              "type": "text",
+              "id": "3I2yz",
+              "name": "sub4",
+              "fill": "#A1A1AA",
+              "content": "SYNC BEATPORT PLAYLISTS TO SPOTIFY",
+              "fontFamily": "IBM Plex Mono",
+              "fontSize": 11,
+              "fontWeight": "normal",
+              "letterSpacing": 3
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "BE65J",
+          "name": "statusRow4",
+          "gap": 8,
+          "padding": [
+            24,
+            0,
+            40,
+            0
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "ellipse",
+              "id": "4Whmd",
+              "name": "dot4",
+              "fill": "#C4F82A",
+              "width": 8,
+              "height": 8
+            },
+            {
+              "type": "text",
+              "id": "VO7BJ",
+              "name": "statusTxt4",
+              "fill": "#A1A1AA",
+              "content": "CONNECTED TO SPOTIFY",
+              "fontFamily": "IBM Plex Mono",
+              "fontSize": 11,
+              "fontWeight": "normal",
+              "letterSpacing": 2
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "hzQrB",
+          "name": "progBlock",
+          "width": 560,
+          "layout": "vertical",
+          "gap": 16,
+          "children": [
+            {
+              "type": "frame",
+              "id": "30pAy",
+              "name": "progHeader",
+              "width": "fill_container",
+              "justifyContent": "space_between",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "0QepN",
+                  "name": "progLabel",
+                  "fill": "#E8E4DE",
+                  "content": "MATCHING TRACKS",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 12,
+                  "fontWeight": "700",
+                  "letterSpacing": 2
+                },
+                {
+                  "type": "text",
+                  "id": "s5OJl",
+                  "name": "progCount",
+                  "fill": "#C4F82A",
+                  "content": "13/20",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 12,
+                  "fontWeight": "700"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "HKYvC",
+              "name": "barBg",
+              "width": "fill_container",
+              "height": 4,
+              "fill": "#2A2A2E",
+              "children": [
+                {
+                  "type": "rectangle",
+                  "id": "CAbqa",
+                  "name": "barFill",
+                  "fill": "#C4F82A",
+                  "width": 364,
+                  "height": 4
+                }
+              ]
+            },
+            {
+              "type": "text",
+              "id": "bJUKg",
+              "name": "trackLine",
+              "fill": "#9CA3AF",
+              "content": "Adam Beyer — Teach Me (Original Mix)",
+              "fontFamily": "IBM Plex Mono",
+              "fontSize": 12,
+              "fontWeight": "normal"
+            },
+            {
+              "type": "rectangle",
+              "id": "4um7o",
+              "name": "divider",
+              "fill": "#2A2A2E",
+              "width": "fill_container",
+              "height": 1
+            },
+            {
+              "type": "frame",
+              "id": "YwYyw",
+              "name": "recentFrame",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 6,
+              "padding": [
+                12,
+                0,
+                0,
+                0
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "imish",
+                  "name": "recentLabel",
+                  "fill": "#71717A",
+                  "content": "RECENTLY MATCHED",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 10,
+                  "fontWeight": "normal",
+                  "letterSpacing": 2
+                },
+                {
+                  "type": "text",
+                  "id": "rk5a2",
+                  "name": "track1",
+                  "fill": "#52525B",
+                  "content": "✓ Charlotte de Witte — Overdrive (98%)",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "O1Zu5",
+                  "name": "track2",
+                  "fill": "#52525B",
+                  "content": "✓ Amelie Lens — Higher (92%)",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "wDYlN",
+                  "name": "track3",
+                  "fill": "#52525B",
+                  "content": "✓ ANNA — Intentions (89%)",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "rKEll",
+      "x": -1441,
+      "y": 905,
+      "name": "V2 - 05 Results State",
+      "width": 1280,
+      "height": 720,
+      "fill": "#111111",
+      "layout": "vertical",
+      "padding": [
+        80,
+        0,
+        0,
+        0
+      ],
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "frame",
+          "id": "uiqqY",
+          "name": "lw5",
+          "width": 560,
+          "layout": "vertical",
+          "gap": 4,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "wcXQK",
+              "name": "l5",
+              "fill": "#C4F82A",
+              "content": "DJSUPPORT",
+              "fontFamily": "Inter",
+              "fontSize": 32,
+              "fontWeight": "800",
+              "letterSpacing": 4
+            },
+            {
+              "type": "text",
+              "id": "ikGl8",
+              "name": "s5",
+              "fill": "#A1A1AA",
+              "content": "SYNC BEATPORT PLAYLISTS TO SPOTIFY",
+              "fontFamily": "IBM Plex Mono",
+              "fontSize": 11,
+              "fontWeight": "normal",
+              "letterSpacing": 3
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "S6WsZ",
+          "name": "sr5",
+          "gap": 8,
+          "padding": [
+            24,
+            0,
+            40,
+            0
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "ellipse",
+              "id": "1dP3Q",
+              "name": "d5",
+              "fill": "#C4F82A",
+              "width": 8,
+              "height": 8
+            },
+            {
+              "type": "text",
+              "id": "o4Hu2",
+              "name": "st5",
+              "fill": "#A1A1AA",
+              "content": "CONNECTED TO SPOTIFY",
+              "fontFamily": "IBM Plex Mono",
+              "fontSize": 11,
+              "fontWeight": "normal",
+              "letterSpacing": 2
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "M5gn0",
+          "name": "resultBlock",
+          "width": 560,
+          "layout": "vertical",
+          "gap": 16,
+          "children": [
+            {
+              "type": "frame",
+              "id": "0n2MI",
+              "name": "resultInfo",
+              "width": "fill_container",
+              "stroke": {
+                "align": "inside",
+                "thickness": {
+                  "left": 2
+                },
+                "fill": "#C4F82A"
+              },
+              "layout": "vertical",
+              "gap": 8,
+              "padding": [
+                0,
+                0,
+                0,
+                16
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "FMXcl",
+                  "name": "playlistName",
+                  "fill": "#E8E4DE",
+                  "content": "Techno Bangers",
+                  "fontFamily": "Inter",
+                  "fontSize": 20,
+                  "fontWeight": "800"
+                },
+                {
+                  "type": "text",
+                  "id": "ZXhzW",
+                  "name": "statsText",
+                  "fill": "#A1A1AA",
+                  "content": "CREATED · 6 TRACKS · 66.7% MATCHED",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 11,
+                  "fontWeight": "normal",
+                  "letterSpacing": 2
+                },
+                {
+                  "type": "frame",
+                  "id": "mVldo",
+                  "name": "openBtn",
+                  "fill": "#C4F82A",
+                  "padding": [
+                    12,
+                    24
+                  ],
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "qBCDl",
+                      "name": "openTxt",
+                      "fill": "#111111",
+                      "content": "OPEN IN SPOTIFY",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 12,
+                      "fontWeight": "700",
+                      "letterSpacing": 2
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "rectangle",
+              "id": "G9ade",
+              "name": "div5a",
+              "fill": "#2A2A2E",
+              "width": "fill_container",
+              "height": 1
+            },
+            {
+              "type": "frame",
+              "id": "3kHin",
+              "name": "matchedRow",
+              "width": "fill_container",
+              "gap": 8,
+              "padding": [
+                12,
+                0
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "kIv5n",
+                  "name": "matchArrow",
+                  "fill": "#A1A1AA",
+                  "content": "▶",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 10,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "3g1Vs",
+                  "name": "matchLabel",
+                  "fill": "#E8E4DE",
+                  "content": "MATCHED TRACKS (4)",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 12,
+                  "fontWeight": "700",
+                  "letterSpacing": 2
+                }
+              ]
+            },
+            {
+              "type": "rectangle",
+              "id": "Vwbxx",
+              "name": "div5b",
+              "fill": "#2A2A2E",
+              "width": "fill_container",
+              "height": 1
+            },
+            {
+              "type": "frame",
+              "id": "raiwy",
+              "name": "unmatchedRow",
+              "width": "fill_container",
+              "gap": 8,
+              "padding": [
+                12,
+                0
+              ],
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "1fpcL",
+                  "name": "unmArrow",
+                  "fill": "#F87171",
+                  "content": "▶",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 10,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "yhpct",
+                  "name": "unmLabel",
+                  "fill": "#F87171",
+                  "content": "UNMATCHED TRACKS (2)",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 12,
+                  "fontWeight": "700",
+                  "letterSpacing": 2
+                }
+              ]
+            },
+            {
+              "type": "rectangle",
+              "id": "j5X3t",
+              "name": "div5c",
+              "fill": "#2A2A2E",
+              "width": "fill_container",
+              "height": 1
+            },
+            {
+              "type": "frame",
+              "id": "dPzgc",
+              "name": "syncBtn5",
+              "width": "fill_container",
+              "fill": "#00000000",
+              "padding": [
+                12,
+                0
+              ],
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "FW5KQ",
+                  "name": "syncTxt5",
+                  "fill": "#71717A",
+                  "content": "SYNC ANOTHER",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 11,
+                  "fontWeight": "normal",
+                  "letterSpacing": 2
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "KMkgX",
+      "x": -61,
+      "y": 905,
+      "name": "V2 - 06 Results Expanded",
+      "width": 1280,
+      "height": 960,
+      "fill": "#111111",
+      "layout": "vertical",
+      "padding": [
+        80,
+        0,
+        0,
+        0
+      ],
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "frame",
+          "id": "Cywtd",
+          "name": "lw6",
+          "width": 560,
+          "layout": "vertical",
+          "gap": 4,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "DqZVo",
+              "name": "l6",
+              "fill": "#C4F82A",
+              "content": "DJSUPPORT",
+              "fontFamily": "Inter",
+              "fontSize": 32,
+              "fontWeight": "800",
+              "letterSpacing": 4
+            },
+            {
+              "type": "text",
+              "id": "L0GtV",
+              "name": "su6",
+              "fill": "#A1A1AA",
+              "content": "SYNC BEATPORT PLAYLISTS TO SPOTIFY",
+              "fontFamily": "IBM Plex Mono",
+              "fontSize": 11,
+              "fontWeight": "normal",
+              "letterSpacing": 3
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "xVkVE",
+          "name": "sr6",
+          "gap": 8,
+          "padding": [
+            24,
+            0,
+            32,
+            0
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "ellipse",
+              "id": "HKy2X",
+              "name": "do6",
+              "fill": "#C4F82A",
+              "width": 8,
+              "height": 8
+            },
+            {
+              "type": "text",
+              "id": "NvBcY",
+              "name": "stx6",
+              "fill": "#A1A1AA",
+              "content": "CONNECTED TO SPOTIFY",
+              "fontFamily": "IBM Plex Mono",
+              "fontSize": 11,
+              "fontWeight": "normal",
+              "letterSpacing": 2
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "wOqKT",
+          "name": "rBlock6",
+          "width": 560,
+          "layout": "vertical",
+          "gap": 16,
+          "children": [
+            {
+              "type": "frame",
+              "id": "LPYky",
+              "name": "rInfo6",
+              "width": "fill_container",
+              "stroke": {
+                "align": "inside",
+                "thickness": {
+                  "left": 2
+                },
+                "fill": "#C4F82A"
+              },
+              "layout": "vertical",
+              "gap": 8,
+              "padding": [
+                0,
+                0,
+                0,
+                16
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "UtAWD",
+                  "name": "pName6",
+                  "fill": "#E8E4DE",
+                  "content": "Techno Bangers",
+                  "fontFamily": "Inter",
+                  "fontSize": 20,
+                  "fontWeight": "800"
+                },
+                {
+                  "type": "text",
+                  "id": "iNH3u",
+                  "name": "stats6",
+                  "fill": "#A1A1AA",
+                  "content": "CREATED · 6 TRACKS · 66.7% MATCHED",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 11,
+                  "fontWeight": "normal",
+                  "letterSpacing": 2
+                },
+                {
+                  "type": "frame",
+                  "id": "atPwv",
+                  "name": "obtn6",
+                  "fill": "#C4F82A",
+                  "padding": [
+                    12,
+                    24
+                  ],
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "JC0AF",
+                      "name": "obtx6",
+                      "fill": "#111111",
+                      "content": "OPEN IN SPOTIFY",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 12,
+                      "fontWeight": "700",
+                      "letterSpacing": 2
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "rectangle",
+              "id": "JWAvY",
+              "name": "divTop",
+              "fill": "#2A2A2E",
+              "width": "fill_container",
+              "height": 1
+            },
+            {
+              "type": "frame",
+              "id": "7X59U",
+              "name": "matchSection",
+              "width": "fill_container",
+              "layout": "vertical",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "xvrHU",
+                  "name": "mHeader",
+                  "width": "fill_container",
+                  "gap": 8,
+                  "padding": [
+                    0,
+                    0,
+                    16,
+                    0
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "iPJLv",
+                      "name": "mArrow",
+                      "fill": "#C4F82A",
+                      "content": "▼",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 10,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "iXYcq",
+                      "name": "mLabel",
+                      "fill": "#E8E4DE",
+                      "content": "MATCHED TRACKS (4)",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 12,
+                      "fontWeight": "700",
+                      "letterSpacing": 2
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "vIzbC",
+                  "name": "tblHeader",
+                  "width": "fill_container",
+                  "padding": [
+                    8,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "vtz7c",
+                      "name": "thSource",
+                      "fill": "#9CA3AF",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "SOURCE",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 10,
+                      "fontWeight": "normal",
+                      "letterSpacing": 2
+                    },
+                    {
+                      "type": "text",
+                      "id": "hCJkr",
+                      "name": "thMatch",
+                      "fill": "#9CA3AF",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "SPOTIFY MATCH",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 10,
+                      "fontWeight": "normal",
+                      "letterSpacing": 2
+                    },
+                    {
+                      "type": "text",
+                      "id": "t9wxM",
+                      "name": "thScore",
+                      "fill": "#9CA3AF",
+                      "content": "SCORE",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 10,
+                      "fontWeight": "normal",
+                      "letterSpacing": 2
+                    }
+                  ]
+                },
+                {
+                  "type": "rectangle",
+                  "id": "tzEJ7",
+                  "name": "divTh",
+                  "fill": "#333333",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "xw51T",
+                  "name": "row1",
+                  "width": "fill_container",
+                  "padding": [
+                    10,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "nvZhk",
+                      "name": "r1s",
+                      "fill": "#E8E4DE",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Adam Beyer — Teach Me",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "qAVvU",
+                      "name": "r1m",
+                      "fill": "#E8E4DE",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Adam Beyer — Teach Me",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "jWlQa",
+                      "name": "r1c",
+                      "fill": "#C4F82A",
+                      "content": "95",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 11,
+                      "fontWeight": "700"
+                    }
+                  ]
+                },
+                {
+                  "type": "rectangle",
+                  "id": "Fooxv",
+                  "name": "d1",
+                  "fill": "#2A2A2E",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "57Hjp",
+                  "name": "row2",
+                  "width": "fill_container",
+                  "padding": [
+                    10,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "BQgT4",
+                      "name": "r2s",
+                      "fill": "#E8E4DE",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Charlotte de Witte — Overdrive",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "gV8YV",
+                      "name": "r2m",
+                      "fill": "#E8E4DE",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Charlotte de Witte — Overdrive",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "742xI",
+                      "name": "r2c",
+                      "fill": "#C4F82A",
+                      "content": "98",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 11,
+                      "fontWeight": "700"
+                    }
+                  ]
+                },
+                {
+                  "type": "rectangle",
+                  "id": "N7Qhi",
+                  "name": "d2",
+                  "fill": "#2A2A2E",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "ZbUX9",
+                  "name": "row3",
+                  "width": "fill_container",
+                  "padding": [
+                    10,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "O1jmr",
+                      "name": "r3s",
+                      "fill": "#E8E4DE",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Amelie Lens — Higher",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "S9XYS",
+                      "name": "r3m",
+                      "fill": "#E8E4DE",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Amelie Lens — Higher",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "uKISw",
+                      "name": "r3c",
+                      "fill": "#C4F82A",
+                      "content": "92",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 11,
+                      "fontWeight": "700"
+                    }
+                  ]
+                },
+                {
+                  "type": "rectangle",
+                  "id": "S9vsT",
+                  "name": "d3",
+                  "fill": "#2A2A2E",
+                  "width": "fill_container",
+                  "height": 1
+                },
+                {
+                  "type": "frame",
+                  "id": "3KO2F",
+                  "name": "row4",
+                  "width": "fill_container",
+                  "padding": [
+                    10,
+                    0
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "SjiKx",
+                      "name": "r4s",
+                      "fill": "#E8E4DE",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "ANNA — Intentions",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "GLcIg",
+                      "name": "r4m",
+                      "fill": "#E8E4DE",
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "ANNA — Intentions",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 11,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "rAEya",
+                      "name": "r4c",
+                      "fill": "#C4F82A",
+                      "content": "89",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 11,
+                      "fontWeight": "700"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "rectangle",
+              "id": "hXmbl",
+              "name": "divUm",
+              "fill": "#2A2A2E",
+              "width": "fill_container",
+              "height": 1
+            },
+            {
+              "type": "frame",
+              "id": "gzbfZ",
+              "name": "unmSection",
+              "width": "fill_container",
+              "layout": "vertical",
+              "gap": 12,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "Zi6WV",
+                  "name": "umHeader",
+                  "width": "fill_container",
+                  "gap": 8,
+                  "padding": [
+                    0,
+                    0,
+                    8,
+                    0
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "qGXnb",
+                      "name": "umArrow",
+                      "fill": "#F87171",
+                      "content": "▼",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 10,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "v4snH",
+                      "name": "umLabel",
+                      "fill": "#F87171",
+                      "content": "UNMATCHED TRACKS (2)",
+                      "fontFamily": "IBM Plex Mono",
+                      "fontSize": 12,
+                      "fontWeight": "700",
+                      "letterSpacing": 2
+                    }
+                  ]
+                },
+                {
+                  "type": "text",
+                  "id": "tbmZ6",
+                  "name": "umTrack1",
+                  "fill": "#94A3B8",
+                  "content": "— Obscure Artist — Underground Track",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                },
+                {
+                  "type": "text",
+                  "id": "hFWj6",
+                  "name": "umTrack2",
+                  "fill": "#94A3B8",
+                  "content": "— Unknown Producer — Rare Remix",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 11,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "rectangle",
+              "id": "6UPv5",
+              "name": "divBot",
+              "fill": "#2A2A2E",
+              "width": "fill_container",
+              "height": 1
+            },
+            {
+              "type": "frame",
+              "id": "K0g9Z",
+              "name": "syncBtn6",
+              "width": "fill_container",
+              "fill": "#00000000",
+              "padding": [
+                12,
+                0
+              ],
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "tQE25",
+                  "name": "syncTxt6",
+                  "fill": "#71717A",
+                  "content": "SYNC ANOTHER",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 11,
+                  "fontWeight": "normal",
+                  "letterSpacing": 2
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "frame",
+      "id": "21OvP",
+      "x": -1441,
+      "y": 1965,
+      "name": "V2 - 07 Empty State",
+      "width": 1280,
+      "height": 720,
+      "fill": "#111111",
+      "layout": "vertical",
+      "padding": [
+        80,
+        0,
+        0,
+        0
+      ],
+      "alignItems": "center",
+      "children": [
+        {
+          "type": "frame",
+          "id": "cBg3i",
+          "name": "logoWrap7",
+          "width": 560,
+          "layout": "vertical",
+          "gap": 4,
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "text",
+              "id": "7rAG1",
+              "name": "logo7",
+              "fill": "#C4F82A",
+              "content": "DJSUPPORT",
+              "fontFamily": "Inter",
+              "fontSize": 32,
+              "fontWeight": "800",
+              "letterSpacing": 4
+            },
+            {
+              "type": "text",
+              "id": "ehA6u",
+              "name": "sub7",
+              "fill": "#A1A1AA",
+              "content": "SYNC BEATPORT PLAYLISTS TO SPOTIFY",
+              "fontFamily": "IBM Plex Mono",
+              "fontSize": 11,
+              "fontWeight": "normal",
+              "letterSpacing": 3
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Qxh7V",
+          "name": "statusRow7",
+          "gap": 8,
+          "padding": [
+            24,
+            0,
+            40,
+            0
+          ],
+          "alignItems": "center",
+          "children": [
+            {
+              "type": "ellipse",
+              "id": "mkVdf",
+              "name": "dot7",
+              "fill": "#C4F82A",
+              "width": 8,
+              "height": 8
+            },
+            {
+              "type": "text",
+              "id": "d3vMl",
+              "name": "statusTxt7",
+              "fill": "#A1A1AA",
+              "content": "CONNECTED TO SPOTIFY",
+              "fontFamily": "IBM Plex Mono",
+              "fontSize": 11,
+              "fontWeight": "normal",
+              "letterSpacing": 2
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "jr89i",
+          "name": "resultBlock7",
+          "width": 560,
+          "layout": "vertical",
+          "gap": 16,
+          "children": [
+            {
+              "type": "frame",
+              "id": "juCZ9",
+              "name": "resultInfo7",
+              "width": "fill_container",
+              "stroke": {
+                "align": "inside",
+                "thickness": {
+                  "left": 2
+                },
+                "fill": "#C4F82A"
+              },
+              "layout": "vertical",
+              "gap": 8,
+              "padding": [
+                0,
+                0,
+                0,
+                16
+              ],
+              "children": [
+                {
+                  "type": "text",
+                  "id": "pUo1h",
+                  "name": "pName7",
+                  "fill": "#E8E4DE",
+                  "content": "Techno Bangers",
+                  "fontFamily": "Inter",
+                  "fontSize": 20,
+                  "fontWeight": "800"
+                },
+                {
+                  "type": "text",
+                  "id": "shCY6",
+                  "name": "stats7",
+                  "fill": "#A1A1AA",
+                  "content": "CREATED · 0 TRACKS · 0% MATCHED",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 11,
+                  "fontWeight": "normal",
+                  "letterSpacing": 2
+                },
+                {
+                  "type": "text",
+                  "id": "K5g89",
+                  "name": "emptyMsg",
+                  "fill": "#9CA3AF",
+                  "textGrowth": "fixed-width",
+                  "width": "fill_container",
+                  "content": "No tracks could be matched on Spotify. This can happen with very new or obscure releases.",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 12,
+                  "fontWeight": "normal"
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "q2PcT",
+              "name": "tryBtn7",
+              "fill": "#C4F82A",
+              "padding": [
+                12,
+                24
+              ],
+              "justifyContent": "center",
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "5Goij",
+                  "name": "tryTxt7",
+                  "fill": "#111111",
+                  "content": "TRY DIFFERENT URL",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 12,
+                  "fontWeight": "700",
+                  "letterSpacing": 2
+                }
+              ]
+            },
+            {
+              "type": "frame",
+              "id": "i7Z2s",
+              "name": "lowerLink7",
+              "padding": [
+                4,
+                0
+              ],
+              "justifyContent": "center",
+              "children": [
+                {
+                  "type": "text",
+                  "id": "I4W30",
+                  "name": "lowerTxt7",
+                  "fill": "#71717A",
+                  "content": "LOWER MATCH THRESHOLD",
+                  "fontFamily": "IBM Plex Mono",
+                  "fontSize": 11,
+                  "fontWeight": "normal",
+                  "letterSpacing": 2
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
