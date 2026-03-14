@@ -645,7 +645,14 @@ def label(
 @click.option("--port", default=8000, show_default=True, help="Port to bind to.")
 def web(host: str, port: int):
     """Start the djsupport web UI."""
-    import uvicorn
+    try:
+        import uvicorn
+    except ImportError:
+        click.echo(
+            "Web UI requires extra dependencies. Install with:\n"
+            "  pip install djsupport[web]"
+        )
+        raise SystemExit(1)
 
     click.echo(f"Starting djsupport web UI at http://{host}:{port}")
     uvicorn.run("djsupport.web:app", host=host, port=port)

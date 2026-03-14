@@ -8,7 +8,7 @@ djsupport syncs Rekordbox playlists, Beatport DJ charts, and Beatport record lab
 
 - Python 3.10+ (uses `str | None` union syntax)
 - Click for CLI
-- FastAPI + uvicorn for web UI
+- FastAPI + uvicorn for web UI (optional: `pip install djsupport[web]`)
 - spotipy for Spotify API
 - rapidfuzz for fuzzy string matching
 - requests for Beatport HTTP fetching
@@ -42,6 +42,7 @@ docs/           # Plans, reports, and solution docs
 
 ```bash
 pip install -e ".[dev]"    # Install in dev mode with test deps
+pip install -e ".[dev,web]" # Install with test deps + web UI (FastAPI/uvicorn)
 djsupport list <xml>       # List playlists from Rekordbox XML
 djsupport sync <xml>       # Sync playlists to Spotify
 djsupport sync <xml> --dry-run  # Preview without modifying Spotify

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- FastAPI and uvicorn are now optional dependencies — install with `pip install djsupport[web]`
+- `djsupport web` shows a friendly install hint when web dependencies are missing
+
 ### Added
 
 - `djsupport web` command — starts a web UI at localhost:8000 for syncing Beatport playlists to Spotify
