@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>djsupport</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;700&family=Inter:wght@800&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
@@ -48,13 +49,22 @@
 
         /* Logo */
         .logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
             font-family: 'Inter', sans-serif;
             font-weight: 800;
             font-size: 32px;
             letter-spacing: 3px;
             color: var(--text-primary);
+            justify-content: center;
         }
         .logo--accent { color: var(--accent); letter-spacing: 4px; }
+        .logo img {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+        }
         .subtitle {
             margin-top: 12px;
             font-size: 12px;
@@ -363,6 +373,7 @@
             .container { padding: 56px 24px 40px; }
             .container--left { margin-left: 0; }
             .logo { font-size: 24px; }
+            .logo img { width: 32px; height: 32px; }
             .input-box, .input-underline { font-size: 13px; }
             .results-table td { font-size: 10px; max-width: 120px; }
         }
@@ -371,7 +382,7 @@
 <body>
     <!-- ===== INPUT STATE ===== -->
     <div id="input-section" class="container container--center">
-        <div class="logo">DJSUPPORT</div>
+        <div class="logo"><img src="/static/logo.png" alt="djsupport logo">DJSUPPORT</div>
         <div class="subtitle">SYNC BEATPORT PLAYLISTS TO SPOTIFY</div>
         <div id="auth-status" class="status-row"></div>
 
@@ -394,7 +405,7 @@
 
     <!-- ===== PROGRESS STATE ===== -->
     <div id="progress-section" class="container container--center hidden fade-in">
-        <div class="logo logo--accent">DJSUPPORT</div>
+        <div class="logo logo--accent"><img src="/static/logo.png" alt="djsupport logo">DJSUPPORT</div>
         <div class="subtitle subtitle--center">SYNC BEATPORT PLAYLISTS TO SPOTIFY</div>
         <div class="status-row status-row--center">
             <span class="status-dot"></span>
@@ -419,7 +430,7 @@
 
     <!-- ===== RESULTS STATE ===== -->
     <div id="results-section" class="container container--center hidden fade-in">
-        <div class="logo logo--accent">DJSUPPORT</div>
+        <div class="logo logo--accent"><img src="/static/logo.png" alt="djsupport logo">DJSUPPORT</div>
         <div class="subtitle subtitle--center">SYNC BEATPORT PLAYLISTS TO SPOTIFY</div>
         <div class="status-row status-row--center">
             <span class="status-dot"></span>
@@ -458,7 +469,7 @@
 
     <!-- ===== ERROR STATE ===== -->
     <div id="error-section" class="container container--left hidden fade-in">
-        <div class="logo">DJSUPPORT</div>
+        <div class="logo"><img src="/static/logo.png" alt="djsupport logo">DJSUPPORT</div>
         <div class="subtitle">SYNC BEATPORT PLAYLISTS TO SPOTIFY</div>
         <div class="status-row">
             <span class="status-dot"></span>

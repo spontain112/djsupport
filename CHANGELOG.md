@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Logo and favicon images for web UI — neon green vinyl/sync icon and headphones icon
 - `djsupport web` command — starts a web UI at localhost:8000 for syncing Beatport playlists to Spotify
 - Web frontend with responsive single-page UI (Tailwind CSS) — paste URL, see real-time progress via SSE, view results with Spotify link
 - FastAPI backend with Spotify OAuth browser flow, background sync, and single-job enforcement
