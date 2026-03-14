@@ -27,6 +27,7 @@ build/
 # Claude Code session data (local-only)
 .claude/*
 !.claude/docs/
+compound-engineering.local.md
 
 # IDE files
 .vscode/
@@ -35,6 +36,11 @@ build/
 *.swp
 *.swo
 *~
+
+# Generated artifacts
+.playwright-cli/
+design-exports/
+screenshots/
 
 # OS artifacts
 .DS_Store
