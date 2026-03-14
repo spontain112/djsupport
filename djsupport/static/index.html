@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>djsupport</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Inter', system-ui, -apple-system, sans-serif; }
+        .fade-in { animation: fadeIn 0.3s ease-in; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    </style>
+</head>
+<body class="bg-gray-950 text-gray-100 min-h-screen">
+    <div class="max-w-2xl mx-auto px-4 py-12">
+        <!-- Header -->
+        <div class="mb-10 text-center">
+            <h1 class="text-3xl font-bold tracking-tight">djsupport</h1>
+            <p class="text-gray-400 mt-2">Sync Beatport playlists to Spotify</p>
+            <div id="auth-status" class="mt-3"></div>
+        </div>
+
+        <!-- Input State -->
+        <div id="input-section" class="space-y-4">
+            <div>
+                <label for="url-input" class="block text-sm font-medium text-gray-400 mb-2">Beatport URL</label>
+                <input
+                    id="url-input"
+                    type="url"
+                    placeholder="https://www.beatport.com/chart/name/123"
+                    class="w-full px-4 py-3 bg-gray-900 border border-gray-700 rounded-lg text-gray-100 placeholder-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition"
+                />
+                <p id="url-hint" class="mt-1.5 text-sm text-gray-500 hidden"></p>
+                <p id="url-error" class="mt-1.5 text-sm text-red-400 hidden"></p>
+            </div>
+            <button
+                id="sync-btn"
+                onclick="startSync()"
+                disabled
+                class="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 disabled:text-gray-500 text-white font-medium rounded-lg transition disabled:cursor-not-allowed"
+            >
+                Sync to Spotify
+            </button>
+        </div>
+
+        <!-- Progress State -->
+        <div id="progress-section" class="hidden fade-in space-y-4">
+            <div class="bg-gray-900 border border-gray-800 rounded-lg p-6">
+                <div class="flex justify-between text-sm text-gray-400 mb-2">
+                    <span id="progress-phase">Fetching...</span>
+                    <span id="progress-count"></span>
+                </div>
+                <div class="w-full bg-gray-800 rounded-full h-2.5">
+                    <div id="progress-bar" class="bg-indigo-500 h-2.5 rounded-full transition-all duration-300" style="width: 0%"></div>
+                </div>
+                <p id="progress-detail" class="mt-3 text-sm text-gray-500 truncate"></p>
+                <div class="mt-4 flex gap-6 text-sm">
+                    <span class="text-green-400"><span id="matched-count">0</span> matched</span>
+                    <span class="text-red-400"><span id="unmatched-count">0</span> unmatched</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Results State -->
+        <div id="results-section" class="hidden fade-in space-y-6">
+            <div id="results-summary" class="bg-gray-900 border border-gray-800 rounded-lg p-6"></div>
+            <div id="results-matched" class="hidden"></div>
+            <div id="results-unmatched" class="hidden"></div>
+            <button
+                onclick="resetUI()"
+                class="w-full py-3 px-4 bg-gray-800 hover:bg-gray-700 text-gray-300 font-medium rounded-lg transition"
+            >
+                Sync Another
+            </button>
+        </div>
+
+        <!-- Error State -->
+        <div id="error-section" class="hidden fade-in">
+            <div class="bg-red-900/30 border border-red-800 rounded-lg p-6">
+                <p class="text-red-300 font-medium">Sync Failed</p>
+                <p id="error-message" class="text-red-400 text-sm mt-1"></p>
+                <button
+                    onclick="resetUI()"
+                    class="mt-4 py-2 px-4 bg-gray-800 hover:bg-gray-700 text-gray-300 text-sm rounded-lg transition"
+                >
+                    Try Again
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const urlInput = document.getElementById('url-input');
+        const syncBtn = document.getElementById('sync-btn');
+        const urlHint = document.getElementById('url-hint');
+        const urlError = document.getElementById('url-error');
+
+        let currentJobId = null;
+        let matchedTotal = 0;
+        let unmatchedTotal = 0;
+
+        // Check auth on load
+        async function checkAuth() {
+            try {
+                const res = await fetch('/auth/status');
+                const data = await res.json();
+                const el = document.getElementById('auth-status');
+                if (data.authenticated) {
+                    el.innerHTML = '<span class="inline-flex items-center gap-1.5 text-sm text-green-400"><span class="w-2 h-2 bg-green-400 rounded-full"></span>Connected to Spotify</span>';
+                } else {
+                    el.innerHTML = '<a href="/auth/login" class="inline-flex items-center gap-1.5 text-sm text-yellow-400 hover:text-yellow-300"><span class="w-2 h-2 bg-yellow-400 rounded-full"></span>Connect to Spotify</a>';
+                }
+            } catch {
+                document.getElementById('auth-status').innerHTML = '<span class="text-sm text-red-400">Could not check auth status</span>';
+            }
+        }
+        checkAuth();
+
+        // URL validation
+        urlInput.addEventListener('input', () => {
+            const url = urlInput.value.trim();
+            urlError.classList.add('hidden');
+
+            if (!url) {
+                urlHint.classList.add('hidden');
+                syncBtn.disabled = true;
+                return;
+            }
+
+            if (url.includes('beatport.com/chart/')) {
+                urlHint.textContent = 'Detected: Beatport chart';
+                urlHint.className = 'mt-1.5 text-sm text-indigo-400';
+                syncBtn.disabled = false;
+            } else if (url.includes('beatport.com/label/')) {
+                urlHint.textContent = 'Detected: Beatport label';
+                urlHint.className = 'mt-1.5 text-sm text-indigo-400';
+                syncBtn.disabled = false;
+            } else {
+                urlHint.textContent = 'Enter a Beatport chart or label URL';
+                urlHint.className = 'mt-1.5 text-sm text-yellow-400';
+                syncBtn.disabled = true;
+            }
+        });
+
+        async function startSync() {
+            const url = urlInput.value.trim();
+            if (!url) return;
+
+            matchedTotal = 0;
+            unmatchedTotal = 0;
+
+            // Switch to progress state
+            document.getElementById('input-section').classList.add('hidden');
+            document.getElementById('progress-section').classList.remove('hidden');
+            document.getElementById('results-section').classList.add('hidden');
+            document.getElementById('error-section').classList.add('hidden');
+
+            try {
+                const res = await fetch('/sync', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url }),
+                });
+
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Failed to start sync');
+                }
+
+                const data = await res.json();
+                currentJobId = data.job_id;
+                listenProgress(data.job_id);
+            } catch (e) {
+                showError(e.message);
+            }
+        }
+
+        function listenProgress(jobId) {
+            const evtSource = new EventSource(`/sync/${jobId}/progress`);
+
+            evtSource.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+
+                if (data.phase === 'complete') {
+                    evtSource.close();
+                    fetchResult(jobId);
+                    return;
+                }
+
+                if (data.phase === 'error') {
+                    evtSource.close();
+                    showError(data.detail);
+                    return;
+                }
+
+                // Update progress UI
+                document.getElementById('progress-phase').textContent =
+                    data.phase === 'fetching' ? 'Fetching from Beatport...' :
+                    data.phase === 'matching' ? 'Matching tracks...' :
+                    data.phase === 'syncing' ? 'Updating Spotify playlist...' : data.phase;
+
+                if (data.total > 0) {
+                    const pct = Math.round((data.current / data.total) * 100);
+                    document.getElementById('progress-bar').style.width = pct + '%';
+                    document.getElementById('progress-count').textContent = `${data.current}/${data.total}`;
+                }
+
+                document.getElementById('progress-detail').textContent = data.detail;
+            };
+
+            evtSource.onerror = () => {
+                evtSource.close();
+                showError('Lost connection to server');
+            };
+        }
+
+        async function fetchResult(jobId) {
+            try {
+                const res = await fetch(`/sync/${jobId}/result`);
+                const data = await res.json();
+
+                if (data.error) {
+                    showError(data.error);
+                    return;
+                }
+
+                showResults(data);
+            } catch (e) {
+                showError('Failed to fetch results');
+            }
+        }
+
+        function showResults(data) {
+            document.getElementById('progress-section').classList.add('hidden');
+            document.getElementById('results-section').classList.remove('hidden');
+
+            const pl = data.playlists[0];
+            if (!pl) return;
+
+            const spotifyLink = pl.spotify_url
+                ? `<a href="${pl.spotify_url}" target="_blank" class="inline-flex items-center gap-2 mt-4 py-2 px-4 bg-green-600 hover:bg-green-500 text-white text-sm font-medium rounded-lg transition">Open in Spotify</a>`
+                : '';
+
+            document.getElementById('results-summary').innerHTML = `
+                <div class="flex justify-between items-start">
+                    <div>
+                        <h2 class="text-lg font-semibold">${pl.name}</h2>
+                        <p class="text-sm text-gray-400 mt-1">${pl.action} &middot; ${pl.total} tracks &middot; ${pl.match_rate.toFixed(1)}% matched</p>
+                    </div>
+                    <div class="text-right">
+                        <span class="text-2xl font-bold text-green-400">${pl.matched.length}</span>
+                        <span class="text-gray-500 text-sm">/ ${pl.total}</span>
+                    </div>
+                </div>
+                ${spotifyLink}
+            `;
+
+            // Matched tracks
+            if (pl.matched.length > 0) {
+                const matchedEl = document.getElementById('results-matched');
+                matchedEl.classList.remove('hidden');
+                matchedEl.innerHTML = `
+                    <details class="bg-gray-900 border border-gray-800 rounded-lg">
+                        <summary class="px-6 py-4 cursor-pointer text-sm font-medium text-gray-300 hover:text-gray-100">
+                            Matched Tracks (${pl.matched.length})
+                        </summary>
+                        <div class="px-6 pb-4 max-h-80 overflow-y-auto">
+                            <table class="w-full text-sm">
+                                <thead class="text-gray-500 text-left">
+                                    <tr><th class="pb-2">Source</th><th class="pb-2">Spotify Match</th><th class="pb-2 text-right">Score</th></tr>
+                                </thead>
+                                <tbody class="text-gray-300">
+                                    ${pl.matched.map(m => `
+                                        <tr class="border-t border-gray-800">
+                                            <td class="py-2 pr-3 truncate max-w-[200px]">${m.source_name}</td>
+                                            <td class="py-2 pr-3 truncate max-w-[200px]">${m.spotify_artist} - ${m.spotify_name}</td>
+                                            <td class="py-2 text-right ${m.score >= 90 ? 'text-green-400' : 'text-yellow-400'}">${m.score.toFixed(0)}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        </div>
+                    </details>
+                `;
+            }
+
+            // Unmatched tracks
+            if (pl.unmatched.length > 0) {
+                const unmatchedEl = document.getElementById('results-unmatched');
+                unmatchedEl.classList.remove('hidden');
+                unmatchedEl.innerHTML = `
+                    <details class="bg-gray-900 border border-gray-800 rounded-lg">
+                        <summary class="px-6 py-4 cursor-pointer text-sm font-medium text-red-400 hover:text-red-300">
+                            Unmatched Tracks (${pl.unmatched.length})
+                        </summary>
+                        <div class="px-6 pb-4 max-h-60 overflow-y-auto">
+                            <ul class="text-sm text-gray-400 space-y-1">
+                                ${pl.unmatched.map(t => `<li>- ${t}</li>`).join('')}
+                            </ul>
+                        </div>
+                    </details>
+                `;
+            }
+        }
+
+        function showError(message) {
+            document.getElementById('input-section').classList.add('hidden');
+            document.getElementById('progress-section').classList.add('hidden');
+            document.getElementById('results-section').classList.add('hidden');
+            document.getElementById('error-section').classList.remove('hidden');
+            document.getElementById('error-message').textContent = message;
+        }
+
+        function resetUI() {
+            document.getElementById('input-section').classList.remove('hidden');
+            document.getElementById('progress-section').classList.add('hidden');
+            document.getElementById('results-section').classList.add('hidden');
+            document.getElementById('error-section').classList.add('hidden');
+            document.getElementById('results-matched').classList.add('hidden');
+            document.getElementById('results-unmatched').classList.add('hidden');
+            document.getElementById('progress-bar').style.width = '0%';
+            document.getElementById('progress-count').textContent = '';
+            document.getElementById('progress-detail').textContent = '';
+            document.getElementById('matched-count').textContent = '0';
+            document.getElementById('unmatched-count').textContent = '0';
+            currentJobId = null;
+        }
+    </script>
+</body>
+</html>

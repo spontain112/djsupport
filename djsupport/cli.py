@@ -612,3 +612,14 @@ def label(
     if report_path:
         save_report(report, report_path)
         click.echo(f"\nDetailed report saved to {report_path}")
+
+
+@cli.command()
+@click.option("--host", default="127.0.0.1", show_default=True, help="Host to bind to.")
+@click.option("--port", default=8000, show_default=True, help="Port to bind to.")
+def web(host: str, port: int):
+    """Start the djsupport web UI."""
+    import uvicorn
+
+    click.echo(f"Starting djsupport web UI at http://{host}:{port}")
+    uvicorn.run("djsupport.web:app", host=host, port=port)
