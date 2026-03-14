@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `djsupport web` command — starts a web UI at localhost:8000 for syncing Beatport playlists to Spotify
+- Web frontend with responsive single-page UI (Tailwind CSS) — paste URL, see real-time progress via SSE, view results with Spotify link
+- FastAPI backend with Spotify OAuth browser flow, background sync, and single-job enforcement
+- `djsupport/service.py` module — framework-agnostic sync orchestration shared by CLI and web
+- `spotify_playlist_id` field on `PlaylistReport` for constructing Spotify URLs
+- 28 new tests (10 service layer + 18 web endpoints)
 - `djsupport label <url-or-name>` command — import tracks from a Beatport record label into a Spotify playlist
 - Label name search with interactive selection — `djsupport label "Drumcode"` searches Beatport and presents matching labels with latest release info
 - Paginated label fetching with `per_page=150` for efficient large label imports

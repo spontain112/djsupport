@@ -8,17 +8,20 @@ djsupport syncs Rekordbox playlists, Beatport DJ charts, and Beatport record lab
 
 - Python 3.10+ (uses `str | None` union syntax)
 - Click for CLI
+- FastAPI + uvicorn for web UI
 - spotipy for Spotify API
 - rapidfuzz for fuzzy string matching
 - requests for Beatport HTTP fetching
 - python-dotenv for env config
-- pytest, pytest-cov (in `[project.optional-dependencies] dev`)
+- pytest, pytest-cov, httpx (in `[project.optional-dependencies] dev`)
 
 ## Project structure
 
 ```
 djsupport/
   cli.py        # Click CLI entry point
+  web.py        # FastAPI web backend (OAuth, sync endpoints, SSE progress)
+  service.py    # Framework-agnostic sync orchestration (shared by CLI + web)
   rekordbox.py  # XML parser — Track and Playlist dataclasses
   beatport.py   # Beatport chart scraper — __NEXT_DATA__ extraction
   label.py      # Beatport label scraper — paginated track fetching + label search
@@ -28,7 +31,8 @@ djsupport/
   cache.py      # Persistent match cache with retry logic
   state.py      # Playlist ID mapping for incremental sync (source-agnostic)
   report.py     # Post-sync terminal + Markdown reports
-tests/          # pytest suite (280 tests)
+  static/       # Web frontend (index.html with Tailwind CSS)
+tests/          # pytest suite (308 tests)
 docs/           # Plans, reports, and solution docs
   solutions/    # Documented problem solutions (YAML frontmatter, searchable)
   plans/        # Implementation and feature plans
@@ -45,6 +49,8 @@ djsupport library set <xml>     # Save default Rekordbox XML path
 djsupport library show          # Show configured XML path
 djsupport beatport <url>        # Import Beatport chart to Spotify
 djsupport label <url-or-name>  # Import Beatport label to Spotify
+djsupport web                   # Start web UI at localhost:8000
+djsupport web --port 3000       # Custom port
 
 # Sync flags
 djsupport sync --playlist "My Playlist"  # Sync a single playlist
