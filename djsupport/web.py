@@ -4,27 +4,38 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import queue
 import threading
 import uuid
+from contextlib import asynccontextmanager
+from html import escape
 from pathlib import Path
 from threading import Lock
+from typing import Any
 
-from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from spotipy.oauth2 import SpotifyOAuth
 
+from djsupport.report import SyncReport
 from djsupport.service import ProgressEvent, sync_beatport_chart, sync_beatport_label
 from djsupport.spotify import SCOPES, RateLimitError
 
-load_dotenv()
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    from dotenv import load_dotenv
+    load_dotenv()
+    yield
 
 STATIC_DIR = Path(__file__).parent / "static"
 
-app = FastAPI(title="djsupport")
+app = FastAPI(title="djsupport", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
@@ -62,9 +73,12 @@ def auth_status():
     if token and not mgr.is_token_expired(token):
         return {"authenticated": True}
     if token and mgr.is_token_expired(token):
-        refreshed = mgr.refresh_access_token(token["refresh_token"])
-        if refreshed:
-            return {"authenticated": True}
+        try:
+            refreshed = mgr.refresh_access_token(token["refresh_token"])
+            if refreshed:
+                return {"authenticated": True}
+        except Exception:
+            pass
     return {"authenticated": False}
 
 
@@ -80,7 +94,7 @@ def auth_login():
 def auth_callback(code: str | None = None, error: str | None = None):
     """Handle the Spotify OAuth callback."""
     if error:
-        return HTMLResponse(f"<h1>Auth error</h1><p>{error}</p>", status_code=400)
+        return HTMLResponse(f"<h1>Auth error</h1><p>{escape(error)}</p>", status_code=400)
     if not code:
         return HTMLResponse("<h1>Missing code</h1>", status_code=400)
 
@@ -189,14 +203,15 @@ def _run_sync(job: SyncJob, url_type: str) -> None:
         job.error = str(e)
         _on_progress(ProgressEvent(phase="error", detail=str(e)))
     except Exception as e:
-        job.error = str(e)
-        _on_progress(ProgressEvent(phase="error", detail=str(e)))
+        logger.exception("Sync failed")
+        job.error = "An unexpected error occurred during sync"
+        _on_progress(ProgressEvent(phase="error", detail=job.error))
     finally:
         job.done = True
         job.progress_queue.put(None)  # sentinel
 
 
-def _report_to_dict(report) -> dict:
+def _report_to_dict(report: SyncReport) -> dict[str, Any]:
     """Serialize a SyncReport to a JSON-safe dict."""
     playlists = []
     for pl in report.playlists:
@@ -251,7 +266,7 @@ async def sync_progress(job_id: str):
     async def event_stream():
         while True:
             try:
-                event = await asyncio.get_event_loop().run_in_executor(
+                event = await asyncio.get_running_loop().run_in_executor(
                     None, lambda: job.progress_queue.get(timeout=30)
                 )
             except queue.Empty:

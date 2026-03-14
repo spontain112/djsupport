@@ -47,7 +47,7 @@ def match_and_sync_playlist(
     *,
     sp: spotipy.Spotify,
     cache: MatchCache | None,
-    state_mgr: PlaylistStateManager,
+    state_mgr: PlaylistStateManager | None,
     existing_playlists: dict[str, str] | None,
     threshold: int,
     dry_run: bool,

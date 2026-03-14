@@ -1,10 +1,19 @@
 """CLI entry point for djsupport."""
 
+from __future__ import annotations
+
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
+
+if TYPE_CHECKING:
+    import spotipy
+
+    from djsupport.cache import MatchCache
+    from djsupport.state import PlaylistStateManager
 from dotenv import load_dotenv
 
 from djsupport.config import ConfigManager, validate_rekordbox_xml
@@ -58,7 +67,18 @@ def _cli_match_and_sync(
     tracks: list[Track],
     playlist_name: str,
     playlist_path: str,
-    **kwargs,
+    *,
+    sp: spotipy.Spotify,
+    cache: MatchCache | None,
+    state_mgr: PlaylistStateManager | None,
+    existing_playlists: dict[str, str] | None,
+    threshold: int,
+    dry_run: bool,
+    incremental: bool,
+    prefix: str | None,
+    retry_days: int = 7,
+    retry: bool = False,
+    source_type: str = "rekordbox",
 ) -> PlaylistReport:
     """CLI wrapper around service.match_and_sync_playlist with a Click progress bar."""
     # Set up a Click progress bar driven by service callbacks
@@ -78,7 +98,13 @@ def _cli_match_and_sync(
 
         return match_and_sync_playlist(
             tracks, playlist_name, playlist_path,
-            on_progress=_on_progress, **kwargs,
+            sp=sp, cache=cache, state_mgr=state_mgr,
+            existing_playlists=existing_playlists,
+            threshold=threshold, dry_run=dry_run,
+            incremental=incremental, prefix=prefix,
+            retry_days=retry_days, retry=retry,
+            source_type=source_type,
+            on_progress=_on_progress,
         )
 
 
