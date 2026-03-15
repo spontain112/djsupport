@@ -1,5 +1,9 @@
 # CLAUDE.md
 
+## Scope Guard
+- This repo is for djsupport only. Do NOT build Claude Code skills, slash commands, hooks, or other extensions here.
+- If the user asks to build something that is not djsupport-specific, STOP and redirect them to their dedicated Claude Code extensions workspace.
+
 ## Project overview
 
 djsupport syncs Rekordbox playlists, Beatport DJ charts, and Beatport record labels to Spotify. It parses a Rekordbox XML export, scrapes a Beatport chart or label page, fuzzy-matches tracks against Spotify's catalog, and creates/updates Spotify playlists.
