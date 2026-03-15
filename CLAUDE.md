@@ -23,7 +23,7 @@ djsupport/
   web.py        # FastAPI web backend (OAuth, sync endpoints, SSE progress)
   service.py    # Framework-agnostic sync orchestration (shared by CLI + web)
   rekordbox.py  # XML parser — Track and Playlist dataclasses
-  beatport.py   # Beatport chart scraper — __NEXT_DATA__ extraction
+  beatport.py   # Beatport chart scraper — __NEXT_DATA__ extraction, curator name composition
   label.py      # Beatport label scraper — paginated track fetching + label search
   matcher.py    # Fuzzy matching logic against Spotify search
   spotify.py    # Spotify client wrapper (spotipy + OAuth)
