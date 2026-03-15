@@ -174,7 +174,7 @@ def sync_beatport_chart(
 
     Returns a SyncReport.  Raises RateLimitError on excessive rate limiting.
     """
-    from djsupport.beatport import fetch_chart, validate_url
+    from djsupport.beatport import compose_chart_playlist_name, fetch_chart, validate_url
 
     if on_progress:
         on_progress(ProgressEvent(phase="fetching", detail="Validating URL..."))
@@ -182,7 +182,8 @@ def sync_beatport_chart(
 
     if on_progress:
         on_progress(ProgressEvent(phase="fetching", detail="Fetching chart from Beatport..."))
-    chart_name, _curator, tracks = fetch_chart(url)
+    chart_name, curator, tracks = fetch_chart(url)
+    playlist_name = compose_chart_playlist_name(chart_name, curator)
 
     if not tracks:
         report = SyncReport(
@@ -190,7 +191,7 @@ def sync_beatport_chart(
             dry_run=dry_run, cache_enabled=cache is not None,
             source_label="Beatport",
         )
-        report.playlists.append(PlaylistReport(name=chart_name, path=url))
+        report.playlists.append(PlaylistReport(name=playlist_name, path=url))
         return report
 
     existing = get_user_playlists(sp) if not dry_run else None
@@ -202,7 +203,7 @@ def sync_beatport_chart(
     )
 
     pl_report = match_and_sync_playlist(
-        tracks, chart_name, url,
+        tracks, playlist_name, url,
         sp=sp, cache=cache, state_mgr=state_mgr,
         existing_playlists=existing, threshold=threshold,
         dry_run=dry_run, incremental=incremental,

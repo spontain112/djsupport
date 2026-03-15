@@ -6,6 +6,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 
 from djsupport.beatport import (
+    compose_chart_playlist_name,
     validate_url,
     fetch_chart,
     _parse_chart_data,
@@ -15,6 +16,20 @@ from djsupport.beatport import (
     InvalidBeatportURL,
 )
 from djsupport.rekordbox import Track
+
+
+class TestComposeChartPlaylistName:
+    def test_with_curator(self):
+        assert compose_chart_playlist_name("Tech House Vibes", "Adam Beyer") == "Adam Beyer - Tech House Vibes"
+
+    def test_unknown_curator(self):
+        assert compose_chart_playlist_name("Vibes", "Unknown") == "Vibes"
+
+    def test_empty_curator(self):
+        assert compose_chart_playlist_name("Vibes", "") == "Vibes"
+
+    def test_none_curator(self):
+        assert compose_chart_playlist_name("Vibes", None) == "Vibes"
 
 
 class TestValidateUrl:

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Beatport chart playlists now include the curator/DJ name — e.g. `"Adam Beyer - Tech House Vibes"` instead of just `"Tech House Vibes"`
+- `compose_chart_playlist_name()` helper in `beatport.py` for chart name composition (curator omitted when `"Unknown"`, empty, or `None`)
+
 ### Changed
 
 - FastAPI and uvicorn are now optional dependencies — install with `pip install djsupport[web]`
