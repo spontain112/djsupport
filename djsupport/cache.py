@@ -46,6 +46,7 @@ class MatchCache:
 
     def save(self) -> None:
         """Write cache to disk."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         data = {
             "version": CACHE_VERSION,
             "entries": {k: asdict(v) for k, v in self.entries.items()},

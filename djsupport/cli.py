@@ -300,7 +300,10 @@ def list_playlists(xml_path: str | None):
         click.echo(f"  {pl.path} ({len(pl.track_ids)} tracks)")
 
 
-DEFAULT_BEATPORT_CACHE_PATH = ".djsupport_beatport_cache.json"
+from djsupport.transfer import default_matching_knowledge_path
+
+
+DEFAULT_BEATPORT_CACHE_PATH = str(default_matching_knowledge_path())
 DEFAULT_BEATPORT_STATE_PATH = ".djsupport_beatport_playlists.json"
 
 
@@ -338,7 +341,66 @@ def beatport(
     """
     import requests
 
-    from djsupport.beatport import BeatportParseError, InvalidBeatportURL, compose_chart_playlist_name, fetch_chart, validate_url
+    from djsupport.beatport import (
+        BeatportParseError,
+        InvalidBeatportURL,
+        compose_chart_playlist_name,
+        fetch_chart,
+        validate_url,
+    )
+
+    # Preview enters through the deep Transfer seam. It may retain matching
+    # knowledge, but the interface has no playlist publication/state adapter.
+    if dry_run:
+        from djsupport.cache import MatchCache
+        from djsupport.transfer import (
+            BeatportChartSource,
+            EphemeralMatchingKnowledge,
+            MatchCacheKnowledge,
+            SpotifyMatcher,
+            Transfer,
+            TransferRequest,
+        )
+
+        cache = None if no_cache else MatchCache(cache_path)
+        if cache is not None:
+            cache.load()
+        transfer = Transfer(
+            source=BeatportChartSource(),
+            spotify=SpotifyMatcher(get_client()),
+            matching_knowledge=(
+                EphemeralMatchingKnowledge()
+                if cache is None else MatchCacheKnowledge(cache)
+            ),
+        )
+        try:
+            report = transfer.execute(TransferRequest(
+                source=url,
+                preview=True,
+                threshold=threshold,
+                retry=retry,
+                retry_days=retry_days,
+            ))
+        except InvalidBeatportURL as e:
+            raise click.ClickException(str(e))
+        except BeatportParseError as e:
+            raise click.ClickException(str(e))
+        except requests.RequestException as e:
+            if (
+                hasattr(e, "response")
+                and e.response is not None
+                and e.response.status_code == 404
+            ):
+                raise click.ClickException("Chart not found — check the URL.")
+            raise click.ClickException(f"Failed to fetch chart: {e}")
+        except RateLimitError as e:
+            raise click.ClickException(str(e))
+
+        print_report(report)
+        if report_path:
+            save_report(report, report_path)
+            click.echo(f"\nDetailed report saved to {report_path}")
+        return
 
     try:
         url = validate_url(url)

@@ -1,0 +1,8 @@
+{
+  "name": "Fixture Chart by Fixture DJ",
+  "reference": "https://www.beatport.com/chart/fixture/14",
+  "tracks": [
+    {"track_id": "bp-1", "artist": "Known Artist", "name": "Known Track"},
+    {"track_id": "bp-2", "artist": "New Artist", "name": "New Track"}
+  ]
+}
