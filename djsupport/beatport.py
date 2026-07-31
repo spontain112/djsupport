@@ -24,6 +24,13 @@ class InvalidBeatportURL(ValueError):
     """Raised when a URL is not a valid Beatport chart URL."""
 
 
+def compose_chart_playlist_name(chart_name: str, curator: str | None) -> str:
+    """Compose playlist name from chart name and curator."""
+    if curator and curator != "Unknown":
+        return f"{curator} - {chart_name}"
+    return chart_name
+
+
 def validate_url(url: str) -> str:
     """Validate and normalize a Beatport chart URL.
 

@@ -338,7 +338,7 @@ def beatport(
     """
     import requests
 
-    from djsupport.beatport import BeatportParseError, InvalidBeatportURL, fetch_chart, validate_url
+    from djsupport.beatport import BeatportParseError, InvalidBeatportURL, compose_chart_playlist_name, fetch_chart, validate_url
 
     try:
         url = validate_url(url)
@@ -359,6 +359,7 @@ def beatport(
         click.echo(f"Chart '{chart_name}' has no tracks.")
         return
 
+    playlist_name = compose_chart_playlist_name(chart_name, curator)
     click.echo(f"Chart: {chart_name} by {curator}. {len(tracks)} tracks.")
 
     # Initialize cache (separate from Rekordbox)
@@ -394,7 +395,7 @@ def beatport(
     try:
         pl_report = _cli_match_and_sync(
             tracks,
-            chart_name,
+            playlist_name,
             url,
             sp=sp,
             cache=cache,

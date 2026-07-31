@@ -1,5 +1,9 @@
 # CLAUDE.md
 
+## Scope Guard
+- This repo is for djsupport only. Do NOT build Claude Code skills, slash commands, hooks, or other extensions here.
+- If the user asks to build something that is not djsupport-specific, STOP and redirect them to their dedicated Claude Code extensions workspace.
+
 ## Project overview
 
 djsupport syncs Rekordbox playlists, Beatport DJ charts, and Beatport record labels to Spotify. It parses a Rekordbox XML export, scrapes a Beatport chart or label page, fuzzy-matches tracks against Spotify's catalog, and creates/updates Spotify playlists.
@@ -23,7 +27,7 @@ djsupport/
   web.py        # FastAPI web backend (OAuth, sync endpoints, SSE progress)
   service.py    # Framework-agnostic sync orchestration (shared by CLI + web)
   rekordbox.py  # XML parser — Track and Playlist dataclasses
-  beatport.py   # Beatport chart scraper — __NEXT_DATA__ extraction
+  beatport.py   # Beatport chart scraper — __NEXT_DATA__ extraction, curator name composition
   label.py      # Beatport label scraper — paginated track fetching + label search
   matcher.py    # Fuzzy matching logic against Spotify search
   spotify.py    # Spotify client wrapper (spotipy + OAuth)
