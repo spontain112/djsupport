@@ -5,6 +5,7 @@
 **Planning horizon:** 0.5.0–0.8.0
 
 **Evidence base:** [playlist-management API review](../research/2026-08-01-playlist-management-api-review.md)
+and [AI-assisted UX and user-research tools](../research/2026-08-01-ai-ux-research-tools.md)
 
 **Released-product baseline:** DJ Support 0.4.0 at
 `d7c84f5f144b18920b0edcf32799b5bb8169bd46`
@@ -63,6 +64,11 @@ source list in the [API review](../research/2026-08-01-playlist-management-api-r
 7. Research issues remain research. An umbrella or prototype supplies evidence;
    it does not authorize production implementation. Follow-up implementation
    tickets need bounded acceptance criteria and dependencies.
+8. Connect roadmap claims to user evidence. Use synthetic critique only to
+   generate hypotheses and missing states; validate consequential UX decisions
+   with correctly screened real DJs, an explicit decision gate, and a redacted
+   evidence note. The linked UX-research report defines the release-by-release
+   discovery loop and privacy boundary.
 
 ## Opportunity ranking
 
