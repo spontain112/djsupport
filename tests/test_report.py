@@ -175,6 +175,19 @@ class TestSaveReport:
         assert "Known Artist - Signal (Original Mix).aiff" in content
         assert "Known Artist - Signal" in content
 
+    def test_repeated_subtitle_recovery_keeps_original_report_title(self, tmp_path):
+        path = str(tmp_path / "report.md")
+        source_title = "Signal (Sunrise Mix) (Sunrise Mix)"
+        match = _matched(
+            name=source_title,
+            spotify_name="Signal (Sunrise Mix)",
+            artist="Synthetic Artist",
+        )
+
+        save_report(_report(playlists=[_playlist(matched=[match])]), path)
+
+        assert source_title in (tmp_path / "report.md").read_text()
+
     def test_file_contains_unmatched_tracks(self, tmp_path):
         path = str(tmp_path / "report.md")
         pl = _playlist(unmatched=["Obscure Track"])

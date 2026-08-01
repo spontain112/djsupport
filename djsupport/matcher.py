@@ -28,6 +28,30 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _collapse_repeated_parenthetical_groups(title: str) -> str:
+    """Collapse adjacent equivalent parenthetical groups for comparison only."""
+    adjacent_groups = re.compile(
+        r"(?P<first_group>\((?P<first_content>[^()]*)\))"
+        r"\s*\((?P<second_content>[^()]*)\)",
+    )
+
+    def collapse(match: re.Match[str]) -> str:
+        def normalized_content(value: str) -> str:
+            return re.sub(r"\s+", " ", value.strip()).casefold()
+
+        if normalized_content(match.group("first_content")) == normalized_content(
+            match.group("second_content"),
+        ):
+            return match.group("first_group")
+        return match.group(0)
+
+    previous = None
+    while title != previous:
+        previous = title
+        title = adjacent_groups.sub(collapse, title)
+    return title
+
+
 def _strip_mix_info(title: str) -> str:
     """Remove parenthetical remix/mix info and bracket tags from a title.
 
@@ -130,8 +154,10 @@ def _artist_score(track: Track, result: dict) -> tuple[float, str]:
 def _score_components(track: Track, result: dict) -> dict[str, float]:
     """Return matching score components for a Rekordbox/Spotify pair."""
     artist_score, _artist_score_reason = _artist_score(track, result)
-    norm_title = _normalize(track.name)
-    norm_result = _normalize(result["name"])
+    norm_title = _normalize(_collapse_repeated_parenthetical_groups(track.name))
+    norm_result = _normalize(
+        _collapse_repeated_parenthetical_groups(result["name"]),
+    )
     raw_title_score = fuzz.token_sort_ratio(norm_title, norm_result)
     stripped_title_score = fuzz.token_sort_ratio(
         _normalize(_strip_mix_info(track.name)),

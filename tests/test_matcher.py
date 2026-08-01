@@ -6,6 +6,7 @@ import pytest
 
 from djsupport.matcher import (
     EARLY_EXIT_THRESHOLD,
+    _collapse_repeated_parenthetical_groups,
     _normalize,
     _strip_mix_info,
     _extract_mix_descriptor,
@@ -13,6 +14,7 @@ from djsupport.matcher import (
     _is_named_variant,
     _classify_version_match,
     _duration_penalty,
+    _score_components,
     _score_result,
     match_track,
     match_track_cached,
@@ -84,6 +86,47 @@ class TestNormalize:
 
     def test_empty_string(self):
         assert _normalize("") == ""
+
+
+class TestRepeatedParentheticalComparison:
+    def test_collapses_immediately_adjacent_equivalent_groups_to_one_copy(self):
+        assert _collapse_repeated_parenthetical_groups(
+            "Signal (Sunrise Mix) (Sunrise Mix)",
+        ) == "Signal (Sunrise Mix)"
+
+    def test_equivalence_ignores_case_and_normalizes_content_whitespace(self):
+        assert _collapse_repeated_parenthetical_groups(
+            "Signal (  Sunrise   Mix ) (sunrise mix)",
+        ) == "Signal (  Sunrise   Mix )"
+
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "Signal (Sunrise Mix) (Sunset Mix)",
+            "Signal (Sunrise Mix) Interlude (Sunrise Mix)",
+            "Signal (Sunrise Mix!) (Sunrise Mix)",
+            "Signal (Sunrise Mix) (Sunrise)",
+            "Signal Signal",
+        ],
+    )
+    def test_leaves_non_duplicate_forms_unchanged(self, title):
+        assert _collapse_repeated_parenthetical_groups(title) == title
+
+    def test_title_scoring_compares_one_preserved_copy(self):
+        components = _score_components(
+            make_track("Signal (Sunrise Mix) (Sunrise Mix)", "Synthetic Artist"),
+            make_result("Signal (Sunrise Mix)", "Synthetic Artist"),
+        )
+
+        assert components["raw_title_score"] == 100
+
+    def test_candidate_without_subtitle_is_not_comparison_equivalent(self):
+        components = _score_components(
+            make_track("Signal (Sunrise Mix) (Sunrise Mix)", "Synthetic Artist"),
+            make_result("Signal", "Synthetic Artist"),
+        )
+
+        assert components["raw_title_score"] < 100
 
 
 class TestStripMixInfo:
@@ -241,6 +284,31 @@ class TestMatchTrack:
         assert result["uri"] == "spotify:track:abc"
         assert result["score"] >= 80
         assert result["match_type"] == "exact"
+
+    def test_recovers_existing_repeated_subtitle_candidate_without_new_search(self):
+        source_title = "Signal (Sunrise Mix) (  sunrise   mix )"
+        track = make_track(source_title, "Synthetic Artist")
+        original_track = Track(**vars(track))
+        sp = self._mock_sp([
+            make_spotify_item("Unrelated", "Other Artist", "spotify:track:other"),
+            make_spotify_item(
+                "Signal (Sunrise Mix)",
+                "Synthetic Artist",
+                "spotify:track:signal",
+            ),
+        ])
+
+        result = match_track(sp, track, threshold=80)
+
+        assert result is not None
+        assert result["uri"] == "spotify:track:signal"
+        assert result["match_type"] == "exact"
+        assert result["score"] == 100
+        assert track == original_track
+        assert sp.search.call_count == 1
+        assert sp.search.call_args.kwargs["q"] == (
+            f"artist:Synthetic Artist track:{source_title}"
+        )
 
     def test_matches_remix_when_spotify_co_credits_named_remixer(self):
         sp = self._mock_sp([
