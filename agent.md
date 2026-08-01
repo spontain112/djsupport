@@ -36,6 +36,7 @@ djsupport/
   state.py      # Playlist ID mapping for incremental sync (source-agnostic)
   report.py     # Post-sync terminal + Markdown reports
   transfer.py   # Durable Transfer/Batch orchestration, checkpoints, and publication
+  backup.py     # Versioned local-data backup, preview, merge, and atomic restore
   static/       # Web frontend (index.html with Tailwind CSS)
 tests/          # pytest suite
 docs/           # Plans, reports, and solution docs
@@ -57,6 +58,9 @@ djsupport beatport <url>        # Import Beatport chart to Spotify
 djsupport label <url-or-name>  # Import Beatport label to Spotify
 djsupport web                   # Start web UI at localhost:8000
 djsupport web --port 3000       # Custom port
+djsupport backup                # Create a timestamped local-data archive
+djsupport restore <archive>     # Validate and preview an archive
+djsupport restore <archive> --apply  # Apply a conflict-free restore
 
 # Sync flags
 djsupport sync --playlist "My Playlist"  # Sync a single playlist
