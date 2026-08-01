@@ -15,8 +15,10 @@ from djsupport.matcher import (
     _duration_penalty,
     _score_result,
     match_track,
+    match_track_cached,
     match_track_with_alternatives,
 )
+from djsupport.cache import MatchCache
 from djsupport.rekordbox import Track
 
 
@@ -398,6 +400,168 @@ class TestMatchTrack:
         assert result is not None
         assert result["uri"] == "uri:normalized"
         assert sp.search.call_args_list[2].kwargs["q"] == "artist:artist track:track"
+
+
+class TestTerminalAudioExtensionFallback:
+    def test_recovers_signal_without_changing_source_identity_or_version_intent(self):
+        track = make_track(
+            "Signal (Original Mix).aiff", "Known Artist", duration=360,
+        )
+        original_track = Track(**vars(track))
+        recovered = make_spotify_item(
+            "Signal", "Known Artist", "spotify:track:signal", 360000,
+        )
+        sp = MagicMock()
+        sp.search.side_effect = [
+            {"tracks": {"items": []}},
+            {"tracks": {"items": []}},
+            {"tracks": {"items": [recovered]}},
+        ]
+
+        result = match_track(sp, track, threshold=80)
+
+        assert result is not None
+        assert result["uri"] == "spotify:track:signal"
+        assert result["match_type"] == "exact"
+        assert track == original_track
+        assert "(Original Mix)" in track.name
+        assert [call.kwargs["q"] for call in sp.search.call_args_list] == [
+            "artist:Known Artist track:Signal (Original Mix).aiff",
+            "artist:Known Artist track:Signal.aiff",
+            "artist:Known Artist track:Signal (Original Mix)",
+        ]
+
+    @pytest.mark.parametrize("suffix", [".mp3", ".aiff", ".wav", ".flac"])
+    def test_recognized_terminal_suffix_adds_at_most_one_search(self, suffix):
+        sp = MagicMock()
+        sp.search.return_value = {"tracks": {"items": []}}
+
+        match_track(sp, make_track(f"Signal{suffix}", "Known Artist"))
+
+        queries = [call.kwargs["q"] for call in sp.search.call_args_list]
+        assert queries == [
+            f"artist:Known Artist track:Signal{suffix}",
+            "artist:Known Artist track:Signal",
+            f"Known Artist Signal{suffix}",
+        ]
+        assert len(queries) == len(set(queries))
+
+    @pytest.mark.parametrize(
+        "title",
+        [
+            "Signal.aiff Archive",
+            "Signal.ogg",
+            ".aiff",
+        ],
+    )
+    def test_ineligible_title_keeps_existing_two_search_calls(self, title):
+        sp = MagicMock()
+        sp.search.return_value = {"tracks": {"items": []}}
+
+        match_track(sp, make_track(title, "Known Artist"))
+
+        assert sp.search.call_count == 2
+        assert sp.search.call_args_list[-1].kwargs["q"] == f"Known Artist {title}"
+
+    def test_unknown_artist_does_not_receive_extension_fallback(self):
+        sp = MagicMock()
+        sp.search.return_value = {"tracks": {"items": []}}
+
+        match_track(sp, make_track("Signal.aiff", ""))
+
+        assert sp.search.call_count == 2
+
+    def test_candidate_still_has_to_pass_original_scoring_threshold(self):
+        unrelated = make_spotify_item(
+            "Unrelated", "Different Artist", "spotify:track:wrong", 360000,
+        )
+        sp = MagicMock()
+        sp.search.side_effect = [
+            {"tracks": {"items": []}},
+            {"tracks": {"items": []}},
+            {"tracks": {"items": [unrelated]}},
+        ]
+
+        result = match_track(
+            sp,
+            make_track("Signal (Original Mix).aiff", "Known Artist", duration=360),
+            threshold=80,
+        )
+
+        assert result is None
+        assert sp.search.call_count == 3
+
+    def test_acceptable_earlier_result_skips_extension_fallback(self):
+        exact = make_spotify_item(
+            "Signal (Original Mix).aiff", "Known Artist", "spotify:track:exact",
+            360000,
+        )
+        sp = MagicMock()
+        sp.search.return_value = {"tracks": {"items": [exact]}}
+
+        result = match_track(
+            sp,
+            make_track("Signal (Original Mix).aiff", "Known Artist", duration=360),
+        )
+
+        assert result is not None
+        assert result["uri"] == "spotify:track:exact"
+        assert sp.search.call_count == 1
+
+    def test_cache_hits_and_recent_failure_make_zero_search_calls(self, tmp_path):
+        title = "Signal (Original Mix).aiff"
+        scenarios = ("approved", "success", "failure")
+        for scenario in scenarios:
+            cache = MatchCache(str(tmp_path / f"{scenario}.json"))
+            cached_result = make_result(
+                "Signal", "Known Artist", "spotify:track:signal", 360000,
+            )
+            cached_result["score"] = 95.0
+            cached_result["match_type"] = "exact"
+            if scenario == "approved":
+                cache.record_approval(
+                    "Known Artist", title, "approved", cached_result,
+                )
+            elif scenario == "success":
+                cache.store("Known Artist", title, 80, cached_result)
+            else:
+                cache.store("Known Artist", title, 80, None)
+            sp = MagicMock()
+
+            match_track_cached(
+                sp, make_track(title, "Known Artist", duration=360), cache,
+            )
+
+            assert sp.search.call_count == 0, scenario
+
+    def test_retry_eligible_failure_uses_original_cache_identity(self, tmp_path):
+        title = "Signal (Original Mix).aiff"
+        cache = MatchCache(str(tmp_path / "cache.json"))
+        cache.store("Known Artist", title, 80, None)
+        original_key = cache.cache_key("Known Artist", title)
+        recovered = make_spotify_item(
+            "Signal", "Known Artist", "spotify:track:signal", 360000,
+        )
+        sp = MagicMock()
+        sp.search.side_effect = [
+            {"tracks": {"items": []}},
+            {"tracks": {"items": []}},
+            {"tracks": {"items": [recovered]}},
+        ]
+
+        result, source = match_track_cached(
+            sp, make_track(title, "Known Artist", duration=360), cache,
+            force_retry=True,
+        )
+
+        assert result is not None
+        assert source == "retry"
+        assert sp.search.call_count == 3
+        assert set(cache.entries) == {original_key}
+        assert cache.entries[original_key].spotify_uri == "spotify:track:signal"
+        cache.record_approval("Known Artist", title, "approved", result)
+        assert cache.lookup("Known Artist", title, 100) is not None
+        assert cache.lookup("Known Artist", "Signal (Original Mix)", 100) is None
 
 
 class TestEarlyExit:
