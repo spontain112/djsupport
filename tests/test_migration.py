@@ -87,6 +87,13 @@ class TestLegacyMigration:
                 **_cache_entry(), "spotify_uri": "not-a-spotify-track-uri",
             }},
         }),
+        json.dumps({
+            "version": 1,
+            "entries": {"synthetic": {
+                **_cache_entry(), "threshold": True,
+                "match_type": "unknown",
+            }},
+        }),
     ])
     def test_preview_safely_rejects_malformed_or_unsupported_known_file(
         self,
@@ -284,6 +291,26 @@ class TestLegacyMigration:
         assert not report.valid
         assert report.relink_required == 0
         assert report.historical_snapshots == 0
+
+    def test_malformed_state_prefix_is_not_converted(self, tmp_path):
+        legacy = tmp_path / "legacy"
+        legacy.mkdir()
+        _write_json(legacy / ".djsupport_playlists.json", {
+            "version": 2,
+            "entries": {"Synthetic": {
+                "spotify_id": "playlist-synthetic",
+                "spotify_name": "Synthetic",
+                "source_path": "Synthetic/Source",
+                "last_synced": "2026-01-01T00:00:00",
+                "prefix_used": ["not", "a", "string"],
+                "source_type": "rekordbox",
+            }},
+        })
+
+        report = LegacyMigration(tmp_path / "app-data").preview(legacy)
+
+        assert not report.valid
+        assert report.relink_required == 0
 
 
     def test_apply_is_idempotent_and_leaves_legacy_files_byte_identical(self, tmp_path):

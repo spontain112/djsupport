@@ -259,7 +259,11 @@ class LegacyMigration:
                 not isinstance(entry["matched"], bool)
                 or not isinstance(entry["timestamp"], str)
                 or not isinstance(entry["threshold"], int)
+                or isinstance(entry["threshold"], bool)
                 or not 0 <= entry["threshold"] <= 100
+                or entry.get("match_type") not in (
+                    None, "exact", "fallback_version",
+                )
             ):
                 raise ValueError("invalid cache entry")
             datetime.fromisoformat(entry["timestamp"])
@@ -306,6 +310,11 @@ class LegacyMigration:
                 raise ValueError("invalid playlist-state entry")
             if entry["source_type"] != expected_source:
                 raise ValueError("playlist-state source type is ambiguous")
+            if not (
+                entry["prefix_used"] is None
+                or isinstance(entry["prefix_used"], str)
+            ):
+                raise ValueError("invalid playlist-state prefix")
             datetime.fromisoformat(entry["last_synced"])
         return data["entries"]
 
