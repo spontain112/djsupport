@@ -1567,9 +1567,9 @@ class TestRekordboxBatchExecution:
 
         report = transfer.execute_batch(plan)
 
-        assert report.status == "failed"
+        assert report.status == "paused"
         assert [playlist.outcome for playlist in report.playlists] == [
-            "failed", "skipped",
+            "pending", "skipped",
         ]
         assert report.playlists[1].action == "skipped after shared failure"
         assert storage.publications == []
@@ -1577,8 +1577,9 @@ class TestRekordboxBatchExecution:
             report.transfer_id
         )
         assert [(item.phase, item.outcome) for item in durable.playlists] == [
-            ("paused", "failed"), ("pending", "skipped"),
+            ("paused", "pending"), ("pending", "skipped"),
         ]
+        assert durable.status == "paused"
 
     def test_resume_after_shared_failure_keeps_completed_publication(self, tmp_path):
         class RecoveringSpotify(StatefulSpotify):
@@ -1620,7 +1621,7 @@ class TestRekordboxBatchExecution:
 
         assert stopped.status == "partial success"
         assert [playlist.outcome for playlist in stopped.playlists] == [
-            "completed", "failed",
+            "completed", "pending",
         ]
         assert len(publications.publications) == 1
         completed_searches = list(spotify.searches)
@@ -1640,6 +1641,65 @@ class TestRekordboxBatchExecution:
             ("Solomun", "Vultora (Original Mix)", 80)
         ) == 1
         assert len(publications.publications) == 2
+
+    def test_authentication_failure_before_account_discovery_is_checkpointed(
+        self, tmp_path,
+    ):
+        class UnauthenticatedSpotify(StatefulSpotify):
+            def account_id(self):
+                raise spotipy.SpotifyException(401, -1, "expired token")
+
+        states = FileTransferStorage(tmp_path / "transfers.json")
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=RekordboxPlaylistSource(REKORDBOX_FIXTURE),
+            spotify=UnauthenticatedSpotify(), matching_knowledge=InMemoryStorage(),
+            publication_storage=InMemoryStorage(), transfer_storage=states,
+        )
+        plan = transfer.plan_batch(BatchPlanRequest(
+            playlist_references=(
+                "My Playlists/Peak Time", "My Playlists/Deep",
+            ),
+        ))
+
+        report = transfer.execute_batch(plan)
+
+        assert report.status == "paused"
+        assert [playlist.outcome for playlist in report.playlists] == [
+            "pending", "pending",
+        ]
+        durable = FileTransferStorage(states.path).load_batch(report.transfer_id)
+        assert durable.status == "paused"
+        assert durable.account_id is None
+
+    def test_failed_playlist_report_retains_completed_matching_progress(self, tmp_path):
+        class SecondTrackFailureSpotify(StatefulSpotify):
+            def match(self, track, threshold):
+                if track.name == "Sapphire (Joris Voorn Remix)":
+                    raise ValueError("playlist-specific bad track")
+                return super().match(track, threshold)
+
+        spotify = SecondTrackFailureSpotify({
+            ("Solomun", "Vultora (Original Mix)"): _match(
+                "spotify:track:vultora", "Vultora (Original Mix)", "Solomun",
+            ),
+        })
+        storage = InMemoryStorage()
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=RekordboxPlaylistSource(REKORDBOX_FIXTURE), spotify=spotify,
+            matching_knowledge=storage, publication_storage=storage,
+            transfer_storage=FileTransferStorage(tmp_path / "transfers.json"),
+        )
+
+        report = transfer.execute_batch(transfer.plan_batch(BatchPlanRequest(
+            playlist_references=("My Playlists/Peak Time",),
+        )))
+
+        assert report.playlists[0].outcome == "failed"
+        assert [match.source_name for match in report.playlists[0].matched] == [
+            "Solomun - Vultora (Original Mix)",
+        ]
 
     def test_paused_batch_reloads_and_resumes_without_repeating_effects(self, tmp_path):
         matches = {
