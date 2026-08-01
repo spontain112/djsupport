@@ -385,6 +385,7 @@ def approve(
 @click.option("--prefix", default="djsupport", show_default=True, help="Prefix for Spotify playlist name.")
 @click.option("--no-prefix", is_flag=True, help="Disable playlist name prefix.")
 @click.option("--incremental/--no-incremental", default=True, show_default=True, help="Use incremental playlist updates.")
+@click.option("--mirror", is_flag=True, help="Maintain one recurring Beatport Mirror instead of distinct Snapshots.")
 @click.option("--resume", "resume_id", default=None, help="Resume a durable Transfer ID.")
 @click.option("--abandon", "abandon_id", default=None, help="Explicitly abandon a durable Transfer ID.")
 def beatport(
@@ -400,6 +401,7 @@ def beatport(
     prefix: str,
     no_prefix: bool,
     incremental: bool,
+    mirror: bool,
     resume_id: str | None,
     abandon_id: str | None,
 ) -> None:
@@ -424,6 +426,7 @@ def beatport(
         MatchCacheKnowledge,
         SpotifyMatcher,
         Transfer,
+        TransferMode,
         TransferRequest,
     )
 
@@ -459,6 +462,7 @@ def beatport(
     try:
         report = transfer.execute(TransferRequest(
             source=url,
+            mode=TransferMode.MIRROR if mirror else TransferMode.SNAPSHOT,
             preview=dry_run,
             threshold=threshold,
             retry=retry,
@@ -490,8 +494,10 @@ def beatport(
         click.echo(f"Editable review CSV saved to {review_path}")
 
 
-DEFAULT_LABEL_CACHE_PATH = ".djsupport_label_cache.json"
-DEFAULT_LABEL_STATE_PATH = ".djsupport_label_playlists.json"
+# Charts and labels share user-local authoritative knowledge and publication
+# manifests; callers can still override either path explicitly.
+DEFAULT_LABEL_CACHE_PATH = DEFAULT_BEATPORT_CACHE_PATH
+DEFAULT_LABEL_STATE_PATH = DEFAULT_BEATPORT_STATE_PATH
 
 
 @cli.command()
@@ -507,6 +513,9 @@ DEFAULT_LABEL_STATE_PATH = ".djsupport_label_playlists.json"
 @click.option("--prefix", default="djsupport", show_default=True, help="Prefix for Spotify playlist name.")
 @click.option("--no-prefix", is_flag=True, help="Disable playlist name prefix.")
 @click.option("--incremental/--no-incremental", default=True, show_default=True, help="Use incremental playlist updates.")
+@click.option("--mirror", is_flag=True, help="Maintain one recurring Beatport Mirror instead of distinct Snapshots.")
+@click.option("--resume", "resume_id", default=None, help="Resume a durable Transfer ID.")
+@click.option("--abandon", "abandon_id", default=None, help="Explicitly abandon a durable Transfer ID.")
 def label(
     url_or_name: str,
     dry_run: bool,
@@ -520,6 +529,9 @@ def label(
     prefix: str,
     no_prefix: bool,
     incremental: bool,
+    mirror: bool,
+    resume_id: str | None,
+    abandon_id: str | None,
 ) -> None:
     """Create a Spotify playlist from a Beatport record label.
 
@@ -535,7 +547,6 @@ def label(
     from djsupport.label import (
         InvalidLabelURL,
         LabelParseError,
-        deduplicate_tracks,
         fetch_label_tracks,
         search_labels,
         validate_label_url,
@@ -585,9 +596,6 @@ def label(
         except InvalidLabelURL as e:
             raise click.ClickException(str(e))
 
-    # Fetch tracks with pagination
-    click.echo("Fetching tracks from Beatport label...")
-
     def on_total(total: int) -> bool | None:
         click.echo(f"Label has {total} tracks.")
         if total > LARGE_LABEL_THRESHOLD:
@@ -606,94 +614,94 @@ def label(
             err=True,
         )
 
-    try:
-        label_name, tracks = fetch_label_tracks(
-            label_url, on_total=on_total, on_page=on_page,
-            on_page_error=on_page_error,
+    def fetcher(url: str):
+        click.echo("Fetching tracks from Beatport label...")
+        return fetch_label_tracks(
+            url, on_total=on_total, on_page=on_page, on_page_error=on_page_error,
         )
-    except LabelParseError as e:
-        raise click.ClickException(str(e))
-    except requests.RequestException as e:
-        if hasattr(e, "response") and e.response is not None and e.response.status_code == 404:
-            raise click.ClickException("Label not found — check the URL.")
-        raise click.ClickException(f"Failed to fetch label: {e}")
 
-    if not tracks:
-        click.echo(f"No tracks found for label '{label_name}'.")
-        return
+    def on_deduplicated(duplicates_removed: int, unique_count: int) -> None:
+        if duplicates_removed:
+            click.echo(
+                f"Removed {duplicates_removed} duplicate tracks. "
+                f"{unique_count} unique tracks remaining."
+            )
+        else:
+            click.echo(f"{unique_count} tracks (newest first).")
 
-    # Deduplicate tracks across compilations
-    tracks, dupes_removed = deduplicate_tracks(tracks)
-    if dupes_removed:
-        click.echo(f"Removed {dupes_removed} duplicate tracks. {len(tracks)} unique tracks remaining.")
-    else:
-        click.echo(f"{len(tracks)} tracks (newest first).")
-
-    # Initialize cache
-    cache = None
-    if not no_cache:
-        from djsupport.cache import MatchCache
-        cache = MatchCache(cache_path)
-        cache.load()
-        if cache.entries:
-            click.echo(f"Loaded {len(cache.entries)} cached label matches from {cache_path}")
-
-    actual_prefix = None if no_prefix else prefix
-
-    from djsupport.state import PlaylistStateManager
-    state_mgr = PlaylistStateManager(state_path)
-    state_mgr.load()
-
-    sp = get_client()
-    existing = get_user_playlists(sp) if not dry_run else None
-
-    report = SyncReport(
-        timestamp=datetime.now(),
-        threshold=threshold,
-        dry_run=dry_run,
-        cache_enabled=cache is not None,
-        source_label="Beatport",
+    from djsupport.cache import MatchCache
+    from djsupport.transfer import (
+        BeatportLabelSource,
+        EphemeralMatchingKnowledge,
+        FilePublicationStorage,
+        FileTransferStorage,
+        MatchCacheKnowledge,
+        SpotifyMatcher,
+        Transfer,
+        TransferMode,
+        TransferRequest,
     )
 
-    try:
-        pl_report = _cli_match_and_sync(
-            tracks,
-            label_name,
-            label_url,
-            sp=sp,
-            cache=cache,
-            state_mgr=state_mgr,
-            existing_playlists=existing,
-            threshold=threshold,
-            dry_run=dry_run,
-            incremental=incremental,
-            prefix=actual_prefix,
-            retry_days=retry_days,
-            retry=retry,
-            source_type="label",
-        )
-    except RateLimitError as e:
-        click.echo(f"\n{e}", err=True)
-        if cache is not None:
-            cache.save()
-            click.echo(f"Cache saved to {cache_path} ({len(cache.entries)} entries).", err=True)
-        print_report(report)
-        if report_path:
-            save_report(report, report_path)
-        sys.exit(1)
-
-    report.playlists.append(pl_report)
-
+    cache = None if no_cache else MatchCache(cache_path)
     if cache is not None:
-        cache.save()
-
-    if not dry_run:
-        state_mgr.save()
+        cache.load()
+    if resume_id and abandon_id:
+        raise click.UsageError("Use either --resume or --abandon, not both.")
+    transfer_storage = FileTransferStorage(
+        str(Path(state_path).with_suffix(".transfers.json"))
+    )
+    transfer = Transfer(
+        source=BeatportLabelSource(
+            fetcher=fetcher, on_deduplicated=on_deduplicated,
+        ),
+        spotify=SpotifyMatcher(get_client()),
+        publishing_guards=AccountPublishingGuards(),
+        matching_knowledge=(
+            EphemeralMatchingKnowledge()
+            if cache is None else MatchCacheKnowledge(cache)
+        ),
+        publication_storage=None if dry_run else FilePublicationStorage(state_path),
+        transfer_storage=transfer_storage,
+    )
+    if abandon_id:
+        transfer.abandon(abandon_id)
+        click.echo(f"Transfer {abandon_id} abandoned.")
+        return
+    if resume_id and transfer_storage.load_transfer(resume_id) is None:
+        raise click.ClickException(f"Unknown Transfer: {resume_id}")
+    transfer_id = resume_id or uuid4().hex
+    click.echo(f"Transfer ID: {transfer_id}")
+    try:
+        report = transfer.execute(TransferRequest(
+            source=label_url,
+            mode=TransferMode.MIRROR if mirror else TransferMode.SNAPSHOT,
+            preview=dry_run,
+            threshold=threshold,
+            retry=retry,
+            retry_days=retry_days,
+            playlist_prefix=None if no_prefix else prefix,
+            transfer_id=transfer_id,
+        ))
+    except (InvalidLabelURL, LabelParseError) as e:
+        raise click.ClickException(str(e))
+    except requests.RequestException as e:
+        if (
+            hasattr(e, "response")
+            and e.response is not None
+            and e.response.status_code == 404
+        ):
+            raise click.ClickException("Label not found — check the URL.")
+        raise click.ClickException(f"Failed to fetch label: {e}")
+    except RateLimitError as e:
+        raise click.ClickException(str(e))
 
     print_report(report)
     if report_path:
         save_report(report, report_path)
+        review_path = str(Path(report_path).with_suffix(".csv"))
+        save_review_csv(report, review_path)
         click.echo(f"\nDetailed report saved to {report_path}")
+        click.echo(f"Editable review CSV saved to {review_path}")
 
 
 @cli.command()

@@ -67,18 +67,23 @@ def default_matching_knowledge_path() -> Path:
     return root / "djsupport" / "matching-knowledge.json"
 
 
+class TransferMode(str, Enum):
+    SNAPSHOT = "snapshot"
+    MIRROR = "mirror"
+
+
 @dataclass(frozen=True)
 class TransferRequest:
     """Everything an adapter must provide to start one Transfer."""
 
     source: str
+    mode: TransferMode = TransferMode.SNAPSHOT
     preview: bool = False
     threshold: int = 80
     retry: bool = False
     retry_days: int = 7
     playlist_prefix: str | None = "djsupport"
     transfer_id: str | None = None
-
 
 class TransferStatus(str, Enum):
     MATCHING = "matching"
@@ -243,6 +248,7 @@ class PublicationManifest:
     source_reference: str
     created_at: datetime
     items: tuple[PublicationItem, ...]
+    mode: TransferMode = TransferMode.SNAPSHOT
 
 
 @dataclass(frozen=True)
@@ -374,6 +380,9 @@ class FilePublicationStorage:
         return PublicationManifest(
             **{
                 **stored,
+                "mode": TransferMode(
+                    stored.get("mode", TransferMode.SNAPSHOT.value)
+                ),
                 "created_at": datetime.fromisoformat(stored["created_at"]),
                 "items": tuple(PublicationItem(**item) for item in stored["items"]),
             }
@@ -473,8 +482,39 @@ class BeatportChartSource:
         )
 
 
+class BeatportLabelSource:
+    """Production source adapter for one Beatport record-label selection."""
+
+    source_label = "Beatport label"
+
+    def __init__(
+        self,
+        *,
+        fetcher: Callable[[str], tuple[str, list[Track]]] | None = None,
+        validator: Callable[[str], str] | None = None,
+        on_deduplicated: Callable[[int, int], None] | None = None,
+    ) -> None:
+        self._fetcher = fetcher
+        self._validator = validator
+        self._on_deduplicated = on_deduplicated
+
+    def consume(self, reference: str) -> SourceSelection:
+        from djsupport.label import (
+            deduplicate_tracks,
+            fetch_label_tracks,
+            validate_label_url,
+        )
+
+        url = (self._validator or validate_label_url)(reference)
+        label_name, tracks = (self._fetcher or fetch_label_tracks)(url)
+        unique_tracks, duplicates_removed = deduplicate_tracks(tracks)
+        if self._on_deduplicated is not None:
+            self._on_deduplicated(duplicates_removed, len(unique_tracks))
+        return SourceSelection(label_name, url, unique_tracks)
+
+
 class SpotifyMatcher:
-    """Production Spotify matching and Snapshot publication adapter."""
+    """Production Spotify matching and Transfer publication adapter."""
 
     def __init__(self, client) -> None:
         self._client = client
@@ -491,6 +531,9 @@ class SpotifyMatcher:
         self, name: str, track_uris: list[str], description: str,
         publication_key: str,
     ) -> str:
+        # This marker is the durable identity contract for recurring Mirrors.
+        # It lives with the Spotify playlist, so a new process/client can find
+        # the relationship without depending on process-local state.
         marker = f"djsupport-transfer:{publication_key}"
         description = f"{description} {marker}"
         playlist_id = self._find_publication(marker)
@@ -957,6 +1000,7 @@ class Transfer:
                 account_id=self._spotify.account_id(),
                 request={
                     "source": request.source,
+                    "mode": request.mode.value,
                     "preview": request.preview,
                     "threshold": request.threshold,
                     "retry": request.retry,
@@ -984,7 +1028,13 @@ class Transfer:
             if state.account_id != self._spotify.account_id():
                 raise ValueError("A Transfer cannot resume under another Spotify account")
             request = TransferRequest(
-                **state.request, transfer_id=transfer_id,
+                **{
+                    **state.request,
+                    "mode": TransferMode(
+                        state.request.get("mode", TransferMode.SNAPSHOT.value)
+                    ),
+                },
+                transfer_id=transfer_id,
             )
             stored_selection = state.selection
             selection = SourceSelection(
@@ -1029,12 +1079,21 @@ class Transfer:
             if state.spotify_playlist_id:
                 playlist.name = state.spotify_playlist_name or playlist.name
                 playlist.spotify_playlist_id = state.spotify_playlist_id
-                playlist.action = "provisional snapshot created"
+                playlist.action = (
+                    "provisional mirror updated"
+                    if request.mode == TransferMode.MIRROR
+                    else "provisional snapshot created"
+                )
                 stored_manifest = state.publication_manifest
                 if stored_manifest:
                     playlist.publication_manifest = PublicationManifest(
                         **{
                             **stored_manifest,
+                            "mode": TransferMode(
+                                stored_manifest.get(
+                                    "mode", TransferMode.SNAPSHOT.value,
+                                )
+                            ),
                             "account_id": stored_manifest.get(
                                 "account_id", state.account_id,
                             ),
@@ -1187,16 +1246,25 @@ class Transfer:
                 playlist_id = state.spotify_playlist_id
                 snapshot_name = state.spotify_playlist_name
                 if playlist_id is None:
-                    discriminator = (
-                        f"{created_at:%Y-%m-%d %H%M%S} {uuid4().hex[:8]}"
-                    )
-                    snapshot_name = f"{selection.name} — {discriminator}"
+                    if request.mode == TransferMode.MIRROR:
+                        snapshot_name = selection.name
+                    else:
+                        discriminator = (
+                            f"{created_at:%Y-%m-%d %H%M%S} {uuid4().hex[:8]}"
+                        )
+                        snapshot_name = f"{selection.name} — {discriminator}"
                     if request.playlist_prefix:
                         snapshot_name = f"{request.playlist_prefix} / {snapshot_name}"
                     description = (
-                        f"Provisional Snapshot from {self._source.source_label}: "
+                        f"Provisional {request.mode.value.title()} from "
+                        f"{self._source.source_label}: "
                         f"{selection.reference}. Created {created_at.isoformat()}."
                     )
+                    publication_key = transfer_id
+                    if request.mode == TransferMode.MIRROR:
+                        publication_key = hashlib.sha256(
+                            f"{state.account_id}\0{selection.reference}".encode()
+                        ).hexdigest()
                     playlist_id = self._retry_policy.run(
                         lambda: self._spotify.publish_provisional_snapshot(
                             snapshot_name,
@@ -1205,7 +1273,7 @@ class Transfer:
                                 if item.spotify_uri not in collision_uris
                             )),
                             description,
-                            transfer_id,
+                            publication_key,
                         )
                     )
                     state.spotify_playlist_id = playlist_id
@@ -1230,6 +1298,7 @@ class Transfer:
                     source_reference=selection.reference,
                     created_at=created_at,
                     items=tuple(publication_items),
+                    mode=request.mode,
                 )
                 stored_manifest = asdict(manifest)
                 stored_manifest["created_at"] = manifest.created_at.isoformat()
@@ -1248,7 +1317,11 @@ class Transfer:
                 playlist.name = snapshot_name
                 playlist.spotify_playlist_id = playlist_id
                 playlist.publication_manifest = manifest
-                playlist.action = "provisional snapshot created"
+                playlist.action = (
+                    "provisional mirror updated"
+                    if request.mode == TransferMode.MIRROR
+                    else "provisional snapshot created"
+                )
             state.outcome = playlist.action
             state.status = TransferStatus.COMPLETED
             self._save_transfer(transfer_id, state)

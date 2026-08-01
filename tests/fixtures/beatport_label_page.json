@@ -1,0 +1,50 @@
+{
+  "props": {
+    "pageProps": {
+      "label": {"name": "Fixture Label"},
+      "dehydratedState": {
+        "queries": [
+          {
+            "state": {
+              "data": {
+                "count": 3,
+                "results": [
+                  {
+                    "id": 2101,
+                    "name": "Known Track",
+                    "mix_name": "Original Mix",
+                    "artists": [{"name": "Known Artist"}],
+                    "release": {"name": "Newest Release", "label": {"name": "Fixture Label"}},
+                    "genre": {"name": "Techno"},
+                    "publish_date": "2026-07-03",
+                    "length": "05:00"
+                  },
+                  {
+                    "id": 2102,
+                    "name": "Known Track",
+                    "mix_name": "Original Mix",
+                    "artists": [{"name": "Known Artist"}],
+                    "release": {"name": "Older Compilation", "label": {"name": "Fixture Label"}},
+                    "genre": {"name": "Techno"},
+                    "publish_date": "2026-06-02",
+                    "length": "05:00"
+                  },
+                  {
+                    "id": 2103,
+                    "name": "New Track",
+                    "mix_name": "Extended Mix",
+                    "artists": [{"name": "New Artist"}],
+                    "release": {"name": "New Release", "label": {"name": "Fixture Label"}},
+                    "genre": {"name": "House"},
+                    "publish_date": "2026-05-01",
+                    "length": "06:30"
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}
