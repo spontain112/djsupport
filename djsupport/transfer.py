@@ -492,9 +492,11 @@ class BeatportLabelSource:
         *,
         fetcher: Callable[[str], tuple[str, list[Track]]] | None = None,
         validator: Callable[[str], str] | None = None,
+        on_deduplicated: Callable[[int, int], None] | None = None,
     ) -> None:
         self._fetcher = fetcher
         self._validator = validator
+        self._on_deduplicated = on_deduplicated
 
     def consume(self, reference: str) -> SourceSelection:
         from djsupport.label import (
@@ -505,12 +507,14 @@ class BeatportLabelSource:
 
         url = (self._validator or validate_label_url)(reference)
         label_name, tracks = (self._fetcher or fetch_label_tracks)(url)
-        unique_tracks, _ = deduplicate_tracks(tracks)
+        unique_tracks, duplicates_removed = deduplicate_tracks(tracks)
+        if self._on_deduplicated is not None:
+            self._on_deduplicated(duplicates_removed, len(unique_tracks))
         return SourceSelection(label_name, url, unique_tracks)
 
 
 class SpotifyMatcher:
-    """Production Spotify matching and Snapshot publication adapter."""
+    """Production Spotify matching and Transfer publication adapter."""
 
     def __init__(self, client) -> None:
         self._client = client
@@ -527,6 +531,9 @@ class SpotifyMatcher:
         self, name: str, track_uris: list[str], description: str,
         publication_key: str,
     ) -> str:
+        # This marker is the durable identity contract for recurring Mirrors.
+        # It lives with the Spotify playlist, so a new process/client can find
+        # the relationship without depending on process-local state.
         marker = f"djsupport-transfer:{publication_key}"
         description = f"{description} {marker}"
         playlist_id = self._find_publication(marker)

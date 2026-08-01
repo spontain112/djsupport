@@ -167,25 +167,28 @@ class InMemoryStorage:
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "beatport_chart.json"
+LABEL_FIXTURE = Path(__file__).parent / "fixtures" / "beatport_label_page.json"
 TEST_PUBLISHING_GUARDS = AccountPublishingGuards()
 
 
-def test_beatport_label_source_preserves_fixture_order_and_deduplicates():
-    tracks = [
-        Track("label-1", "Artist", "Track", "", "", "Label", "", ""),
-        Track("label-2", "Artist", "Track", "Compilation", "", "Label", "", ""),
-        Track("label-3", "Other", "Newest", "", "", "Label", "", ""),
-    ]
-    source = BeatportLabelSource(
-        fetcher=lambda url: ("Fixture Label", tracks),
-        validator=lambda url: "https://www.beatport.com/label/fixture/21",
-    )
+class TestBeatportLabelSource:
+    def test_production_intake_parses_fixture_order_and_deduplicates(self, monkeypatch):
+        fixture_data = LABEL_FIXTURE.read_text()
+        fixture_html = f'<script id="__NEXT_DATA__">{fixture_data}</script>'
+        monkeypatch.setattr("djsupport.label._fetch_page", lambda url, page: fixture_html)
 
-    selection = source.consume("fixture")
+        selection = BeatportLabelSource().consume(
+            "https://www.beatport.com/label/fixture/21"
+        )
 
-    assert selection.name == "Fixture Label"
-    assert selection.reference == "https://www.beatport.com/label/fixture/21"
-    assert [track.track_id for track in selection.tracks] == ["label-1", "label-3"]
+        assert selection.name == "Fixture Label"
+        assert selection.reference == "https://www.beatport.com/label/fixture/21"
+        assert [track.track_id for track in selection.tracks] == [
+            "bp-label-2101", "bp-label-2103",
+        ]
+        assert [track.name for track in selection.tracks] == [
+            "Known Track", "New Track (Extended Mix)",
+        ]
 
 
 def _match(uri, name, artist):
@@ -1488,6 +1491,34 @@ class TestProvisionalPlaylistApproval:
 
 
 class TestSpotifyApprovalAdapter:
+    def test_recurring_mirror_marker_survives_adapter_reconstruction(self):
+        client = MagicMock()
+        playlists = []
+        client.current_user.return_value = {"id": "spotify-user-1"}
+        client.current_user_playlists.side_effect = lambda limit: {
+            "items": list(playlists), "next": None,
+        }
+
+        def create_playlist(user_id, name, public, description):
+            playlist = {"id": "mirror-1", "description": description}
+            playlists.append(playlist)
+            return playlist
+
+        client.user_playlist_create.side_effect = create_playlist
+
+        first_id = SpotifyMatcher(client).publish_provisional_snapshot(
+            "Fixture Mirror", ["spotify:track:first"], "description", "stable-key",
+        )
+        second_id = SpotifyMatcher(client).publish_provisional_snapshot(
+            "Fixture Mirror", ["spotify:track:second"], "description", "stable-key",
+        )
+
+        assert first_id == second_id == "mirror-1"
+        assert client.user_playlist_create.call_count == 1
+        assert client.playlist_replace_items.call_args.args == (
+            "mirror-1", ["spotify:track:second"],
+        )
+
     def test_reads_all_current_playlist_track_uris(self):
         client = MagicMock()
         client.playlist_items.return_value = {

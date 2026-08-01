@@ -547,7 +547,6 @@ def label(
     from djsupport.label import (
         InvalidLabelURL,
         LabelParseError,
-        deduplicate_tracks,
         fetch_label_tracks,
         search_labels,
         validate_label_url,
@@ -621,6 +620,15 @@ def label(
             url, on_total=on_total, on_page=on_page, on_page_error=on_page_error,
         )
 
+    def on_deduplicated(duplicates_removed: int, unique_count: int) -> None:
+        if duplicates_removed:
+            click.echo(
+                f"Removed {duplicates_removed} duplicate tracks. "
+                f"{unique_count} unique tracks remaining."
+            )
+        else:
+            click.echo(f"{unique_count} tracks (newest first).")
+
     from djsupport.cache import MatchCache
     from djsupport.transfer import (
         BeatportLabelSource,
@@ -643,7 +651,9 @@ def label(
         str(Path(state_path).with_suffix(".transfers.json"))
     )
     transfer = Transfer(
-        source=BeatportLabelSource(fetcher=fetcher),
+        source=BeatportLabelSource(
+            fetcher=fetcher, on_deduplicated=on_deduplicated,
+        ),
         spotify=SpotifyMatcher(get_client()),
         publishing_guards=AccountPublishingGuards(),
         matching_knowledge=(
@@ -675,6 +685,12 @@ def label(
     except (InvalidLabelURL, LabelParseError) as e:
         raise click.ClickException(str(e))
     except requests.RequestException as e:
+        if (
+            hasattr(e, "response")
+            and e.response is not None
+            and e.response.status_code == 404
+        ):
+            raise click.ClickException("Label not found — check the URL.")
         raise click.ClickException(f"Failed to fetch label: {e}")
     except RateLimitError as e:
         raise click.ClickException(str(e))
