@@ -51,6 +51,7 @@ from djsupport.spotify import MAX_RATE_LIMIT_WAIT, RateLimitError, _parse_retry_
 
 PUBLICATION_MANIFEST_VERSION = 3
 TRANSFER_STATE_VERSION = 1
+EXPENSIVE_BATCH_LOOKUP_THRESHOLD = 100
 SPOTIFY_TRACK_URI = re.compile(r"^spotify:track:([A-Za-z0-9]{22})$")
 SPOTIFY_TRACK_URL = re.compile(
     r"^https://open\.spotify\.com/track/([A-Za-z0-9]{22})(?:\?.*)?$"
@@ -100,6 +101,54 @@ class TransferRequest:
     drift_resolution: DriftResolution | None = None
     mirror_disposition: MirrorDisposition | None = None
     mirror_playlist_id: str | None = None
+
+
+@dataclass(frozen=True)
+class BatchPlanRequest:
+    """An explicit, bounded Rekordbox Batch selection."""
+
+    playlist_references: tuple[str, ...] = ()
+    whole_library: bool = False
+    threshold: int = 80
+    confirm_expensive: bool = False
+
+
+@dataclass(frozen=True)
+class PlaylistPreflight:
+    name: str
+    reference: str
+    total_tracks: int
+    approved_match_hits: int
+    cache_hits: int
+    expected_uncached_lookups: int
+
+
+@dataclass(frozen=True)
+class BatchPlan:
+    playlists: tuple[PlaylistPreflight, ...]
+    confirmation_required: bool = False
+
+    @property
+    def ready(self) -> bool:
+        return not self.confirmation_required
+
+    @property
+    def total_tracks(self) -> int:
+        return sum(playlist.total_tracks for playlist in self.playlists)
+
+    @property
+    def approved_match_hits(self) -> int:
+        return sum(playlist.approved_match_hits for playlist in self.playlists)
+
+    @property
+    def cache_hits(self) -> int:
+        return sum(playlist.cache_hits for playlist in self.playlists)
+
+    @property
+    def expected_uncached_lookups(self) -> int:
+        return sum(
+            playlist.expected_uncached_lookups for playlist in self.playlists
+        )
 
 class TransferStatus(str, Enum):
     MATCHING = "matching"
@@ -683,6 +732,10 @@ class RekordboxPlaylistSource:
         from djsupport.rekordbox import parse_xml
 
         tracks, playlists = parse_xml(self._xml_path)
+        return self._select(tracks, playlists, reference)
+
+    @staticmethod
+    def _select(tracks, playlists, reference: str) -> SourceSelection:
         selected = [
             playlist for playlist in playlists
             if playlist.path == reference or playlist.name == reference
@@ -707,6 +760,33 @@ class RekordboxPlaylistSource:
             playlist.path,
             [tracks[track_id] for track_id in playlist.track_ids],
         )
+
+    def consume_batch(
+        self, references: tuple[str, ...], whole_library: bool,
+    ) -> tuple[SourceSelection, ...]:
+        if references and whole_library:
+            raise ValueError(
+                "Select playlists explicitly or opt into the whole library, not both"
+            )
+        if not references and not whole_library:
+            raise ValueError("A Batch must select at least one playlist explicitly")
+        if len(set(references)) != len(references):
+            raise ValueError("A Batch cannot contain a duplicate playlist reference")
+        from djsupport.rekordbox import parse_xml
+
+        tracks, playlists = parse_xml(self._xml_path)
+        selected_references = (
+            tuple(playlist.path for playlist in playlists)
+            if whole_library else references
+        )
+        selections = tuple(
+            self._select(tracks, playlists, reference)
+            for reference in selected_references
+        )
+        canonical_references = [selection.reference for selection in selections]
+        if len(set(canonical_references)) != len(canonical_references):
+            raise ValueError("A Batch cannot contain a duplicate playlist reference")
+        return selections
 
 
 class SpotifyMatcher:
@@ -949,6 +1029,48 @@ class Transfer:
     def pause(self) -> None:
         """Request a pause after the current track reaches a safe checkpoint."""
         self._pause_requested = True
+
+    def plan_batch(self, request: BatchPlanRequest) -> BatchPlan:
+        """Plan an explicitly selected Rekordbox Batch without side effects."""
+        selections = self._source.consume_batch(
+            request.playlist_references, request.whole_library,
+        )
+        playlists = []
+        for selection in selections:
+            approved_match_hits = 0
+            cache_hits = 0
+            expected_uncached_lookups = 0
+            for track in selection.tracks:
+                known = self._knowledge.lookup(track, request.threshold)
+                if known is not None and known.get("authoritative"):
+                    approved_match_hits += 1
+                elif known is not None or not self._knowledge.should_retry(
+                    track, request.threshold, 7, False,
+                ):
+                    cache_hits += 1
+                else:
+                    expected_uncached_lookups += 1
+            playlists.append(PlaylistPreflight(
+                name=selection.name,
+                reference=selection.reference,
+                total_tracks=len(selection.tracks),
+                approved_match_hits=approved_match_hits,
+                cache_hits=cache_hits,
+                expected_uncached_lookups=expected_uncached_lookups,
+            ))
+        expected_lookups = sum(
+            playlist.expected_uncached_lookups for playlist in playlists
+        )
+        return BatchPlan(
+            tuple(playlists),
+            confirmation_required=(
+                (
+                    request.whole_library
+                    or expected_lookups >= EXPENSIVE_BATCH_LOOKUP_THRESHOLD
+                )
+                and not request.confirm_expensive
+            ),
+        )
 
     def abandon(self, transfer_id: str) -> None:
         """Explicitly make a persisted, non-completed Transfer terminal."""

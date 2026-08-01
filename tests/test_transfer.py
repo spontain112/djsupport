@@ -21,6 +21,7 @@ from djsupport.report import PlaylistReport, SyncReport, save_report
 from djsupport.spotify import RateLimitError
 from djsupport.transfer import (
     AccountPublishingGuards,
+    BatchPlanRequest,
     FilePublicationStorage,
     FileTransferStorage,
     MatchCacheKnowledge,
@@ -1342,6 +1343,127 @@ class TestRekordboxMirror:
             ),
             80,
         )["authoritative"] is True
+
+
+class TestRekordboxBatchPlanning:
+    def test_explicit_playlists_are_planned_without_spotify_or_state_mutation(self):
+        spotify = StatefulSpotify()
+        knowledge = InMemoryStorage()
+        knowledge.matches[("Solomun", "Vultora (Original Mix)")] = {
+            **_match("spotify:track:vultora", "Vultora (Original Mix)", "Solomun"),
+            "authoritative": True,
+        }
+        knowledge.matches[(
+            "Eagles & Butterflies", "Sapphire (Joris Voorn Remix)",
+        )] = _match(
+            "spotify:track:sapphire", "Sapphire (Joris Voorn Remix)",
+            "Eagles & Butterflies",
+        )
+        storage = InMemoryStorage()
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=RekordboxPlaylistSource(REKORDBOX_FIXTURE), spotify=spotify,
+            matching_knowledge=knowledge, publication_storage=storage,
+            transfer_storage=storage,
+        )
+
+        plan = transfer.plan_batch(BatchPlanRequest(playlist_references=(
+            "My Playlists/Peak Time", "My Playlists/Deep",
+        )))
+
+        assert [playlist.reference for playlist in plan.playlists] == [
+            "My Playlists/Peak Time", "My Playlists/Deep",
+        ]
+        assert plan.total_tracks == 3
+        assert plan.approved_match_hits == 1
+        assert plan.cache_hits == 1
+        assert plan.expected_uncached_lookups == 1
+        assert spotify.searches == []
+        assert spotify.playlists == {"existing": ["spotify:track:untouched"]}
+        assert storage.publications == []
+        assert storage.playlist_writes == 0
+        assert storage.matches == {}
+        assert knowledge.checkpoints == 0
+
+    def test_omitted_selection_is_not_inferred_as_the_whole_library(self):
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=RekordboxPlaylistSource(REKORDBOX_FIXTURE),
+            spotify=StatefulSpotify(), matching_knowledge=InMemoryStorage(),
+        )
+
+        with pytest.raises(ValueError, match="select at least one playlist"):
+            transfer.plan_batch(BatchPlanRequest())
+
+        whole_library = transfer.plan_batch(BatchPlanRequest(whole_library=True))
+
+        assert [playlist.reference for playlist in whole_library.playlists] == [
+            "My Playlists/Peak Time", "My Playlists/Deep",
+        ]
+        assert whole_library.total_tracks == 3
+
+    def test_expensive_plan_requires_confirmation_without_a_lookup_ceiling(self):
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=RekordboxPlaylistSource(REKORDBOX_FIXTURE),
+            spotify=StatefulSpotify(), matching_knowledge=InMemoryStorage(),
+        )
+
+        unconfirmed = transfer.plan_batch(BatchPlanRequest(
+            whole_library=True,
+        ))
+        confirmed = transfer.plan_batch(BatchPlanRequest(
+            whole_library=True, confirm_expensive=True,
+        ))
+
+        assert unconfirmed.expected_uncached_lookups == 3
+        assert unconfirmed.confirmation_required is True
+        assert unconfirmed.ready is False
+        assert confirmed.expected_uncached_lookups == 3
+        assert confirmed.confirmation_required is False
+        assert confirmed.ready is True
+
+    def test_duplicate_playlist_references_are_not_a_batch_set(self):
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=RekordboxPlaylistSource(REKORDBOX_FIXTURE),
+            spotify=StatefulSpotify(), matching_knowledge=InMemoryStorage(),
+        )
+
+        with pytest.raises(ValueError, match="duplicate playlist"):
+            transfer.plan_batch(BatchPlanRequest(playlist_references=(
+                "Deep", "My Playlists/Deep",
+            )))
+
+    def test_positive_and_negative_cache_entries_are_not_expected_lookups(
+        self, tmp_path,
+    ):
+        cache = MatchCache(str(tmp_path / "matching-knowledge.json"))
+        cache.record_approval(
+            "Solomun", "Vultora (Original Mix)", "approved",
+            _match("spotify:track:vultora", "Vultora (Original Mix)", "Solomun"),
+            412,
+        )
+        cache.store(
+            "Eagles & Butterflies", "Sapphire (Joris Voorn Remix)", 80,
+            _match(
+                "spotify:track:sapphire", "Sapphire (Joris Voorn Remix)",
+                "Eagles & Butterflies",
+            ),
+        )
+        cache.store("Âme", "Für Immer", 80, None)
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=RekordboxPlaylistSource(REKORDBOX_FIXTURE),
+            spotify=StatefulSpotify(),
+            matching_knowledge=MatchCacheKnowledge(cache),
+        )
+
+        plan = transfer.plan_batch(BatchPlanRequest(whole_library=True))
+
+        assert plan.approved_match_hits == 1
+        assert plan.cache_hits == 2
+        assert plan.expected_uncached_lookups == 0
 
 
 class TestTransferPublicationLifecycle:
