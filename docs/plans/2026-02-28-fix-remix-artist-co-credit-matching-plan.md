@@ -1,8 +1,9 @@
 ---
 title: Remix Artist Co-Credit Matching
 type: fix
-status: pending
+status: converted-to-issue
 date: 2026-02-28
+github_issue: https://github.com/spontain112/djsupport/issues/30
 ---
 
 # Remix Artist Co-Credit Matching
