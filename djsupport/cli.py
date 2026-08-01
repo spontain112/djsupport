@@ -469,6 +469,7 @@ def beatport(
             retry_days=retry_days,
             playlist_prefix=None if no_prefix else prefix,
             transfer_id=transfer_id,
+            retain_matching_knowledge=not no_cache,
         ))
     except InvalidBeatportURL as e:
         raise click.ClickException(str(e))
@@ -681,6 +682,7 @@ def label(
             retry_days=retry_days,
             playlist_prefix=None if no_prefix else prefix,
             transfer_id=transfer_id,
+            retain_matching_knowledge=not no_cache,
         ))
     except (InvalidLabelURL, LabelParseError) as e:
         raise click.ClickException(str(e))

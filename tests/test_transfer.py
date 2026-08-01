@@ -1822,17 +1822,21 @@ class TestTransferPublicationLifecycle:
     def test_failure_is_a_durable_observable_outcome(self, tmp_path):
         class FailingSource:
             source_label = "Beatport"
+            recovered = False
 
             def consume(self, reference):
-                raise ValueError("fixture intake failed")
+                if not self.recovered:
+                    raise ValueError("fixture intake failed")
+                return SourceSelection("Recovered", reference, [])
 
         state_path = tmp_path / "transfers.json"
         request = TransferRequest(
             source="fixture", preview=True, transfer_id="failed-transfer",
         )
+        source = FailingSource()
         transfer = Transfer(
             publishing_guards=TEST_PUBLISHING_GUARDS,
-            source=FailingSource(), spotify=StatefulSpotify(),
+            source=source, spotify=StatefulSpotify(),
             matching_knowledge=InMemoryStorage(),
             transfer_storage=FileTransferStorage(state_path),
         )
@@ -1849,6 +1853,15 @@ class TestTransferPublicationLifecycle:
 
         assert progress.status == "paused"
         assert progress.error == "fixture intake failed"
+
+        source.recovered = True
+        transfer.prepare(request)
+        resumed_progress = transfer.progress("failed-transfer")
+        resumed = transfer.execute(request)
+
+        assert resumed_progress.status == "matching"
+        assert resumed_progress.error is None
+        assert resumed.status == "completed"
 
     def test_progress_reloads_from_durable_state_without_resuming_work(self, tmp_path):
         spotify = StatefulSpotify({

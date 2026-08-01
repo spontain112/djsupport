@@ -101,6 +101,7 @@ class TransferRequest:
     drift_resolution: DriftResolution | None = None
     mirror_disposition: MirrorDisposition | None = None
     mirror_playlist_id: str | None = None
+    retain_matching_knowledge: bool = True
 
 
 @dataclass(frozen=True)
@@ -169,6 +170,7 @@ class TransferProgress:
     current: int
     total: int
     error: str | None = None
+    retain_matching_knowledge: bool = True
 
 
 class BatchPhase(str, Enum):
@@ -1139,6 +1141,14 @@ class Transfer:
         transfer_id = request.transfer_id or uuid4().hex
         state = self._transfer_storage.load_transfer(transfer_id)
         if state is not None:
+            if state.source != request.source:
+                raise ValueError("A resumed Transfer must use its original source")
+            if state.account_id != self._spotify.account_id():
+                raise ValueError("A Transfer cannot resume under another Spotify account")
+            if state.status == TransferStatus.PAUSED:
+                state.status = TransferStatus.MATCHING
+                state.outcome = None
+                self._save_transfer(transfer_id, state)
             return transfer_id
         state = TransferState(
             status=TransferStatus.MATCHING,
@@ -1169,6 +1179,9 @@ class Transfer:
             current=state.next_track_index,
             total=len(state.selection.get("tracks", ())),
             error=state.outcome if state.status == TransferStatus.PAUSED else None,
+            retain_matching_knowledge=state.request.get(
+                "retain_matching_knowledge", True,
+            ),
         )
 
     @staticmethod
@@ -1190,6 +1203,7 @@ class Transfer:
                 if request.mirror_disposition else None
             ),
             "mirror_playlist_id": request.mirror_playlist_id,
+            "retain_matching_knowledge": request.retain_matching_knowledge,
         }
 
     def plan_batch(self, request: BatchPlanRequest) -> BatchPlan:

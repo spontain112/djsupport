@@ -143,7 +143,10 @@ def create_app(
         url_type = _detect_url_type(progress.source)
         return make_transfer(
             url_type,
-            request or SyncRequest(url=progress.source),
+            request or SyncRequest(
+                url=progress.source,
+                no_cache=not progress.retain_matching_knowledge,
+            ),
         ), progress
 
     @web_app.get("/auth/status")
@@ -193,6 +196,7 @@ def create_app(
             retry_days=request.retry_days,
             playlist_prefix=request.prefix,
             transfer_id=transfer_id,
+            retain_matching_knowledge=not request.no_cache,
         )
         transfer.prepare(transfer_request)
         run_background(_run_transfer, (transfer, transfer_request))
@@ -227,11 +231,15 @@ def create_app(
         require_authenticated()
         transfer, progress = transfer_for(transfer_id)
         if progress.status not in {"completed", "abandoned"}:
+            resume_request = TransferRequest(
+                source=progress.source,
+                transfer_id=transfer_id,
+                retain_matching_knowledge=progress.retain_matching_knowledge,
+            )
+            transfer.prepare(resume_request)
             run_background(
                 _run_transfer,
-                (transfer, TransferRequest(
-                    source=progress.source, transfer_id=transfer_id,
-                )),
+                (transfer, resume_request),
             )
         return {"transfer_id": transfer_id, "status": progress.status}
 

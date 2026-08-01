@@ -128,8 +128,10 @@ class TestSyncEndpoints:
 
         spotify = FixtureSpotify()
         state_path = tmp_path / "transfers.json"
+        factory_requests = []
 
-        def factory(_kind, _request):
+        def factory(_kind, factory_request):
+            factory_requests.append(factory_request)
             return Transfer(
                 source=FixtureSource(), spotify=spotify,
                 matching_knowledge=Knowledge(),
@@ -152,7 +154,10 @@ class TestSyncEndpoints:
             ),
         )
         res = TestClient(first_app).post(
-            "/sync", json={"url": "https://www.beatport.com/chart/test/123"},
+            "/sync", json={
+                "url": "https://www.beatport.com/chart/test/123",
+                "no_cache": True,
+            },
         )
         assert res.status_code == 200
         data = res.json()
@@ -184,6 +189,7 @@ class TestSyncEndpoints:
         assert spotify.playlists["snapshot-1"] == [
             "spotify:track:bp-1", "spotify:track:bp-2",
         ]
+        assert factory_requests[-1].no_cache is True
 
     def test_label_flow_enters_the_same_transfer_interface(self):
         transfer = MagicMock()
