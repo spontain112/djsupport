@@ -42,7 +42,7 @@ tests/          # pytest suite
 docs/           # Plans, reports, and solution docs
   design/       # Retained, non-runtime design sources for the core application
   solutions/    # Retained incident knowledge (YAML frontmatter, searchable)
-  plans/        # Core-application implementation history and converted research
+  plans/        # Active core-product roadmap plus implementation history and converted research
 ```
 
 ## Key commands
