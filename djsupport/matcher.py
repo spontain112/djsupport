@@ -288,30 +288,49 @@ def _select_best(track: Track, results: list[dict], threshold: int) -> dict | No
     return None
 
 
-def _search_candidates(sp, track: Track) -> list[dict]:
+def _search_candidates(sp, track: Track, threshold: int) -> list[dict]:
     """Gather candidates through the shared ordered Spotify search strategy."""
     all_results: list[dict] = []
-    all_results.extend(search_track(sp, track.artist, track.name))
+    searched: set[tuple[str, str, bool]] = set()
+
+    def search(artist: str, title: str, *, plain: bool = False) -> None:
+        query = (artist, title, plain)
+        if query in searched:
+            return
+        searched.add(query)
+        all_results.extend(search_track(sp, artist, title, plain=plain))
+
+    search(track.artist, track.name)
     early = _select_best(track, all_results, EARLY_EXIT_THRESHOLD)
     if early is not None and early["match_type"] == "exact":
         return all_results
     stripped = _strip_mix_info(track.name)
     if stripped != track.name:
-        all_results.extend(search_track(sp, track.artist, stripped))
+        search(track.artist, stripped)
     if track.remixer:
-        all_results.extend(search_track(sp, f"{track.artist} {track.remixer}", track.name))
+        search(f"{track.artist} {track.remixer}", track.name)
     clean_artist = _normalize(track.artist)
     clean_title = _normalize(stripped)
     if clean_artist != track.artist.lower().strip() or clean_title != stripped.lower().strip():
-        all_results.extend(search_track(sp, clean_artist, clean_title))
+        search(clean_artist, clean_title)
     if not all_results:
-        all_results.extend(search_track(sp, track.artist, track.name, plain=True))
+        search(track.artist, track.name, plain=True)
+    extension_match = re.search(
+        r"\.(?:mp3|aiff|wav|flac)$", track.name, re.IGNORECASE,
+    )
+    if (
+        track.artist.strip()
+        and extension_match is not None
+        and track.name[:extension_match.start()]
+        and _select_best(track, all_results, threshold) is None
+    ):
+        search(track.artist, track.name[:extension_match.start()])
     return all_results
 
 
 def match_track(sp, track: Track, threshold: int = 80) -> dict | None:
     """Try to find a Spotify match for a Rekordbox track."""
-    all_results = _search_candidates(sp, track)
+    all_results = _search_candidates(sp, track, threshold)
 
     return _select_best(track, all_results, threshold)
 
@@ -320,7 +339,7 @@ def match_track_with_alternatives(
     sp, track: Track, threshold: int = 80,
 ) -> dict | None:
     """Return an acceptable match or up to three explained alternatives."""
-    all_results = _search_candidates(sp, track)
+    all_results = _search_candidates(sp, track, threshold)
     match = _select_best(track, all_results, threshold)
     if match is not None:
         return match

@@ -161,6 +161,20 @@ class TestSaveReport:
         assert "source-1" in content
         assert "[Artist - Track A](https://open.spotify.com/track/abc123)" in content
 
+    def test_audio_extension_recovery_keeps_original_source_title(self, tmp_path):
+        path = str(tmp_path / "report.md")
+        match = _matched(
+            name="Known Artist - Signal (Original Mix).aiff",
+            spotify_name="Signal",
+            artist="Known Artist",
+        )
+
+        save_report(_report(playlists=[_playlist(matched=[match])]), path)
+
+        content = (tmp_path / "report.md").read_text()
+        assert "Known Artist - Signal (Original Mix).aiff" in content
+        assert "Known Artist - Signal" in content
+
     def test_file_contains_unmatched_tracks(self, tmp_path):
         path = str(tmp_path / "report.md")
         pl = _playlist(unmatched=["Obscure Track"])
