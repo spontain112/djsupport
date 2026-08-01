@@ -328,6 +328,8 @@ class SpotifyAdapter(Protocol):
 
     def delete_provisional_snapshot(self, playlist_id: str) -> None: ...
 
+    def delete_playlist(self, playlist_id: str) -> None: ...
+
     def provisional_playlist_track_uris(
         self, playlist_id: str,
     ) -> list[str] | None: ...
@@ -741,6 +743,9 @@ class SpotifyMatcher:
         return None
 
     def delete_provisional_snapshot(self, playlist_id: str) -> None:
+        self._client.current_user_unfollow_playlist(playlist_id)
+
+    def delete_playlist(self, playlist_id: str) -> None:
         self._client.current_user_unfollow_playlist(playlist_id)
 
     def provisional_playlist_track_uris(self, playlist_id: str) -> list[str] | None:
@@ -1220,7 +1225,7 @@ class Transfer:
                         status = "completed"
                     elif request.mirror_disposition == MirrorDisposition.DELETE:
                         self._retry_policy.run(
-                            lambda: self._spotify.delete_provisional_snapshot(
+                            lambda: self._spotify.delete_playlist(
                                 relationship.spotify_playlist_id
                             )
                         )
@@ -1561,10 +1566,19 @@ class Transfer:
                 state.matched = [asdict(item) for item in playlist.matched]
                 state.unmatched = list(playlist.unmatched)
 
+            relink_original_uris: list[str] | None = None
             if request.mode == TransferMode.MIRROR:
                 assert self._publication_storage is not None or request.preview
                 relationship = (
-                    self._publication_storage.mirror_for_source(
+                    self._publication_storage.mirror_for_playlist(
+                        state.account_id, request.mirror_playlist_id,
+                    )
+                    if (
+                        self._publication_storage is not None
+                        and request.mirror_disposition == MirrorDisposition.RELINK
+                        and request.mirror_playlist_id is not None
+                    )
+                    else self._publication_storage.mirror_for_source(
                         state.account_id, self._source.source_label,
                         selection.reference,
                     )
@@ -1597,6 +1611,8 @@ class Transfer:
                             relationship.spotify_playlist_id
                         )
                     )
+                    if request.mirror_disposition == MirrorDisposition.RELINK:
+                        relink_original_uris = list(current_uris or ())
                     current_uri_set = set(current_uris or ())
                     playlist.playlist_drift = [
                         PlaylistDrift(
@@ -1655,6 +1671,7 @@ class Transfer:
             elif not request.preview:
                 playlist_id = state.spotify_playlist_id
                 snapshot_name = state.spotify_playlist_name
+                created_playlist = playlist_id is None
                 if playlist_id is None:
                     if request.mode == TransferMode.MIRROR:
                         snapshot_name = selection.name
@@ -1737,7 +1754,12 @@ class Transfer:
                 try:
                     self._publication_storage.retain_publication(manifest)
                 except Exception:
-                    self._spotify.delete_provisional_snapshot(playlist_id)
+                    if created_playlist:
+                        self._spotify.delete_provisional_snapshot(playlist_id)
+                    elif relink_original_uris is not None:
+                        self._spotify.replace_provisional_playlist_tracks(
+                            playlist_id, relink_original_uris,
+                        )
                     state.spotify_playlist_id = None
                     state.spotify_playlist_name = None
                     state.status = TransferStatus.MATCHING

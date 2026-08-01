@@ -60,6 +60,14 @@ class FixtureBeatportSource:
         return SourceSelection(data["name"], data["reference"], tracks)
 
 
+class MissingRekordboxSource:
+    source_label = "Rekordbox"
+    default_mode = TransferMode.MIRROR
+
+    def consume(self, reference):
+        raise SourceNotFound(f"Rekordbox playlist not found: {reference}")
+
+
 class StatefulSpotify:
     def __init__(self, matches=None) -> None:
         self.matches = matches or {}
@@ -88,6 +96,9 @@ class StatefulSpotify:
         return playlist_id
 
     def delete_provisional_snapshot(self, playlist_id):
+        del self.playlists[playlist_id]
+
+    def delete_playlist(self, playlist_id):
         del self.playlists[playlist_id]
 
     def provisional_playlist_track_uris(self, playlist_id):
@@ -172,6 +183,32 @@ class InMemoryStorage:
             and mirror.source_label == source_label
             and mirror.source_reference == source_reference
         ), None)
+
+    def mirror_for_playlist(self, account_id, playlist_id):
+        return next((
+            mirror for mirror in self.mirrors
+            if mirror.account_id == account_id
+            and mirror.spotify_playlist_id == playlist_id
+        ), None)
+
+    def replace_mirror(self, previous, replacement):
+        self.mirrors = [
+            mirror for mirror in self.mirrors
+            if not (
+                mirror.account_id == previous.account_id
+                and mirror.spotify_playlist_id == previous.spotify_playlist_id
+            )
+        ]
+        self.mirrors.append(replacement)
+
+    def remove_mirror(self, relationship):
+        self.mirrors = [
+            mirror for mirror in self.mirrors
+            if not (
+                mirror.account_id == relationship.account_id
+                and mirror.spotify_playlist_id == relationship.spotify_playlist_id
+            )
+        ]
 
     def approve(self, item):
         self.approved_matches.append(item)
@@ -622,13 +659,6 @@ class TestSnapshotPublication:
 
 class TestRekordboxMirror:
     def test_missing_exact_source_becomes_orphan_without_spotify_deletion(self, tmp_path):
-        class MissingSource:
-            source_label = "Rekordbox"
-            default_mode = TransferMode.MIRROR
-
-            def consume(self, reference):
-                raise SourceNotFound(f"Rekordbox playlist not found: {reference}")
-
         spotify = StatefulSpotify()
         storage = FilePublicationStorage(tmp_path / "publications.json")
         storage.retain_mirror(MirrorRelationship(
@@ -642,7 +672,7 @@ class TestRekordboxMirror:
 
         report = Transfer(
             publishing_guards=TEST_PUBLISHING_GUARDS,
-            source=MissingSource(), spotify=spotify,
+            source=MissingRekordboxSource(), spotify=spotify,
             matching_knowledge=storage, publication_storage=storage,
         ).execute(TransferRequest(source="Folder/Original"))
 
@@ -721,14 +751,105 @@ class TestRekordboxMirror:
             "spotify-user-1", "Rekordbox", "Moved/Renamed",
         ).spotify_playlist_id == "mirror-1"
 
-    def test_keep_disposition_releases_orphan_as_ordinary_playlist(self, tmp_path):
-        class MissingSource:
+    def test_relink_reports_existing_playlist_drift_before_mutating(self, tmp_path):
+        fixture = json.loads(MIRROR_REFRESH_FIXTURE.read_text())
+
+        class MovableSource:
+            source_label = "Rekordbox"
+            default_mode = TransferMode.MIRROR
+            reference = "Original/Playlist"
+
+            def consume(self, reference):
+                item = fixture["initial"][0]
+                return SourceSelection(
+                    "Mirror", reference,
+                    [Track(
+                        track_id=item["track_id"], artist=item["artist"],
+                        name=item["name"], duration=item["duration"], album="",
+                        remixer="", label="", genre="", date_added="",
+                    )],
+                )
+
+        source = MovableSource()
+        spotify = StatefulSpotify({
+            ("Artist One", "First Track"): _match(
+                "spotify:track:first", "First Track", "Artist One",
+            ),
+        })
+        knowledge = MatchCacheKnowledge(MatchCache(tmp_path / "knowledge.json"))
+        storage = FilePublicationStorage(tmp_path / "publications.json")
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=source, spotify=spotify, matching_knowledge=knowledge,
+            publication_storage=storage,
+        )
+        initial = transfer.execute(TransferRequest(source=source.reference))
+        playlist_id = initial.playlists[0].spotify_playlist_id
+        transfer.approve(playlist_id)
+        spotify.playlists[playlist_id]["tracks"] = []
+
+        drifted = transfer.execute(TransferRequest(
+            source="Moved/Renamed",
+            mirror_disposition=MirrorDisposition.RELINK,
+            mirror_playlist_id=playlist_id,
+        ))
+
+        assert drifted.status == "playlist drift"
+        assert drifted.playlists[0].action == "restore or revoke required"
+        assert spotify.playlists[playlist_id]["tracks"] == []
+        assert storage.mirror_for_source(
+            "spotify-user-1", "Rekordbox", "Original/Playlist",
+        ) is not None
+
+    def test_relink_storage_failure_preserves_existing_spotify_mirror(self):
+        class MovedSource:
             source_label = "Rekordbox"
             default_mode = TransferMode.MIRROR
 
             def consume(self, reference):
-                raise SourceNotFound(f"Rekordbox playlist not found: {reference}")
+                return SourceSelection(
+                    "Renamed", reference,
+                    [Track(
+                        track_id="rb-1", artist="Artist One", name="First Track",
+                        duration=301, album="", remixer="", label="", genre="",
+                        date_added="",
+                    )],
+                )
 
+        class FailingStorage(InMemoryStorage):
+            def retain_publication(self, manifest):
+                raise OSError("disk full")
+
+        spotify = StatefulSpotify({
+            ("Artist One", "First Track"): _match(
+                "spotify:track:first", "First Track", "Artist One",
+            ),
+        })
+        spotify.playlists["mirror-1"] = {
+            "name": "Original", "tracks": ["spotify:track:old"],
+            "description": "managed",
+        }
+        storage = FailingStorage()
+        storage.retain_mirror(MirrorRelationship(
+            account_id="spotify-user-1", source_label="Rekordbox",
+            source_reference="Original/Playlist", spotify_playlist_id="mirror-1",
+            spotify_playlist_name="Original", approved_at=datetime(2026, 8, 1),
+        ))
+
+        with pytest.raises(OSError, match="disk full"):
+            Transfer(
+                publishing_guards=TEST_PUBLISHING_GUARDS,
+                source=MovedSource(), spotify=spotify,
+                matching_knowledge=storage, publication_storage=storage,
+            ).execute(TransferRequest(
+                source="Moved/Renamed",
+                mirror_disposition=MirrorDisposition.RELINK,
+                mirror_playlist_id="mirror-1",
+            ))
+
+        assert spotify.playlists["mirror-1"]["tracks"] == ["spotify:track:old"]
+
+    def test_keep_disposition_releases_orphan_as_ordinary_playlist(self, tmp_path):
         spotify = StatefulSpotify()
         storage = FilePublicationStorage(tmp_path / "publications.json")
         storage.retain_mirror(MirrorRelationship(
@@ -739,7 +860,7 @@ class TestRekordboxMirror:
 
         report = Transfer(
             publishing_guards=TEST_PUBLISHING_GUARDS,
-            source=MissingSource(), spotify=spotify,
+            source=MissingRekordboxSource(), spotify=spotify,
             matching_knowledge=InMemoryStorage(), publication_storage=storage,
         ).execute(TransferRequest(
             source="Folder/Original",
@@ -755,13 +876,6 @@ class TestRekordboxMirror:
         ) is None
 
     def test_delete_disposition_is_explicit_and_account_scoped(self, tmp_path):
-        class MissingSource:
-            source_label = "Rekordbox"
-            default_mode = TransferMode.MIRROR
-
-            def consume(self, reference):
-                raise SourceNotFound(f"Rekordbox playlist not found: {reference}")
-
         spotify = StatefulSpotify()
         storage = FilePublicationStorage(tmp_path / "publications.json")
         for account_id, playlist_id in (
@@ -777,7 +891,7 @@ class TestRekordboxMirror:
 
         report = Transfer(
             publishing_guards=TEST_PUBLISHING_GUARDS,
-            source=MissingSource(), spotify=spotify,
+            source=MissingRekordboxSource(), spotify=spotify,
             matching_knowledge=InMemoryStorage(), publication_storage=storage,
         ).execute(TransferRequest(
             source="Folder/Original",
@@ -796,13 +910,6 @@ class TestRekordboxMirror:
         ).spotify_playlist_id == "other-account-mirror"
 
     def test_similar_source_name_never_relinks_without_explicit_identity(self):
-        class MissingSource:
-            source_label = "Rekordbox"
-            default_mode = TransferMode.MIRROR
-
-            def consume(self, reference):
-                raise SourceNotFound(f"Rekordbox playlist not found: {reference}")
-
         storage = InMemoryStorage()
         storage.retain_mirror(MirrorRelationship(
             account_id="spotify-user-1", source_label="Rekordbox",
@@ -816,7 +923,7 @@ class TestRekordboxMirror:
         ):
             Transfer(
                 publishing_guards=TEST_PUBLISHING_GUARDS,
-                source=MissingSource(), spotify=StatefulSpotify(),
+                source=MissingRekordboxSource(), spotify=StatefulSpotify(),
                 matching_knowledge=storage, publication_storage=storage,
             ).execute(TransferRequest(source="Folder/Original Mix"))
 
