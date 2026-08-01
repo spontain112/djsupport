@@ -201,6 +201,10 @@ class InMemoryStorage:
         ]
         self.mirrors.append(replacement)
 
+    def retain_relinked_publication(self, previous, replacement, manifest):
+        self.retain_publication(manifest)
+        self.replace_mirror(previous, replacement)
+
     def remove_mirror(self, relationship):
         self.mirrors = [
             mirror for mirror in self.mirrors
@@ -817,7 +821,7 @@ class TestRekordboxMirror:
                 )
 
         class FailingStorage(InMemoryStorage):
-            def retain_publication(self, manifest):
+            def retain_relinked_publication(self, previous, replacement, manifest):
                 raise OSError("disk full")
 
         spotify = StatefulSpotify({

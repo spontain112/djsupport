@@ -364,6 +364,11 @@ class PublicationStorage(Protocol):
         self, previous: MirrorRelationship, replacement: MirrorRelationship,
     ) -> None: ...
 
+    def retain_relinked_publication(
+        self, previous: MirrorRelationship, replacement: MirrorRelationship,
+        manifest: PublicationManifest,
+    ) -> None: ...
+
     def remove_mirror(self, relationship: MirrorRelationship) -> None: ...
 
 
@@ -513,6 +518,38 @@ class FilePublicationStorage:
             )
         ]
         self.retain_mirror(replacement)
+
+    def retain_relinked_publication(
+        self, previous: MirrorRelationship, replacement: MirrorRelationship,
+        manifest: PublicationManifest,
+    ) -> None:
+        stored_manifest = asdict(manifest)
+        stored_manifest["created_at"] = manifest.created_at.isoformat()
+        next_manifests = [
+            item for item in self.manifests
+            if not (
+                item.get("account_id") == manifest.account_id
+                and item.get("spotify_playlist_id") == manifest.spotify_playlist_id
+            )
+        ]
+        next_manifests.append(stored_manifest)
+        stored_relationship = asdict(replacement)
+        stored_relationship["approved_at"] = replacement.approved_at.isoformat()
+        stored_relationship["orphaned_at"] = None
+        previous_mirrors = self.mirrors
+        self.mirrors = [
+            item for item in self.mirrors
+            if not (
+                item.get("account_id") == previous.account_id
+                and item.get("spotify_playlist_id") == previous.spotify_playlist_id
+            )
+        ]
+        self.mirrors.append(stored_relationship)
+        try:
+            self._save(next_manifests, self.approvals)
+        except Exception:
+            self.mirrors = previous_mirrors
+            raise
 
     def remove_mirror(self, relationship: MirrorRelationship) -> None:
         self.mirrors = [
@@ -1752,7 +1789,24 @@ class Transfer:
                 self._save_transfer(transfer_id, state)
                 assert self._publication_storage is not None
                 try:
-                    self._publication_storage.retain_publication(manifest)
+                    if request.mirror_disposition == MirrorDisposition.RELINK:
+                        assert request.mirror_playlist_id is not None
+                        previous = self._publication_storage.mirror_for_playlist(
+                            state.account_id, request.mirror_playlist_id,
+                        )
+                        assert previous is not None
+                        self._publication_storage.retain_relinked_publication(
+                            previous,
+                            replace(
+                                previous,
+                                source_label=self._source.source_label,
+                                source_reference=selection.reference,
+                                orphaned_at=None,
+                            ),
+                            manifest,
+                        )
+                    else:
+                        self._publication_storage.retain_publication(manifest)
                 except Exception:
                     if created_playlist:
                         self._spotify.delete_provisional_snapshot(playlist_id)
@@ -1765,21 +1819,6 @@ class Transfer:
                     state.status = TransferStatus.MATCHING
                     self._save_transfer(transfer_id, state)
                     raise
-                if request.mirror_disposition == MirrorDisposition.RELINK:
-                    assert request.mirror_playlist_id is not None
-                    previous = self._publication_storage.mirror_for_playlist(
-                        state.account_id, request.mirror_playlist_id,
-                    )
-                    assert previous is not None
-                    self._publication_storage.replace_mirror(
-                        previous,
-                        replace(
-                            previous,
-                            source_label=self._source.source_label,
-                            source_reference=selection.reference,
-                            orphaned_at=None,
-                        ),
-                    )
                 playlist.name = snapshot_name
                 playlist.spotify_playlist_id = playlist_id
                 playlist.publication_manifest = manifest
