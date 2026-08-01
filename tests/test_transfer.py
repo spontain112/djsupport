@@ -1466,6 +1466,243 @@ class TestRekordboxBatchPlanning:
         assert plan.expected_uncached_lookups == 0
 
 
+class TestRekordboxBatchExecution:
+    def test_playlist_failure_preserves_completed_work_and_continues(self, tmp_path):
+        class PlaylistFailureSpotify(StatefulSpotify):
+            def match(self, track, threshold):
+                if track.name == "Für Immer":
+                    raise ValueError("playlist-specific bad track")
+                return super().match(track, threshold)
+
+        spotify = PlaylistFailureSpotify({
+            ("Solomun", "Vultora (Original Mix)"): _match(
+                "spotify:track:vultora", "Vultora (Original Mix)", "Solomun",
+            ),
+            ("Eagles & Butterflies", "Sapphire (Joris Voorn Remix)"): _match(
+                "spotify:track:sapphire", "Sapphire (Joris Voorn Remix)",
+                "Eagles & Butterflies",
+            ),
+        })
+        storage = InMemoryStorage()
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=RekordboxPlaylistSource(REKORDBOX_FIXTURE), spotify=spotify,
+            matching_knowledge=storage, publication_storage=storage,
+            transfer_storage=FileTransferStorage(tmp_path / "transfers.json"),
+        )
+        plan = transfer.plan_batch(BatchPlanRequest(
+            playlist_references=(
+                "My Playlists/Peak Time", "My Playlists/Deep",
+            ),
+        ))
+
+        report = transfer.execute_batch(plan)
+
+        assert report.status == "partial success"
+        assert [playlist.outcome for playlist in report.playlists] == [
+            "completed", "failed",
+        ]
+        assert len(storage.publications) == 1
+        assert spotify.playlists["snapshot-1"]["tracks"] == [
+            "spotify:track:vultora", "spotify:track:sapphire",
+        ]
+
+    def test_playlist_failure_does_not_block_a_later_independent_playlist(
+        self, tmp_path,
+    ):
+        class PlaylistFailureSpotify(StatefulSpotify):
+            def match(self, track, threshold):
+                if track.name == "Für Immer":
+                    raise ValueError("playlist-specific bad track")
+                return super().match(track, threshold)
+
+        spotify = PlaylistFailureSpotify({
+            ("Solomun", "Vultora (Original Mix)"): _match(
+                "spotify:track:vultora", "Vultora (Original Mix)", "Solomun",
+            ),
+            ("Eagles & Butterflies", "Sapphire (Joris Voorn Remix)"): _match(
+                "spotify:track:sapphire", "Sapphire (Joris Voorn Remix)",
+                "Eagles & Butterflies",
+            ),
+        })
+        storage = InMemoryStorage()
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=RekordboxPlaylistSource(REKORDBOX_FIXTURE), spotify=spotify,
+            matching_knowledge=storage, publication_storage=storage,
+            transfer_storage=FileTransferStorage(tmp_path / "transfers.json"),
+        )
+
+        report = transfer.execute_batch(transfer.plan_batch(BatchPlanRequest(
+            playlist_references=(
+                "My Playlists/Deep", "My Playlists/Peak Time",
+            ),
+        )))
+
+        assert [playlist.outcome for playlist in report.playlists] == [
+            "failed", "completed",
+        ]
+        assert spotify.playlists["snapshot-1"]["tracks"] == [
+            "spotify:track:vultora", "spotify:track:sapphire",
+        ]
+
+    def test_shared_failure_stops_and_skips_later_playlists(self, tmp_path):
+        class RateLimitedSpotify(StatefulSpotify):
+            def match(self, track, threshold):
+                raise RateLimitError(3600)
+
+        storage = InMemoryStorage()
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=RekordboxPlaylistSource(REKORDBOX_FIXTURE),
+            spotify=RateLimitedSpotify(), matching_knowledge=storage,
+            publication_storage=storage,
+            transfer_storage=FileTransferStorage(tmp_path / "transfers.json"),
+        )
+        plan = transfer.plan_batch(BatchPlanRequest(
+            playlist_references=(
+                "My Playlists/Peak Time", "My Playlists/Deep",
+            ),
+        ))
+
+        report = transfer.execute_batch(plan)
+
+        assert report.status == "failed"
+        assert [playlist.outcome for playlist in report.playlists] == [
+            "failed", "skipped",
+        ]
+        assert report.playlists[1].action == "skipped after shared failure"
+        assert storage.publications == []
+        durable = FileTransferStorage(tmp_path / "transfers.json").load_batch(
+            report.transfer_id
+        )
+        assert [(item.phase, item.outcome) for item in durable.playlists] == [
+            ("paused", "failed"), ("pending", "skipped"),
+        ]
+
+    def test_resume_after_shared_failure_keeps_completed_publication(self, tmp_path):
+        class RecoveringSpotify(StatefulSpotify):
+            unavailable = True
+
+            def match(self, track, threshold):
+                if track.name == "Für Immer" and self.unavailable:
+                    raise requests.ConnectionError("Spotify unavailable")
+                return super().match(track, threshold)
+
+        spotify = RecoveringSpotify({
+            ("Solomun", "Vultora (Original Mix)"): _match(
+                "spotify:track:vultora", "Vultora (Original Mix)", "Solomun",
+            ),
+            ("Eagles & Butterflies", "Sapphire (Joris Voorn Remix)"): _match(
+                "spotify:track:sapphire", "Sapphire (Joris Voorn Remix)",
+                "Eagles & Butterflies",
+            ),
+            ("Âme", "Für Immer"): _match(
+                "spotify:track:fur-immer", "Für Immer", "Âme",
+            ),
+        })
+        publications = InMemoryStorage()
+        states = FileTransferStorage(tmp_path / "transfers.json")
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=RekordboxPlaylistSource(REKORDBOX_FIXTURE), spotify=spotify,
+            matching_knowledge=InMemoryStorage(), publication_storage=publications,
+            transfer_storage=states,
+            retry_policy=RetryPolicy(max_attempts=1, sleep=lambda _: None),
+        )
+        plan = transfer.plan_batch(BatchPlanRequest(
+            playlist_references=(
+                "My Playlists/Peak Time", "My Playlists/Deep",
+            ),
+        ))
+
+        stopped = transfer.execute_batch(plan)
+
+        assert stopped.status == "partial success"
+        assert [playlist.outcome for playlist in stopped.playlists] == [
+            "completed", "failed",
+        ]
+        assert len(publications.publications) == 1
+        completed_searches = list(spotify.searches)
+
+        spotify.unavailable = False
+        resumed = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=RekordboxPlaylistSource(REKORDBOX_FIXTURE), spotify=spotify,
+            matching_knowledge=InMemoryStorage(), publication_storage=publications,
+            transfer_storage=FileTransferStorage(states.path),
+            retry_policy=RetryPolicy(max_attempts=1, sleep=lambda _: None),
+        ).execute_batch(plan, transfer_id=stopped.transfer_id)
+
+        assert resumed.status == "completed"
+        assert spotify.searches[:2] == completed_searches
+        assert spotify.searches.count(
+            ("Solomun", "Vultora (Original Mix)", 80)
+        ) == 1
+        assert len(publications.publications) == 2
+
+    def test_paused_batch_reloads_and_resumes_without_repeating_effects(self, tmp_path):
+        matches = {
+            ("Solomun", "Vultora (Original Mix)"): _match(
+                "spotify:track:vultora", "Vultora (Original Mix)", "Solomun",
+            ),
+            ("Eagles & Butterflies", "Sapphire (Joris Voorn Remix)"): _match(
+                "spotify:track:sapphire", "Sapphire (Joris Voorn Remix)",
+                "Eagles & Butterflies",
+            ),
+            ("Âme", "Für Immer"): _match(
+                "spotify:track:fur-immer", "Für Immer", "Âme",
+            ),
+        }
+        spotify = StatefulSpotify(matches)
+        publications = InMemoryStorage()
+        state_path = tmp_path / "transfers.json"
+        first = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=RekordboxPlaylistSource(REKORDBOX_FIXTURE), spotify=spotify,
+            matching_knowledge=InMemoryStorage(), publication_storage=publications,
+            transfer_storage=FileTransferStorage(state_path),
+        )
+        plan = first.plan_batch(BatchPlanRequest(
+            playlist_references=(
+                "My Playlists/Peak Time", "My Playlists/Deep",
+            ),
+        ))
+        first.pause()
+
+        paused = first.execute_batch(plan)
+
+        assert paused.status == "paused"
+        assert [playlist.outcome for playlist in paused.playlists] == [
+            "pending", "pending",
+        ]
+        assert spotify.searches == [("Solomun", "Vultora (Original Mix)", 80)]
+
+        resumed = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=RekordboxPlaylistSource(REKORDBOX_FIXTURE), spotify=spotify,
+            matching_knowledge=InMemoryStorage(), publication_storage=publications,
+            transfer_storage=FileTransferStorage(state_path),
+        ).execute_batch(plan, transfer_id=paused.transfer_id)
+
+        assert resumed.status == "completed"
+        assert [playlist.outcome for playlist in resumed.playlists] == [
+            "completed", "completed",
+        ]
+        assert spotify.searches == [
+            ("Solomun", "Vultora (Original Mix)", 80),
+            ("Eagles & Butterflies", "Sapphire (Joris Voorn Remix)", 80),
+            ("Âme", "Für Immer", 80),
+        ]
+        assert len(publications.publications) == 2
+
+        report_path = tmp_path / "batch-report.md"
+        save_report(resumed, str(report_path))
+        text = report_path.read_text()
+        assert "**Outcome:** completed" in text
+        assert "**Status:** completed" in text
+
+
 class TestTransferPublicationLifecycle:
     def test_paused_transfer_reloads_and_resumes_without_repeating_work(self, tmp_path):
         matches = {

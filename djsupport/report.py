@@ -91,6 +91,7 @@ class PlaylistReport:
     mirror_dispositions: tuple[str, ...] = ()
     mirror_disposition: str | None = None
     action: str = "dry-run"  # "created", "updated", "unchanged", or "dry-run"
+    outcome: str = "completed"
     spotify_playlist_id: str | None = None
     publication_manifest: PublicationManifest | None = None
     cache_hits: int = 0
@@ -148,7 +149,9 @@ def print_report(report: SyncReport) -> None:
 
     for pl in report.playlists:
         click.echo()
-        click.echo(f"Playlist: {pl.path}  ({pl.action})")
+        click.echo(
+            f"Playlist: {pl.path}  ({pl.action})  |  Outcome: {pl.outcome}"
+        )
         click.echo(f"  Matched:  {len(pl.matched)}/{pl.total} ({pl.match_rate:.1f}%)")
 
         if pl.matched:
@@ -203,6 +206,8 @@ def save_report(report: SyncReport, path: str) -> None:
 
     for pl in report.playlists:
         lines.append(f"## {pl.path}  ({pl.action})")
+        lines.append("")
+        lines.append(f"**Outcome:** {pl.outcome}")
         lines.append("")
         lines.append(f"**Matched:** {len(pl.matched)}/{pl.total} ({pl.match_rate:.1f}%)")
 
