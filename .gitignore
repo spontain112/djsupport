@@ -1,8 +1,10 @@
 # Credentials and tokens
-.env
+.env*
+!.env.example
 .cache
 .cache/
 .spotipy_cache*
+*credentials*.json
 
 # Python
 __pycache__/
@@ -23,6 +25,16 @@ build/
 .djsupport_config.json
 *.xml
 !tests/fixtures/*.xml
+*playlist-state*.json
+
+# Local matching evidence and exports (force-add only after explicit consent
+# and privacy review for contribution)
+matching-regression*.json
+matching-regression*.csv
+matching-regression*.tsv
+local-regression*.json
+local-regression*.csv
+local-regression*.tsv
 
 # Claude Code session data (local-only)
 .claude/*
@@ -41,6 +53,15 @@ compound-engineering.local.md
 .playwright-cli/
 design-exports/
 screenshots/
+reports/
+docs/reports/
+*.djsupport-report.md
+*.djsupport-report.csv
+report.md
+review.csv
+*-report.md
+*-report.csv
+*-review.csv
 
 # OS artifacts
 .DS_Store

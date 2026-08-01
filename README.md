@@ -182,6 +182,11 @@ Edit a row's Spotify URL to provide a Correction. Corrections repair the playlis
 without duplicates and become approved matching knowledge stored only in your
 local application data.
 
+For matcher contributors, the optional live accuracy workflow consumes those
+local Corrections directly; no personal mapping fixture is kept in Git. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the privacy-safe workflow and synthetic
+fixture requirements.
+
 ### Playlist naming
 
 Spotify playlists are prefixed with `djsupport /` by default. Change or disable the prefix:

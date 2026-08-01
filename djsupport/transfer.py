@@ -1070,6 +1070,7 @@ class MatchCacheKnowledge:
             "source_track_id": item.source_track_id,
             "source_artist": item.source_artist,
             "source_title": item.source_title,
+            "source_duration": item.source_duration,
             "spotify_uri": item.spotify_uri,
             "spotify_name": item.spotify_name,
             "spotify_artist": item.spotify_artist,

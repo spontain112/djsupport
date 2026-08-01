@@ -25,4 +25,8 @@ Audit performed on 2026-07-31 after GitHub Issues became the configured work tra
 
 ## Data ownership
 
-The unmatched-track report remains tracked temporarily so its generalized findings are not lost before issue #33 provides a safe local destination. Do not add new personal reports, Corrections, Approved Matches, playlist state, or user-derived regression data to Git.
+Issue #33 removed the personal unmatched-track listing after its generalized
+metadata findings were retained in issue #32. Corrections, Approved Matches,
+playlist state, reports, and user-derived regression knowledge remain in local
+application storage; repository tests use synthetic or explicitly exported,
+consented, and privacy-reviewed contributions only.

@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Live matcher accuracy checks now read Correction-derived regression knowledge
+  from private, versioned application storage. The tracked personal report and
+  curated mapping fixture were removed, with stronger ignore and contribution
+  guardrails for user-derived artifacts.
 - All production flows now enter the public Transfer interface; the replaced
   shallow `service.py` orchestration and its implementation-coupled tests were
   removed. Rekordbox work now requires explicit playlist selection or an
