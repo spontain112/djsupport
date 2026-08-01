@@ -9,13 +9,15 @@ from __future__ import annotations
 
 import json
 import hashlib
+import csv
 import os
+import re
 import sys
 import tempfile
 import time
 from collections import Counter
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -39,6 +41,10 @@ from djsupport.spotify import MAX_RATE_LIMIT_WAIT, RateLimitError, _parse_retry_
 
 PUBLICATION_MANIFEST_VERSION = 1
 TRANSFER_STATE_VERSION = 1
+SPOTIFY_TRACK_URI = re.compile(r"^spotify:track:([A-Za-z0-9]{22})$")
+SPOTIFY_TRACK_URL = re.compile(
+    r"^https://open\.spotify\.com/track/([A-Za-z0-9]{22})(?:\?.*)?$"
+)
 ResultT = TypeVar("ResultT")
 
 
@@ -237,6 +243,7 @@ class ApprovalOutcome:
     approved: tuple[PublicationItem, ...] = ()
     rejected: tuple[PublicationItem, ...] = ()
     collisions: tuple[PublicationItem, ...] = ()
+    corrections: tuple[PublicationItem, ...] = ()
 
 
 class SourceAdapter(Protocol):
@@ -260,6 +267,12 @@ class SpotifyAdapter(Protocol):
     def provisional_playlist_track_uris(
         self, playlist_id: str,
     ) -> list[str] | None: ...
+
+    def replace_provisional_playlist_tracks(
+        self, playlist_id: str, track_uris: list[str],
+    ) -> None: ...
+
+    def spotify_track(self, uri: str) -> dict: ...
 
 
 class PublicationStorage(Protocol):
@@ -413,6 +426,8 @@ class MatchingKnowledge(Protocol):
 
     def reject(self, item: PublicationItem) -> None: ...
 
+    def correct(self, item: PublicationItem) -> None: ...
+
 
 class BeatportChartSource:
     """Production source adapter for one Beatport chart."""
@@ -505,6 +520,23 @@ class SpotifyMatcher:
             page = self._client.next(page)
         return uris
 
+    def replace_provisional_playlist_tracks(
+        self, playlist_id: str, track_uris: list[str],
+    ) -> None:
+        self._client.playlist_replace_items(playlist_id, track_uris[:100])
+        for offset in range(100, len(track_uris), 100):
+            self._client.playlist_add_items(
+                playlist_id, track_uris[offset:offset + 100],
+            )
+
+    def spotify_track(self, uri: str) -> dict:
+        track = self._client.track(uri)
+        return {
+            "uri": track["uri"],
+            "name": track["name"],
+            "artist": ", ".join(artist["name"] for artist in track["artists"]),
+        }
+
 
 class MatchCacheKnowledge:
     """Expose the existing durable match cache as Transfer storage."""
@@ -566,6 +598,17 @@ class MatchCacheKnowledge:
             },
         )
 
+    def correct(self, item: PublicationItem) -> None:
+        self.approve(item)
+        self._cache.record_correction({
+            "source_track_id": item.source_track_id,
+            "source_artist": item.source_artist,
+            "source_title": item.source_title,
+            "spotify_uri": item.spotify_uri,
+            "spotify_name": item.spotify_name,
+            "spotify_artist": item.spotify_artist,
+        })
+
 
 class EphemeralMatchingKnowledge:
     """Non-persistent matching knowledge used for explicit ``--no-cache``."""
@@ -590,6 +633,9 @@ class EphemeralMatchingKnowledge:
         pass
 
     def reject(self, item: PublicationItem) -> None:
+        pass
+
+    def correct(self, item: PublicationItem) -> None:
         pass
 
 
@@ -634,7 +680,9 @@ class Transfer:
         state.status = TransferStatus.ABANDONED
         self._transfer_storage.save_transfer(transfer_id, state)
 
-    def approve(self, playlist_id: str) -> ApprovalOutcome:
+    def approve(
+        self, playlist_id: str, *, corrections: str | Path | None = None,
+    ) -> ApprovalOutcome:
         """Review exactly one retained Provisional Playlist against Spotify."""
         if self._publication_storage is None:
             raise ValueError("Approval requires publication storage")
@@ -647,6 +695,7 @@ class Transfer:
                 f"No Provisional Playlist {playlist_id} belongs to this Spotify account"
             )
         with self._publishing_guards.acquire(account_id):
+            corrected_items = self._read_corrections(corrections, manifest)
             current_uris = self._retry_policy.run(
                 lambda: self._spotify.provisional_playlist_track_uris(playlist_id)
             )
@@ -658,17 +707,23 @@ class Transfer:
                     status=ApprovalStatus.ABANDONED,
                 )
             else:
+                if corrected_items:
+                    current_uris = self._repair_corrections(
+                        playlist_id, manifest, current_uris, corrected_items,
+                    )
                 remaining = Counter(current_uris)
                 approved: list[PublicationItem] = []
                 rejected: list[PublicationItem] = []
-                proposed_counts = Counter(
-                    item.spotify_uri for item in manifest.items
+                reviewed_items = tuple(
+                    corrected_items.get(item.source_track_id, item)
+                    for item in manifest.items
                 )
+                proposed_counts = Counter(item.spotify_uri for item in reviewed_items)
                 collision_uris = {
                     uri for uri, count in proposed_counts.items() if count > 1
                 }
                 collisions: list[PublicationItem] = []
-                for item in manifest.items:
+                for item in reviewed_items:
                     if item.spotify_uri in collision_uris:
                         collisions.append(item)
                         continue
@@ -688,14 +743,132 @@ class Transfer:
                     approved=tuple(approved),
                     rejected=tuple(rejected),
                     collisions=tuple(collisions),
+                    corrections=tuple(
+                        item for item in approved
+                        if item.source_track_id in corrected_items
+                    ),
                 )
                 for item in outcome.approved:
-                    self._knowledge.approve(item)
+                    if item.source_track_id in corrected_items:
+                        self._knowledge.correct(item)
+                    else:
+                        self._knowledge.approve(item)
                 for item in outcome.rejected:
                     self._knowledge.reject(item)
                 self._knowledge.checkpoint()
             self._publication_storage.retain_approval(outcome)
             return outcome
+
+    def _read_corrections(
+        self, corrections: str | Path | None, manifest: PublicationManifest,
+    ) -> dict[str, PublicationItem]:
+        if corrections is None:
+            return {}
+        source_reference_counts = Counter(
+            item.source_track_id for item in manifest.items
+        )
+        manifest_items = {item.source_track_id: item for item in manifest.items}
+        corrected: dict[str, PublicationItem] = {}
+        with Path(corrections).open(newline="") as csv_file:
+            reader = csv.DictReader(csv_file)
+            required = {"source_track_id", "spotify_url"}
+            if not required.issubset(reader.fieldnames or ()):
+                raise ValueError(
+                    "Correction CSV requires source_track_id and spotify_url columns"
+                )
+            for row_number, row in enumerate(reader, start=2):
+                source_track_id = (row.get("source_track_id") or "").strip()
+                spotify_reference = (row.get("spotify_url") or "").strip()
+                if not spotify_reference:
+                    continue
+                if not source_track_id or source_track_id not in manifest_items:
+                    raise ValueError(
+                        f"Correction row {row_number} has an unknown source_track_id"
+                    )
+                if source_reference_counts[source_track_id] != 1:
+                    raise ValueError(
+                        f"Correction row {row_number} source_track_id "
+                        f"{source_track_id} is not a unique stable source reference"
+                    )
+                if source_track_id in corrected:
+                    raise ValueError(
+                        f"Correction row {row_number} repeats source_track_id "
+                        f"{source_track_id}"
+                    )
+                original = manifest_items[source_track_id]
+                if spotify_reference == original.spotify_uri or (
+                    original.spotify_uri.startswith("spotify:track:")
+                    and spotify_reference.split("?", 1)[0].endswith(
+                        f"/track/{original.spotify_uri.removeprefix('spotify:track:')}"
+                    )
+                ):
+                    continue
+                spotify_uri = self._spotify_uri(spotify_reference, row_number)
+                spotify_track = self._retry_policy.run(
+                    lambda uri=spotify_uri: self._spotify.spotify_track(uri)
+                )
+                if spotify_track.get("uri") != spotify_uri:
+                    raise ValueError(
+                        f"Correction row {row_number} did not resolve to its Spotify track"
+                    )
+                corrected[source_track_id] = replace(
+                    original,
+                    spotify_uri=spotify_uri,
+                    spotify_name=spotify_track["name"],
+                    spotify_artist=spotify_track["artist"],
+                    score=100.0,
+                    match_type="correction",
+                )
+        return corrected
+
+    @staticmethod
+    def _spotify_uri(reference: str, row_number: int) -> str:
+        uri_match = SPOTIFY_TRACK_URI.fullmatch(reference)
+        if uri_match:
+            return reference
+        url_match = SPOTIFY_TRACK_URL.fullmatch(reference)
+        if url_match:
+            return f"spotify:track:{url_match.group(1)}"
+        raise ValueError(
+            f"Correction row {row_number} has an invalid Spotify track URL or URI"
+        )
+
+    def _repair_corrections(
+        self,
+        playlist_id: str,
+        manifest: PublicationManifest,
+        current_uris: list[str],
+        corrected_items: dict[str, PublicationItem],
+    ) -> list[str]:
+        original_uris = {item.spotify_uri for item in manifest.items}
+        corrected_uris = {item.spotify_uri for item in corrected_items.values()}
+        managed_uris = original_uris | corrected_uris
+        present = Counter(current_uris)
+        desired = []
+        for item in manifest.items:
+            correction = corrected_items.get(item.source_track_id)
+            if correction is not None:
+                if correction.spotify_uri not in desired:
+                    desired.append(correction.spotify_uri)
+            elif present[item.spotify_uri] and item.spotify_uri not in desired:
+                desired.append(item.spotify_uri)
+
+        first_managed = next(
+            (index for index, uri in enumerate(current_uris) if uri in managed_uris),
+            0,
+        )
+        manual = [uri for uri in current_uris if uri not in managed_uris]
+        insertion = sum(
+            1 for uri in current_uris[:first_managed] if uri not in managed_uris
+        )
+        repaired = [*manual[:insertion], *desired, *manual[insertion:]]
+        if repaired != current_uris:
+            self._retry_policy.run(
+                lambda: self._spotify.replace_provisional_playlist_tracks(
+                    playlist_id, repaired,
+                )
+            )
+        return repaired
 
     def execute(self, request: TransferRequest) -> SyncReport:
         """Execute at most one publishing Transfer per Spotify account."""

@@ -151,11 +151,14 @@ then approve that one playlist:
 
 ```bash
 djsupport beatport <chart-url> --report review.md
-djsupport approve <spotify-playlist-id>
+djsupport approve <spotify-playlist-id> --review-csv review.csv
 ```
 
 Approval records surviving proposals as approved, removed proposals as rejected,
 and a deleted Provisional Playlist as abandoned while retaining its history.
+Edit a row's Spotify URL to provide a Correction. Corrections repair the playlist
+without duplicates and become approved matching knowledge stored only in your
+local application data.
 
 ### Playlist naming
 

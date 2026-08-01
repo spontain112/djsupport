@@ -323,7 +323,13 @@ DEFAULT_BEATPORT_STATE_PATH = str(default_publication_manifest_path())
     "--cache-path", default=DEFAULT_BEATPORT_CACHE_PATH, show_default=True,
     help="Path to durable matching knowledge.",
 )
-def approve(playlist_id: str, state_path: str, cache_path: str) -> None:
+@click.option(
+    "--review-csv", type=click.Path(exists=True, dir_okay=False),
+    help="Edited review CSV containing explicit Corrections.",
+)
+def approve(
+    playlist_id: str, state_path: str, cache_path: str, review_csv: str | None,
+) -> None:
     """Approve one Provisional Playlist after reviewing it in Spotify."""
     from djsupport.cache import MatchCache
     from djsupport.transfer import (
@@ -344,7 +350,10 @@ def approve(playlist_id: str, state_path: str, cache_path: str) -> None:
         publication_storage=FilePublicationStorage(state_path),
     )
     try:
-        review = transfer.approve(playlist_id)
+        if review_csv is None:
+            review = transfer.approve(playlist_id)
+        else:
+            review = transfer.approve(playlist_id, corrections=review_csv)
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     if review.status.value == "abandoned":
@@ -355,7 +364,8 @@ def approve(playlist_id: str, state_path: str, cache_path: str) -> None:
     click.echo(
         f"Provisional Playlist {playlist_id}: "
         f"{len(review.approved)} approved, {len(review.rejected)} rejected, "
-        f"{len(review.collisions)} collisions."
+        f"{len(review.collisions)} collisions, "
+        f"{len(review.corrections)} Corrections."
     )
 
 

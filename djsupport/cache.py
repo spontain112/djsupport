@@ -30,6 +30,7 @@ class MatchCache:
     def __init__(self, path: str = DEFAULT_CACHE_PATH):
         self.path = Path(path)
         self.entries: dict[str, CacheEntry] = {}
+        self.local_regressions: list[dict] = []
         self._dirty_count: int = 0
 
     def load(self) -> None:
@@ -44,6 +45,7 @@ class MatchCache:
             return
         for key, entry in data.get("entries", {}).items():
             self.entries[key] = CacheEntry(**entry)
+        self.local_regressions = data.get("local_regressions", [])
 
     def save(self) -> None:
         """Write cache to disk."""
@@ -51,6 +53,7 @@ class MatchCache:
         data = {
             "version": CACHE_VERSION,
             "entries": {k: asdict(v) for k, v in self.entries.items()},
+            "local_regressions": self.local_regressions,
         }
         self.path.write_text(json.dumps(data, indent=2))
         self._dirty_count = 0
@@ -123,6 +126,16 @@ class MatchCache:
             )
             self.entries[key] = entry
         entry.approval_status = status
+        self._dirty_count += 1
+
+    def record_correction(self, correction: dict) -> None:
+        """Retain user-derived matcher truth only in local application data."""
+        identity = correction["source_track_id"]
+        self.local_regressions = [
+            item for item in self.local_regressions
+            if item.get("source_track_id") != identity
+        ]
+        self.local_regressions.append(correction)
         self._dirty_count += 1
 
     def is_retry_eligible(self, artist: str, title: str,
