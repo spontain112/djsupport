@@ -5,10 +5,15 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["djsupport*"]
 
+[tool.setuptools.package-data]
+djsupport = ["static/*.html", "static/*.png"]
+
 [project]
 name = "djsupport"
-version = "0.3.0"
+version = "0.4.0"
 description = "Transfer Rekordbox and Beatport selections to Spotify"
+readme = "README.md"
+license = "MIT"
 requires-python = ">=3.10"
 dependencies = [
     "spotipy>=2.23",
@@ -31,6 +36,10 @@ dev = [
 
 [project.scripts]
 djsupport = "djsupport.cli:cli"
+
+[project.urls]
+Repository = "https://github.com/spontain112/djsupport"
+Issues = "https://github.com/spontain112/djsupport/issues"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

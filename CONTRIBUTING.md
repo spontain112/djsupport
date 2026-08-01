@@ -34,3 +34,23 @@ Use `--knowledge-path PATH` to select another local matching-knowledge file.
 This workflow calls Spotify and is not part of the offline test suite. Do not
 attach its output to an issue or pull request unless it has been generalized
 and privacy-reviewed.
+
+## Development and release checks
+
+Install development and optional web dependencies with:
+
+```bash
+python -m pip install -e ".[dev,web]"
+```
+
+Run the offline suite with `pytest`. Release preparation also compiles the
+Python package, runs the repository privacy tests, builds both source and wheel
+artifacts, inspects every archive member, and installs the wheel in a clean
+temporary environment for CLI/import smoke tests. Live Spotify and Beatport
+checks are separate, explicitly authorized workflows and are never part of the
+offline release gate.
+
+When a persistent schema changes, keep its reader compatible with documented
+older versions or provide an explicit migration. Add a synthetic backup/restore
+test that covers the current schema and the supported upgrade boundary. Never
+use an actual application-data directory for release validation.

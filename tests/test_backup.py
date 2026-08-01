@@ -133,6 +133,21 @@ class TestRestorePreview:
         assert preview.conflicts == ()
         assert (target / "matching-knowledge.json").read_bytes() == before
 
+    def test_accepts_current_publication_manifest_schema(self, tmp_path):
+        source = tmp_path / "source"
+        _write_json(source / "publication-manifests.json", {
+            "version": 4,
+            "manifests": [],
+            "approvals": [],
+            "mirrors": [],
+        })
+        archive = LocalDataBackup(source).create(tmp_path / "backups")
+
+        preview = LocalDataBackup(tmp_path / "target").preview(archive)
+
+        assert preview.valid is True
+        assert preview.contents == ("publication-manifests.json",)
+
     @pytest.mark.parametrize("damage", ["corrupt", "unsupported-backup", "unsupported-data"])
     def test_rejects_corrupt_or_unsupported_archive(self, tmp_path, damage):
         source = tmp_path / "source"
