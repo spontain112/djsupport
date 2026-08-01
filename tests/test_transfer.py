@@ -1786,6 +1786,37 @@ class TestRekordboxBatchExecution:
 
 
 class TestTransferPublicationLifecycle:
+    def test_progress_reloads_from_durable_state_without_resuming_work(self, tmp_path):
+        spotify = StatefulSpotify({
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+        })
+        state_path = tmp_path / "transfers.json"
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=InMemoryStorage(),
+            publication_storage=InMemoryStorage(),
+            transfer_storage=FileTransferStorage(state_path),
+        )
+        transfer.pause()
+        paused = transfer.execute(TransferRequest(source="fixture"))
+
+        progress = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=InMemoryStorage(),
+            publication_storage=InMemoryStorage(),
+            transfer_storage=FileTransferStorage(state_path),
+        ).progress(paused.transfer_id)
+
+        assert progress.status == "paused"
+        assert progress.current == 1
+        assert progress.total == 2
+        assert progress.source == "fixture"
+        assert spotify.searches == [("Known Artist", "Known Track", 80)]
+
     def test_paused_transfer_reloads_and_resumes_without_repeating_work(self, tmp_path):
         matches = {
             ("Known Artist", "Known Track"): _match(

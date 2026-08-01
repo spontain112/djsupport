@@ -522,6 +522,22 @@
         }
         checkAuth();
 
+        const activeTransferKey = 'djsupport.activeTransfer';
+        const activeTransferId = localStorage.getItem(activeTransferKey);
+        if (activeTransferId) {
+            document.getElementById('input-section').classList.add('hidden');
+            document.getElementById('progress-section').classList.remove('hidden');
+            fetch(`/sync/${activeTransferId}/resume`, { method: 'POST' })
+                .then((response) => {
+                    if (!response.ok) throw new Error('Unable to resume Transfer');
+                    listenProgress(activeTransferId);
+                })
+                .catch(() => {
+                    localStorage.removeItem(activeTransferKey);
+                    showError('Unable to reload the previous Transfer');
+                });
+        }
+
         // URL validation
         urlInput.addEventListener('input', () => {
             const url = urlInput.value.trim();
@@ -579,6 +595,7 @@
                 }
 
                 const data = await res.json();
+                localStorage.setItem(activeTransferKey, data.transfer_id);
                 listenProgress(data.job_id);
             } catch (e) {
                 showError(e.message);
@@ -657,6 +674,7 @@
         }
 
         function showResults(data) {
+            localStorage.removeItem(activeTransferKey);
             document.getElementById('progress-section').classList.add('hidden');
             document.getElementById('results-section').classList.remove('hidden');
 

@@ -159,6 +159,17 @@ class TransferStatus(str, Enum):
     ABANDONED = "abandoned"
 
 
+@dataclass(frozen=True)
+class TransferProgress:
+    """Durable, adapter-facing progress for one Transfer."""
+
+    transfer_id: str
+    source: str
+    status: str
+    current: int
+    total: int
+
+
 class BatchPhase(str, Enum):
     PENDING = "pending"
     PAUSED = "paused"
@@ -1114,6 +1125,23 @@ class Transfer:
     def pause(self) -> None:
         """Request a pause after the current track reaches a safe checkpoint."""
         self._pause_requested = True
+
+    def progress(self, transfer_id: str) -> TransferProgress:
+        """Reload observable progress without consuming or resuming the source."""
+        if self._transfer_storage is None:
+            raise ValueError("Progress requires durable Transfer storage")
+        state = self._transfer_storage.load_transfer(transfer_id)
+        if state is None:
+            raise ValueError(f"Unknown Transfer: {transfer_id}")
+        if state.account_id != self._spotify.account_id():
+            raise ValueError("A Transfer cannot be viewed under another Spotify account")
+        return TransferProgress(
+            transfer_id=transfer_id,
+            source=state.source,
+            status=state.status.value,
+            current=state.next_track_index,
+            total=len(state.selection.get("tracks", ())),
+        )
 
     def plan_batch(self, request: BatchPlanRequest) -> BatchPlan:
         """Plan an explicitly selected Rekordbox Batch without side effects."""
@@ -2263,6 +2291,12 @@ class Transfer:
             self._save_transfer(transfer_id, state)
             raise
         except KeyboardInterrupt:
+            state.status = TransferStatus.PAUSED
+            self._save_transfer(transfer_id, state)
+            raise
+        except Exception:
+            # A durable single Transfer remains resumable after adapter or
+            # integration failures that are not classified above.
             state.status = TransferStatus.PAUSED
             self._save_transfer(transfer_id, state)
             raise

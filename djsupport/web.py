@@ -1,19 +1,17 @@
-"""FastAPI web backend for djsupport."""
+"""Thin FastAPI adapter for durable djsupport Transfers."""
 
 from __future__ import annotations
 
 import asyncio
 import json
 import logging
-import queue
 import threading
-import uuid
 from contextlib import asynccontextmanager
 from html import escape
 from pathlib import Path
-from threading import Lock
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
@@ -22,10 +20,25 @@ from pydantic import BaseModel
 from spotipy.oauth2 import SpotifyOAuth
 
 from djsupport.report import SyncReport
-from djsupport.service import ProgressEvent, sync_beatport_chart, sync_beatport_label
-from djsupport.spotify import SCOPES, RateLimitError
+from djsupport.spotify import SCOPES
+from djsupport.transfer import (
+    AccountPublishingGuards,
+    BeatportChartSource,
+    BeatportLabelSource,
+    EphemeralMatchingKnowledge,
+    FilePublicationStorage,
+    FileTransferStorage,
+    MatchCacheKnowledge,
+    SpotifyMatcher,
+    Transfer,
+    TransferMode,
+    TransferRequest,
+    default_matching_knowledge_path,
+    default_publication_manifest_path,
+)
 
 logger = logging.getLogger(__name__)
+STATIC_DIR = Path(__file__).parent / "static"
 
 
 @asynccontextmanager
@@ -34,79 +47,6 @@ async def lifespan(app: FastAPI):
     load_dotenv()
     yield
 
-STATIC_DIR = Path(__file__).parent / "static"
-
-app = FastAPI(title="djsupport", lifespan=lifespan)
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-
-
-# ---------------------------------------------------------------------------
-# In-memory job store (single-user, single-job)
-# ---------------------------------------------------------------------------
-
-class SyncJob:
-    def __init__(self, job_id: str, url: str):
-        self.job_id = job_id
-        self.url = url
-        self.progress_queue: queue.Queue[ProgressEvent | None] = queue.Queue(maxsize=500)
-        self.result: dict | None = None
-        self.error: str | None = None
-        self.done = False
-
-
-_current_job: SyncJob | None = None
-_job_lock = Lock()
-
-
-# ---------------------------------------------------------------------------
-# Auth endpoints
-# ---------------------------------------------------------------------------
-
-def _auth_manager() -> SpotifyOAuth:
-    return SpotifyOAuth(scope=SCOPES, open_browser=False)
-
-
-@app.get("/auth/status")
-def auth_status():
-    """Check if a valid Spotify token exists."""
-    mgr = _auth_manager()
-    token = mgr.get_cached_token()
-    if token and not mgr.is_token_expired(token):
-        return {"authenticated": True}
-    if token and mgr.is_token_expired(token):
-        try:
-            refreshed = mgr.refresh_access_token(token["refresh_token"])
-            if refreshed:
-                return {"authenticated": True}
-        except Exception:
-            pass
-    return {"authenticated": False}
-
-
-@app.get("/auth/login")
-def auth_login():
-    """Redirect the user to Spotify's authorization page."""
-    mgr = _auth_manager()
-    auth_url = mgr.get_authorize_url()
-    return RedirectResponse(auth_url)
-
-
-@app.get("/auth/callback")
-def auth_callback(code: str | None = None, error: str | None = None):
-    """Handle the Spotify OAuth callback."""
-    if error:
-        return HTMLResponse(f"<h1>Auth error</h1><p>{escape(error)}</p>", status_code=400)
-    if not code:
-        return HTMLResponse("<h1>Missing code</h1>", status_code=400)
-
-    mgr = _auth_manager()
-    mgr.get_access_token(code)
-    return RedirectResponse("/")
-
-
-# ---------------------------------------------------------------------------
-# Sync endpoints
-# ---------------------------------------------------------------------------
 
 class SyncRequest(BaseModel):
     url: str
@@ -118,160 +58,243 @@ class SyncRequest(BaseModel):
     no_cache: bool = False
 
 
+def _auth_manager() -> SpotifyOAuth:
+    return SpotifyOAuth(scope=SCOPES, open_browser=False)
+
+
 def _detect_url_type(url: str) -> str:
-    """Return 'chart', 'label', or raise ValueError."""
+    """Return ``chart`` or ``label`` for a supported Beatport URL."""
     parsed = urlparse(url)
     if parsed.hostname not in ("beatport.com", "www.beatport.com"):
-        raise ValueError(
-            "URL must be a Beatport chart or label URL "
-            "(e.g. https://www.beatport.com/chart/name/123 "
-            "or https://www.beatport.com/label/name/1)"
-        )
+        raise ValueError(_url_error())
     if "/chart/" in parsed.path:
         return "chart"
     if "/label/" in parsed.path:
         return "label"
-    raise ValueError(
+    raise ValueError(_url_error())
+
+
+def _url_error() -> str:
+    return (
         "URL must be a Beatport chart or label URL "
         "(e.g. https://www.beatport.com/chart/name/123 "
         "or https://www.beatport.com/label/name/1)"
     )
 
 
-@app.post("/sync")
-def start_sync(req: SyncRequest):
-    """Start a sync job. Returns the job ID."""
-    global _current_job
-
-    # Validate URL type
-    try:
-        url_type = _detect_url_type(req.url)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    # Check auth
-    mgr = _auth_manager()
-    token = mgr.get_cached_token()
-    if not token or mgr.is_token_expired(token):
-        raise HTTPException(status_code=401, detail="Not authenticated with Spotify")
-
-    with _job_lock:
-        if _current_job is not None and not _current_job.done:
-            raise HTTPException(status_code=409, detail="A sync is already running")
-
-        job_id = uuid.uuid4().hex[:12]
-        job = SyncJob(job_id, req.url)
-        _current_job = job
-
-    # Run sync in background thread
-    thread = threading.Thread(
-        target=_run_sync, args=(job, url_type, req), daemon=True,
-    )
-    thread.start()
-    return {"job_id": job_id, "url_type": url_type}
-
-
-def _run_sync(job: SyncJob, url_type: str, req: SyncRequest) -> None:
-    """Execute the sync in a background thread."""
+def _default_transfer_factory(url_type: str, request: SyncRequest) -> Transfer:
     from djsupport.cache import MatchCache
     from djsupport.spotify import get_client
-    from djsupport.state import PlaylistStateManager
 
-    cache_path = (
-        ".djsupport_beatport_cache.json" if url_type == "chart"
-        else ".djsupport_label_cache.json"
-    )
-    state_path = (
-        ".djsupport_beatport_playlists.json" if url_type == "chart"
-        else ".djsupport_label_playlists.json"
-    )
-
-    cache = None if req.no_cache else MatchCache(cache_path)
+    cache = None if request.no_cache else MatchCache(default_matching_knowledge_path())
     if cache is not None:
         cache.load()
-    state_mgr = PlaylistStateManager(state_path)
-    state_mgr.load()
+    publication_path = default_publication_manifest_path()
+    return Transfer(
+        source=(BeatportChartSource() if url_type == "chart" else BeatportLabelSource()),
+        spotify=SpotifyMatcher(get_client()),
+        publishing_guards=AccountPublishingGuards(),
+        matching_knowledge=(
+            EphemeralMatchingKnowledge() if cache is None else MatchCacheKnowledge(cache)
+        ),
+        publication_storage=(
+            None if request.dry_run else FilePublicationStorage(publication_path)
+        ),
+        transfer_storage=FileTransferStorage(
+            publication_path.with_suffix(".transfers.json")
+        ),
+    )
 
-    def _on_progress(event: ProgressEvent) -> None:
+
+def _thread_runner(target: Callable, args: tuple) -> None:
+    threading.Thread(target=target, args=args, daemon=True).start()
+
+
+def create_app(
+    *,
+    transfer_factory: Callable[[str, SyncRequest], Transfer] | None = None,
+    auth_manager: Callable[[], SpotifyOAuth] | None = None,
+    background_runner: Callable[[Callable, tuple], None] | None = None,
+) -> FastAPI:
+    """Create the web adapter with replaceable external-boundary wiring."""
+    web_app = FastAPI(title="djsupport", lifespan=lifespan)
+    web_app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+    make_transfer = transfer_factory or _default_transfer_factory
+    run_background = background_runner or _thread_runner
+
+    def oauth_manager():
+        return auth_manager() if auth_manager is not None else _auth_manager()
+
+    def transfer_for(transfer_id: str, request: SyncRequest | None = None):
+        probe_request = request or SyncRequest(
+            url="https://www.beatport.com/chart/durable/1"
+        )
+        probe = make_transfer("chart", probe_request)
         try:
-            job.progress_queue.put_nowait(event)
-        except queue.Full:
-            pass  # drop event if consumer is too slow
+            progress = probe.progress(transfer_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail="Transfer not found") from exc
+        url_type = _detect_url_type(progress.source)
+        return make_transfer(
+            url_type,
+            request or SyncRequest(url=progress.source),
+        ), progress
 
-    sync_kwargs: dict[str, Any] = {
-        "sp": get_client(),
-        "cache": cache,
-        "state_mgr": state_mgr,
-        "on_progress": _on_progress,
-        "threshold": req.threshold,
-        "dry_run": req.dry_run,
-        "prefix": req.prefix,
-        "retry": req.retry,
-        "retry_days": req.retry_days,
-    }
+    @web_app.get("/auth/status")
+    def auth_status():
+        mgr = oauth_manager()
+        token = mgr.get_cached_token()
+        if token and not mgr.is_token_expired(token):
+            return {"authenticated": True}
+        if token and mgr.is_token_expired(token):
+            try:
+                if mgr.refresh_access_token(token["refresh_token"]):
+                    return {"authenticated": True}
+            except Exception:
+                pass
+        return {"authenticated": False}
 
+    @web_app.get("/auth/login")
+    def auth_login():
+        return RedirectResponse(oauth_manager().get_authorize_url())
+
+    @web_app.get("/auth/callback")
+    def auth_callback(code: str | None = None, error: str | None = None):
+        if error:
+            return HTMLResponse(
+                f"<h1>Auth error</h1><p>{escape(error)}</p>", status_code=400,
+            )
+        if not code:
+            return HTMLResponse("<h1>Missing code</h1>", status_code=400)
+        oauth_manager().get_access_token(code)
+        return RedirectResponse("/")
+
+    @web_app.post("/sync")
+    def start_sync(request: SyncRequest):
+        try:
+            url_type = _detect_url_type(request.url)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        mgr = oauth_manager()
+        token = mgr.get_cached_token()
+        if not token or mgr.is_token_expired(token):
+            raise HTTPException(status_code=401, detail="Not authenticated with Spotify")
+        transfer_id = uuid4().hex
+        transfer = make_transfer(url_type, request)
+        transfer_request = TransferRequest(
+            source=request.url,
+            mode=TransferMode.SNAPSHOT,
+            preview=request.dry_run,
+            threshold=request.threshold,
+            retry=request.retry,
+            retry_days=request.retry_days,
+            playlist_prefix=request.prefix,
+            transfer_id=transfer_id,
+        )
+        run_background(_run_transfer, (transfer, transfer_request))
+        return {
+            "job_id": transfer_id,
+            "transfer_id": transfer_id,
+            "url_type": url_type,
+        }
+
+    @web_app.get("/sync/{transfer_id}/progress")
+    async def sync_progress(transfer_id: str):
+        async def event_stream():
+            while True:
+                transfer, progress = transfer_for(transfer_id)
+                data = {
+                    "phase": (
+                        "complete" if progress.status == "completed"
+                        else progress.status
+                    ),
+                    "current": progress.current,
+                    "total": progress.total,
+                    "detail": f"{progress.current}/{progress.total}",
+                }
+                yield f"data: {json.dumps(data)}\n\n"
+                if progress.status in {"completed", "paused", "abandoned"}:
+                    break
+                await asyncio.sleep(0.25)
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+    @web_app.post("/sync/{transfer_id}/resume")
+    def resume_sync(transfer_id: str):
+        mgr = oauth_manager()
+        token = mgr.get_cached_token()
+        if not token or mgr.is_token_expired(token):
+            raise HTTPException(status_code=401, detail="Not authenticated with Spotify")
+        transfer, progress = transfer_for(transfer_id)
+        if progress.status not in {"completed", "abandoned"}:
+            run_background(
+                _run_transfer,
+                (transfer, TransferRequest(
+                    source=progress.source, transfer_id=transfer_id,
+                )),
+            )
+        return {"transfer_id": transfer_id, "status": progress.status}
+
+    @web_app.get("/sync/{transfer_id}/result")
+    def sync_result(transfer_id: str):
+        transfer, progress = transfer_for(transfer_id)
+        if progress.status != "completed":
+            raise HTTPException(status_code=202, detail="Transfer still in progress")
+        report = transfer.execute(TransferRequest(
+            source=progress.source, transfer_id=transfer_id,
+        ))
+        return _report_to_dict(report)
+
+    @web_app.get("/")
+    def index():
+        return HTMLResponse((STATIC_DIR / "index.html").read_text())
+
+    return web_app
+
+
+def _run_transfer(transfer: Transfer, request: TransferRequest) -> None:
     try:
-        if url_type == "chart":
-            report = sync_beatport_chart(job.url, **sync_kwargs)
-        else:
-            report = sync_beatport_label(job.url, **sync_kwargs)
-
-        if cache is not None:
-            cache.save()
-        state_mgr.save()
-
-        job.result = _report_to_dict(report)
-    except RateLimitError as e:
-        if cache is not None:
-            cache.save()
-        job.error = str(e)
-        _on_progress(ProgressEvent(phase="error", detail=str(e)))
-    except Exception as e:
-        logger.exception("Sync failed")
-        job.error = "An unexpected error occurred during sync"
-        _on_progress(ProgressEvent(phase="error", detail=job.error))
-    finally:
-        job.done = True
-        job.progress_queue.put(None)  # sentinel
+        transfer.execute(request)
+    except Exception:
+        logger.exception("Transfer failed")
 
 
 def _report_to_dict(report: SyncReport) -> dict[str, Any]:
-    """Serialize a SyncReport to a JSON-safe dict."""
     playlists = []
-    for pl in report.playlists:
-        matched = [
-            {
-                "source_name": m.source_name,
-                "spotify_name": m.spotify_name,
-                "spotify_artist": m.spotify_artist,
-                "score": m.score,
-                "match_type": m.match_type,
-            }
-            for m in pl.matched
-        ]
+    for playlist in report.playlists:
         playlists.append({
-            "name": pl.name,
-            "path": pl.path,
-            "action": pl.action,
-            "spotify_playlist_id": pl.spotify_playlist_id,
+            "name": playlist.name,
+            "path": playlist.path,
+            "action": playlist.action,
+            "outcome": playlist.outcome,
+            "spotify_playlist_id": playlist.spotify_playlist_id,
             "spotify_url": (
-                f"https://open.spotify.com/playlist/{pl.spotify_playlist_id}"
-                if pl.spotify_playlist_id else None
+                f"https://open.spotify.com/playlist/{playlist.spotify_playlist_id}"
+                if playlist.spotify_playlist_id else None
             ),
-            "matched": matched,
-            "unmatched": pl.unmatched,
-            "total": pl.total,
-            "match_rate": pl.match_rate,
-            "cache_hits": pl.cache_hits,
-            "api_lookups": pl.api_lookups,
-            "retried": pl.retried,
+            "matched": [
+                {
+                    "source_name": match.source_name,
+                    "spotify_name": match.spotify_name,
+                    "spotify_artist": match.spotify_artist,
+                    "score": match.score,
+                    "match_type": match.match_type,
+                }
+                for match in playlist.matched
+            ],
+            "unmatched": playlist.unmatched,
+            "total": playlist.total,
+            "match_rate": playlist.match_rate,
+            "cache_hits": playlist.cache_hits,
+            "api_lookups": playlist.api_lookups,
+            "retried": playlist.retried,
         })
-
     return {
         "timestamp": report.timestamp.isoformat(),
         "threshold": report.threshold,
         "dry_run": report.dry_run,
         "source_label": report.source_label,
+        "transfer_id": report.transfer_id,
+        "status": report.status,
         "playlists": playlists,
         "total_matched": report.total_matched,
         "total_unmatched": report.total_unmatched,
@@ -279,65 +302,4 @@ def _report_to_dict(report: SyncReport) -> dict[str, Any]:
     }
 
 
-@app.get("/sync/{job_id}/progress")
-async def sync_progress(job_id: str):
-    """Stream progress events via SSE."""
-    if _current_job is None or _current_job.job_id != job_id:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    job = _current_job
-
-    async def event_stream():
-        while True:
-            try:
-                event = await asyncio.get_running_loop().run_in_executor(
-                    None, lambda: job.progress_queue.get(timeout=30)
-                )
-            except queue.Empty:
-                # Send keepalive
-                yield f": keepalive\n\n"
-                continue
-
-            if event is None:  # sentinel — sync done
-                if job.error:
-                    data = json.dumps({"phase": "error", "detail": job.error})
-                else:
-                    data = json.dumps({"phase": "complete", "detail": "Sync complete"})
-                yield f"data: {data}\n\n"
-                break
-
-            data = json.dumps({
-                "phase": event.phase,
-                "current": event.current,
-                "total": event.total,
-                "detail": event.detail,
-            })
-            yield f"data: {data}\n\n"
-
-    return StreamingResponse(event_stream(), media_type="text/event-stream")
-
-
-@app.get("/sync/{job_id}/result")
-def sync_result(job_id: str):
-    """Get the final sync result."""
-    if _current_job is None or _current_job.job_id != job_id:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    if not _current_job.done:
-        raise HTTPException(status_code=202, detail="Sync still in progress")
-
-    if _current_job.error:
-        return {"error": _current_job.error}
-
-    return _current_job.result
-
-
-# ---------------------------------------------------------------------------
-# Serve frontend
-# ---------------------------------------------------------------------------
-
-@app.get("/")
-def index():
-    """Serve the frontend."""
-    index_path = STATIC_DIR / "index.html"
-    return HTMLResponse(index_path.read_text())
+app = create_app()
