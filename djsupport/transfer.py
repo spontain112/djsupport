@@ -360,10 +360,6 @@ class PublicationStorage(Protocol):
         self, account_id: str, playlist_id: str,
     ) -> MirrorRelationship | None: ...
 
-    def replace_mirror(
-        self, previous: MirrorRelationship, replacement: MirrorRelationship,
-    ) -> None: ...
-
     def retain_relinked_publication(
         self, previous: MirrorRelationship, replacement: MirrorRelationship,
         manifest: PublicationManifest,
@@ -506,18 +502,6 @@ class FilePublicationStorage:
             mirror for mirror in self.mirrors_for_account(account_id)
             if mirror.spotify_playlist_id == playlist_id
         ), None)
-
-    def replace_mirror(
-        self, previous: MirrorRelationship, replacement: MirrorRelationship,
-    ) -> None:
-        self.mirrors = [
-            item for item in self.mirrors
-            if not (
-                item.get("account_id") == previous.account_id
-                and item.get("spotify_playlist_id") == previous.spotify_playlist_id
-            )
-        ]
-        self.retain_mirror(replacement)
 
     def retain_relinked_publication(
         self, previous: MirrorRelationship, replacement: MirrorRelationship,

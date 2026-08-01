@@ -191,7 +191,8 @@ class InMemoryStorage:
             and mirror.spotify_playlist_id == playlist_id
         ), None)
 
-    def replace_mirror(self, previous, replacement):
+    def retain_relinked_publication(self, previous, replacement, manifest):
+        self.retain_publication(manifest)
         self.mirrors = [
             mirror for mirror in self.mirrors
             if not (
@@ -200,10 +201,6 @@ class InMemoryStorage:
             )
         ]
         self.mirrors.append(replacement)
-
-    def retain_relinked_publication(self, previous, replacement, manifest):
-        self.retain_publication(manifest)
-        self.replace_mirror(previous, replacement)
 
     def remove_mirror(self, relationship):
         self.mirrors = [
