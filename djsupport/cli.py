@@ -6,6 +6,7 @@ import sys
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 import click
 
@@ -326,6 +327,8 @@ DEFAULT_BEATPORT_STATE_PATH = str(default_publication_manifest_path())
 @click.option("--prefix", default="djsupport", show_default=True, help="Prefix for Spotify playlist name.")
 @click.option("--no-prefix", is_flag=True, help="Disable playlist name prefix.")
 @click.option("--incremental/--no-incremental", default=True, show_default=True, help="Use incremental playlist updates.")
+@click.option("--resume", "resume_id", default=None, help="Resume a durable Transfer ID.")
+@click.option("--abandon", "abandon_id", default=None, help="Explicitly abandon a durable Transfer ID.")
 def beatport(
     url: str,
     dry_run: bool,
@@ -339,6 +342,8 @@ def beatport(
     prefix: str,
     no_prefix: bool,
     incremental: bool,
+    resume_id: str | None,
+    abandon_id: str | None,
 ) -> None:
     """Create a Spotify playlist from a Beatport DJ chart.
 
@@ -357,6 +362,7 @@ def beatport(
         BeatportChartSource,
         EphemeralMatchingKnowledge,
         FilePublicationStorage,
+        FileTransferStorage,
         MatchCacheKnowledge,
         SpotifyMatcher,
         Transfer,
@@ -366,6 +372,11 @@ def beatport(
     cache = None if no_cache else MatchCache(cache_path)
     if cache is not None:
         cache.load()
+    if resume_id and abandon_id:
+        raise click.UsageError("Use either --resume or --abandon, not both.")
+    transfer_storage = FileTransferStorage(
+        str(Path(state_path).with_suffix(".transfers.json"))
+    )
     transfer = Transfer(
         source=BeatportChartSource(),
         spotify=SpotifyMatcher(get_client()),
@@ -376,7 +387,16 @@ def beatport(
         publication_storage=(
             None if dry_run else FilePublicationStorage(state_path)
         ),
+        transfer_storage=transfer_storage,
     )
+    if abandon_id:
+        transfer.abandon(abandon_id)
+        click.echo(f"Transfer {abandon_id} abandoned.")
+        return
+    if resume_id and transfer_storage.load_transfer(resume_id) is None:
+        raise click.ClickException(f"Unknown Transfer: {resume_id}")
+    transfer_id = resume_id or uuid4().hex
+    click.echo(f"Transfer ID: {transfer_id}")
     try:
         report = transfer.execute(TransferRequest(
             source=url,
@@ -385,6 +405,7 @@ def beatport(
             retry=retry,
             retry_days=retry_days,
             playlist_prefix=None if no_prefix else prefix,
+            transfer_id=transfer_id,
         ))
     except InvalidBeatportURL as e:
         raise click.ClickException(str(e))

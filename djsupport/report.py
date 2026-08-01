@@ -49,6 +49,8 @@ class SyncReport:
     playlists: list[PlaylistReport] = field(default_factory=list)
     cache_enabled: bool = False
     source_label: str = "Rekordbox"
+    transfer_id: str | None = None
+    status: str = "completed"
 
     @property
     def total_matched(self) -> int:
@@ -75,6 +77,8 @@ def print_report(report: SyncReport) -> None:
     click.echo("\u2550" * 42)
     click.echo(f"  Sync Report  {ts}")
     click.echo(f"  Mode: {mode}  |  Threshold: {report.threshold}")
+    if report.transfer_id:
+        click.echo(f"  Transfer: {report.transfer_id}  |  Status: {report.status}")
     click.echo("\u2550" * 42)
 
     for pl in report.playlists:
@@ -126,6 +130,8 @@ def save_report(report: SyncReport, path: str) -> None:
     lines.append(f"# Sync Report — {ts}")
     lines.append("")
     lines.append(f"**Mode:** {mode}  |  **Threshold:** {report.threshold}")
+    if report.transfer_id:
+        lines.append(f"**Transfer:** {report.transfer_id}  |  **Status:** {report.status}")
     lines.append("")
 
     for pl in report.playlists:

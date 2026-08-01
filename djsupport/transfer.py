@@ -12,6 +12,7 @@ import os
 import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime
+from enum import Enum
 from pathlib import Path
 from typing import Protocol
 from uuid import uuid4
@@ -23,6 +24,7 @@ from djsupport.report import MatchedTrack, PlaylistReport, SyncReport
 
 
 PUBLICATION_MANIFEST_VERSION = 1
+TRANSFER_STATE_VERSION = 1
 
 
 def default_matching_knowledge_path() -> Path:
@@ -46,6 +48,39 @@ class TransferRequest:
     retry: bool = False
     retry_days: int = 7
     playlist_prefix: str | None = "djsupport"
+    transfer_id: str | None = None
+
+
+class TransferStatus(str, Enum):
+    MATCHING = "matching"
+    PAUSED = "paused"
+    RETAINING_PUBLICATION = "retaining publication"
+    COMPLETED = "completed"
+    ABANDONED = "abandoned"
+
+
+@dataclass
+class TransferState:
+    """Mutable, versioned checkpoint for one durable Transfer."""
+
+    status: TransferStatus
+    source: str
+    account_id: str
+    request: dict
+    selection: dict
+    created_at: str
+    next_track_index: int
+    matched: list[dict]
+    unmatched: list[str]
+    publication_items: list[dict]
+    spotify_playlist_id: str | None = None
+    spotify_playlist_name: str | None = None
+    publication_manifest: dict | None = None
+    outcome: str | None = None
+
+    @classmethod
+    def from_dict(cls, value: dict) -> TransferState:
+        return cls(**{**value, "status": TransferStatus(value["status"])})
 
 
 @dataclass(frozen=True)
@@ -91,10 +126,13 @@ class SourceAdapter(Protocol):
 
 
 class SpotifyAdapter(Protocol):
+    def account_id(self) -> str: ...
+
     def match(self, track: Track, threshold: int) -> dict | None: ...
 
     def publish_provisional_snapshot(
         self, name: str, track_uris: list[str], description: str,
+        publication_key: str,
     ) -> str: ...
 
     def delete_provisional_snapshot(self, playlist_id: str) -> None: ...
@@ -126,7 +164,11 @@ class FilePublicationStorage:
     def retain_publication(self, manifest: PublicationManifest) -> None:
         stored = asdict(manifest)
         stored["created_at"] = manifest.created_at.isoformat()
-        next_manifests = [*self.manifests, stored]
+        next_manifests = [
+            item for item in self.manifests
+            if item.get("spotify_playlist_id") != manifest.spotify_playlist_id
+        ]
+        next_manifests.append(stored)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(f"{self.path.suffix}.tmp")
         temporary.write_text(json.dumps({
@@ -135,6 +177,51 @@ class FilePublicationStorage:
         }, indent=2))
         os.replace(temporary, self.path)
         self.manifests = next_manifests
+
+
+class TransferStorage(Protocol):
+    def load_transfer(self, transfer_id: str) -> TransferState | None: ...
+
+    def save_transfer(self, transfer_id: str, state: TransferState) -> None: ...
+
+
+class FileTransferStorage:
+    """Atomically persisted, versioned state for resumable Transfers."""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self.transfers: dict[str, TransferState] = {}
+        self._load()
+
+    def _load(self) -> None:
+        if not self.path.exists():
+            return
+        try:
+            data = json.loads(self.path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return
+        if data.get("version") == TRANSFER_STATE_VERSION:
+            for transfer_id, state in data.get("transfers", {}).items():
+                try:
+                    self.transfers[transfer_id] = TransferState.from_dict(state)
+                except (KeyError, TypeError, ValueError):
+                    continue
+
+    def load_transfer(self, transfer_id: str) -> TransferState | None:
+        return self.transfers.get(transfer_id)
+
+    def save_transfer(self, transfer_id: str, state: TransferState) -> None:
+        next_transfers = {**self.transfers, transfer_id: state}
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.with_suffix(f"{self.path.suffix}.tmp")
+        temporary.write_text(json.dumps({
+            "version": TRANSFER_STATE_VERSION,
+            "transfers": {
+                key: asdict(transfer) for key, transfer in next_transfers.items()
+            },
+        }, indent=2))
+        os.replace(temporary, self.path)
+        self.transfers = next_transfers
 
 
 def default_publication_manifest_path() -> Path:
@@ -180,17 +267,24 @@ class SpotifyMatcher:
     def __init__(self, client) -> None:
         self._client = client
 
+    def account_id(self) -> str:
+        return self._client.current_user()["id"]
+
     def match(self, track: Track, threshold: int) -> dict | None:
         return match_track(self._client, track, threshold=threshold)
 
     def publish_provisional_snapshot(
         self, name: str, track_uris: list[str], description: str,
+        publication_key: str,
     ) -> str:
-        user_id = self._client.current_user()["id"]
-        playlist = self._client.user_playlist_create(
-            user_id, name, public=False, description=description,
-        )
-        playlist_id = playlist["id"]
+        marker = f"djsupport-transfer:{publication_key}"
+        description = f"{description} {marker}"
+        playlist_id = self._find_publication(marker)
+        if playlist_id is None:
+            playlist = self._client.user_playlist_create(
+                self.account_id(), name, public=False, description=description,
+            )
+            playlist_id = playlist["id"]
         try:
             if track_uris:
                 self._client.playlist_replace_items(playlist_id, track_uris[:100])
@@ -204,6 +298,17 @@ class SpotifyMatcher:
             self.delete_provisional_snapshot(playlist_id)
             raise
         return playlist_id
+
+    def _find_publication(self, marker: str) -> str | None:
+        page = self._client.current_user_playlists(limit=50)
+        while page:
+            for playlist in page.get("items", []):
+                if marker in (playlist.get("description") or ""):
+                    return playlist["id"]
+            if not page.get("next"):
+                break
+            page = self._client.next(page)
+        return None
 
     def delete_provisional_snapshot(self, playlist_id: str) -> None:
         self._client.current_user_unfollow_playlist(playlist_id)
@@ -278,11 +383,30 @@ class Transfer:
         spotify: SpotifyAdapter,
         matching_knowledge: MatchingKnowledge,
         publication_storage: PublicationStorage | None = None,
+        transfer_storage: TransferStorage | None = None,
     ) -> None:
         self._source = source
         self._spotify = spotify
         self._knowledge = matching_knowledge
         self._publication_storage = publication_storage
+        self._transfer_storage = transfer_storage
+        self._pause_requested = False
+
+    def pause(self) -> None:
+        """Request a pause after the current track reaches a safe checkpoint."""
+        self._pause_requested = True
+
+    def abandon(self, transfer_id: str) -> None:
+        """Explicitly make a persisted, non-completed Transfer terminal."""
+        if self._transfer_storage is None:
+            raise ValueError("Abandonment requires durable Transfer storage")
+        state = self._transfer_storage.load_transfer(transfer_id)
+        if state is None:
+            raise ValueError(f"Unknown Transfer: {transfer_id}")
+        if state.status == TransferStatus.COMPLETED:
+            raise ValueError("A completed Transfer cannot be abandoned")
+        state.status = TransferStatus.ABANDONED
+        self._transfer_storage.save_transfer(transfer_id, state)
 
     def execute(self, request: TransferRequest) -> SyncReport:
         """Execute one Transfer and return its structured outcome.
@@ -293,8 +417,55 @@ class Transfer:
         if not request.preview and self._publication_storage is None:
             raise ValueError("Publishing Transfers require publication storage")
 
-        selection = self._source.consume(request.source)
-        created_at = datetime.now()
+        transfer_id = request.transfer_id or uuid4().hex
+        state = (
+            self._transfer_storage.load_transfer(transfer_id)
+            if self._transfer_storage is not None else None
+        )
+        if state is None:
+            selection = self._source.consume(request.source)
+            created_at = datetime.now()
+            state = TransferState(
+                status=TransferStatus.MATCHING,
+                source=request.source,
+                account_id=self._spotify.account_id(),
+                request={
+                    "source": request.source,
+                    "preview": request.preview,
+                    "threshold": request.threshold,
+                    "retry": request.retry,
+                    "retry_days": request.retry_days,
+                    "playlist_prefix": request.playlist_prefix,
+                },
+                selection={
+                    "name": selection.name,
+                    "reference": selection.reference,
+                    "tracks": [asdict(track) for track in selection.tracks],
+                },
+                created_at=created_at.isoformat(),
+                next_track_index=0,
+                matched=[],
+                unmatched=[],
+                publication_items=[],
+            )
+            self._save_transfer(transfer_id, state)
+        else:
+            if state.status == TransferStatus.ABANDONED:
+                raise ValueError(f"Transfer {transfer_id} was abandoned")
+            if state.source != request.source:
+                raise ValueError("A resumed Transfer must use its original source")
+            if state.account_id != self._spotify.account_id():
+                raise ValueError("A Transfer cannot resume under another Spotify account")
+            request = TransferRequest(
+                **state.request, transfer_id=transfer_id,
+            )
+            stored_selection = state.selection
+            selection = SourceSelection(
+                stored_selection["name"], stored_selection["reference"],
+                [Track(**track) for track in stored_selection["tracks"]],
+            )
+            created_at = datetime.fromisoformat(state.created_at)
+
         playlist = PlaylistReport(
             name=selection.name,
             path=selection.reference,
@@ -307,11 +478,43 @@ class Transfer:
             playlists=[playlist],
             cache_enabled=getattr(self._knowledge, "persistent", True),
             source_label=self._source.source_label,
+            transfer_id=transfer_id,
+            status=state.status.value,
         )
-        publication_items: list[PublicationItem] = []
+        playlist.matched = [MatchedTrack(**item) for item in state.matched]
+        playlist.unmatched = list(state.unmatched)
+        publication_items = [
+            PublicationItem(**item) for item in state.publication_items
+        ]
+        if state.status == TransferStatus.COMPLETED:
+            report.status = "completed"
+            if state.spotify_playlist_id:
+                playlist.name = state.spotify_playlist_name or playlist.name
+                playlist.spotify_playlist_id = state.spotify_playlist_id
+                playlist.action = "provisional snapshot created"
+                stored_manifest = state.publication_manifest
+                if stored_manifest:
+                    playlist.publication_manifest = PublicationManifest(
+                        **{
+                            **stored_manifest,
+                            "created_at": datetime.fromisoformat(
+                                stored_manifest["created_at"]
+                            ),
+                            "items": tuple(
+                                PublicationItem(**item)
+                                for item in stored_manifest["items"]
+                            ),
+                        }
+                    )
+            elif not request.preview and not selection.tracks:
+                playlist.action = "not published: empty source"
+            elif not request.preview and playlist.unmatched:
+                playlist.action = "not published: incomplete matching"
+            return report
 
         try:
-            for track in selection.tracks:
+            for index in range(state.next_track_index, len(selection.tracks)):
+                track = selection.tracks[index]
                 result = self._knowledge.lookup(track, request.threshold)
                 if result is not None:
                     playlist.cache_hits += 1
@@ -348,26 +551,60 @@ class Transfer:
                         match_type=matched_track.match_type,
                     ))
 
+                state.next_track_index = index + 1
+                state.matched = [asdict(item) for item in playlist.matched]
+                state.unmatched = list(playlist.unmatched)
+                state.publication_items = [
+                    asdict(item) for item in publication_items
+                ]
+                self._knowledge.checkpoint()
+                if self._pause_requested:
+                    state.status = TransferStatus.PAUSED
+                    self._save_transfer(transfer_id, state)
+                    self._pause_requested = False
+                    playlist.action = "paused"
+                    report.status = "paused"
+                    return report
+                self._save_transfer(transfer_id, state)
+
             if not request.preview and not selection.tracks:
                 playlist.action = "not published: empty source"
             elif not request.preview and playlist.unmatched:
                 playlist.action = "not published: incomplete matching"
             elif not request.preview:
-                discriminator = (
-                    f"{created_at:%Y-%m-%d %H%M%S} {uuid4().hex[:8]}"
-                )
-                snapshot_name = f"{selection.name} — {discriminator}"
-                if request.playlist_prefix:
-                    snapshot_name = f"{request.playlist_prefix} / {snapshot_name}"
-                description = (
-                    f"Provisional Snapshot from {self._source.source_label}: "
-                    f"{selection.reference}. Created {created_at.isoformat()}."
-                )
-                playlist_id = self._spotify.publish_provisional_snapshot(
-                    snapshot_name,
-                    [item.spotify_uri for item in publication_items],
-                    description,
-                )
+                playlist_id = state.spotify_playlist_id
+                snapshot_name = state.spotify_playlist_name
+                if playlist_id is None:
+                    discriminator = (
+                        f"{created_at:%Y-%m-%d %H%M%S} {uuid4().hex[:8]}"
+                    )
+                    snapshot_name = f"{selection.name} — {discriminator}"
+                    if request.playlist_prefix:
+                        snapshot_name = f"{request.playlist_prefix} / {snapshot_name}"
+                    description = (
+                        f"Provisional Snapshot from {self._source.source_label}: "
+                        f"{selection.reference}. Created {created_at.isoformat()}."
+                    )
+                    playlist_id = self._spotify.publish_provisional_snapshot(
+                        snapshot_name,
+                        [item.spotify_uri for item in publication_items],
+                        description,
+                        transfer_id,
+                    )
+                    state.spotify_playlist_id = playlist_id
+                    state.spotify_playlist_name = snapshot_name
+                    state.status = TransferStatus.RETAINING_PUBLICATION
+                    self._save_transfer(transfer_id, state)
+                    if self._pause_requested:
+                        self._pause_requested = False
+                        state.status = TransferStatus.PAUSED
+                        self._save_transfer(transfer_id, state)
+                        playlist.name = snapshot_name
+                        playlist.spotify_playlist_id = playlist_id
+                        playlist.action = "paused"
+                        report.status = "paused"
+                        return report
+                assert snapshot_name is not None
                 manifest = PublicationManifest(
                     spotify_playlist_id=playlist_id,
                     spotify_playlist_name=snapshot_name,
@@ -376,18 +613,38 @@ class Transfer:
                     created_at=created_at,
                     items=tuple(publication_items),
                 )
+                stored_manifest = asdict(manifest)
+                stored_manifest["created_at"] = manifest.created_at.isoformat()
+                state.publication_manifest = stored_manifest
+                self._save_transfer(transfer_id, state)
                 assert self._publication_storage is not None
                 try:
                     self._publication_storage.retain_publication(manifest)
                 except Exception:
                     self._spotify.delete_provisional_snapshot(playlist_id)
+                    state.spotify_playlist_id = None
+                    state.spotify_playlist_name = None
+                    state.status = TransferStatus.MATCHING
+                    self._save_transfer(transfer_id, state)
                     raise
                 playlist.name = snapshot_name
                 playlist.spotify_playlist_id = playlist_id
                 playlist.publication_manifest = manifest
                 playlist.action = "provisional snapshot created"
+            state.outcome = playlist.action
+            state.status = TransferStatus.COMPLETED
+            self._save_transfer(transfer_id, state)
+            report.status = "completed"
+        except KeyboardInterrupt:
+            state.status = TransferStatus.PAUSED
+            self._save_transfer(transfer_id, state)
+            raise
         finally:
             # Matching discoveries survive interrupted matching or publication.
             self._knowledge.checkpoint()
 
         return report
+
+    def _save_transfer(self, transfer_id: str, state: TransferState) -> None:
+        if self._transfer_storage is not None:
+            self._transfer_storage.save_transfer(transfer_id, state)
