@@ -76,6 +76,6 @@ class TestRepositoryPrivacy:
         ]
         assert existing == ["djsupport/static/index.html"]
 
-    def test_core_design_source_is_retained_outside_runtime_package(self):
-        assert (REPOSITORY_ROOT / "docs/design/NewUI.pen").is_file()
+    def test_chrome_design_source_is_not_retained_in_core(self):
+        assert not (REPOSITORY_ROOT / "docs/design/NewUI.pen").exists()
         assert not (REPOSITORY_ROOT / "djsupport/NewUI.pen").exists()

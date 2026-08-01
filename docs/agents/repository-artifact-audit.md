@@ -15,9 +15,9 @@ The classifications are the numbered categories requested by the audit.
 | 3. Test fixture/verification | `tests/__init__.py`, `conftest.py`, all `tests/test_*.py`; `tests/fixtures/beatport_chart.json`, `beatport_label_page.json`, `library.xml`, `rekordbox_mirror_refresh.json`, `rekordbox_missing_track.xml` |
 | 4. Canonical documentation/configuration | `.gitignore`, `.env.example`, `AGENTS.md`, `CONTEXT.md`, `agent.md`, `CLAUDE.md`, `.claude/docs/architectural_patterns.md`, `docs/adr/0001-keep-user-data-out-of-the-repository.md`, `docs/agents/domain.md`, `issue-tracker.md`, `triage-labels.md`, `legacy-document-triage.md`, this audit |
 | 5. Historical but intentionally retained | Core completed/converted plans under `docs/plans/` (all remaining files); `docs/research/2026-08-01-playlist-management-api-review.md`; resolved knowledge under `docs/solutions/` (all files); completed review records `todos/001` through `todos/007` |
-| 6. Design source/reference | `docs/design/NewUI.pen`, retained as the authored source for the core web-UI redesign introduced in `4663b67` and populated/updated in `464b225`; it is not runtime or package content |
+| 6. Design source/reference | None retained. Owner review identified the former `NewUI.pen` as Chrome-extension-oriented prior art rather than a canonical core-product source; Git history remains the archive. |
 | 7. Generated/private and ignored | No tracked files. `.gitignore` covers credentials, application state, source XML except synthetic fixtures, matching/regression evidence, reports, build/cache/editor output, root HTML explorations, runtime-folder `.pen` files, and design exports |
-| 8. Obsolete/unused | No tracked files remain. Removed artifacts are listed below and recoverable from Git |
+| 8. Obsolete/unused | No tracked files remain. Removed artifacts, including the former `NewUI.pen`, are recoverable from Git |
 
 `git ls-files` supplied the population for this table. Python modules are imported
 by adapters/tests or form the installed package. Package/build files are selected

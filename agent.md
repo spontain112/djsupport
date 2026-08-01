@@ -133,8 +133,8 @@ pytest --cov=djsupport     # Run with coverage
 - Changelog follows Keep a Changelog format in `CHANGELOG.md`
 - `docs/` contains canonical guidance, core implementation history, and solutions;
   generated reports and out-of-scope product plans do not belong in Git
-- `docs/design/` contains intentionally retained core-product design sources;
-  generated exports belong under the ignored `design-exports/` directory
+- Chrome-extension design sources belong to the separate `djsupport-chrome` unit;
+  generated design exports remain ignored through `design-exports/`
 - `docs/solutions/` holds documented problem solutions with YAML frontmatter (created via `/compound` workflow)
 - Update `agent.md` in the same PR when adding modules, CLI flags, or changing conventions
 
