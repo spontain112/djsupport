@@ -1410,11 +1410,10 @@ class TestRekordboxBatchPlanning:
         )
 
         unconfirmed = transfer.plan_batch(BatchPlanRequest(
-            whole_library=True, expensive_lookup_threshold=1,
+            whole_library=True,
         ))
         confirmed = transfer.plan_batch(BatchPlanRequest(
-            whole_library=True, expensive_lookup_threshold=1,
-            confirm_expensive=True,
+            whole_library=True, confirm_expensive=True,
         ))
 
         assert unconfirmed.expected_uncached_lookups == 3
@@ -1423,6 +1422,18 @@ class TestRekordboxBatchPlanning:
         assert confirmed.expected_uncached_lookups == 3
         assert confirmed.confirmation_required is False
         assert confirmed.ready is True
+
+    def test_duplicate_playlist_references_are_not_a_batch_set(self):
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=RekordboxPlaylistSource(REKORDBOX_FIXTURE),
+            spotify=StatefulSpotify(), matching_knowledge=InMemoryStorage(),
+        )
+
+        with pytest.raises(ValueError, match="duplicate playlist"):
+            transfer.plan_batch(BatchPlanRequest(playlist_references=(
+                "My Playlists/Deep", "My Playlists/Deep",
+            )))
 
     def test_positive_and_negative_cache_entries_are_not_expected_lookups(
         self, tmp_path,

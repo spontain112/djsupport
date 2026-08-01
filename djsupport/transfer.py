@@ -51,6 +51,7 @@ from djsupport.spotify import MAX_RATE_LIMIT_WAIT, RateLimitError, _parse_retry_
 
 PUBLICATION_MANIFEST_VERSION = 3
 TRANSFER_STATE_VERSION = 1
+EXPENSIVE_BATCH_LOOKUP_THRESHOLD = 100
 SPOTIFY_TRACK_URI = re.compile(r"^spotify:track:([A-Za-z0-9]{22})$")
 SPOTIFY_TRACK_URL = re.compile(
     r"^https://open\.spotify\.com/track/([A-Za-z0-9]{22})(?:\?.*)?$"
@@ -109,7 +110,6 @@ class BatchPlanRequest:
     playlist_references: tuple[str, ...] = ()
     whole_library: bool = False
     threshold: int = 80
-    expensive_lookup_threshold: int = 100
     confirm_expensive: bool = False
 
 
@@ -732,6 +732,10 @@ class RekordboxPlaylistSource:
         from djsupport.rekordbox import parse_xml
 
         tracks, playlists = parse_xml(self._xml_path)
+        return self._select(tracks, playlists, reference)
+
+    @staticmethod
+    def _select(tracks, playlists, reference: str) -> SourceSelection:
         selected = [
             playlist for playlist in playlists
             if playlist.path == reference or playlist.name == reference
@@ -766,12 +770,19 @@ class RekordboxPlaylistSource:
             )
         if not references and not whole_library:
             raise ValueError("A Batch must select at least one playlist explicitly")
-        if not whole_library:
-            return tuple(self.consume(reference) for reference in references)
+        if len(set(references)) != len(references):
+            raise ValueError("A Batch cannot contain a duplicate playlist reference")
         from djsupport.rekordbox import parse_xml
 
-        _, playlists = parse_xml(self._xml_path)
-        return tuple(self.consume(playlist.path) for playlist in playlists)
+        tracks, playlists = parse_xml(self._xml_path)
+        selected_references = (
+            tuple(playlist.path for playlist in playlists)
+            if whole_library else references
+        )
+        return tuple(
+            self._select(tracks, playlists, reference)
+            for reference in selected_references
+        )
 
 
 class SpotifyMatcher:
@@ -1049,7 +1060,10 @@ class Transfer:
         return BatchPlan(
             tuple(playlists),
             confirmation_required=(
-                expected_lookups >= request.expensive_lookup_threshold
+                (
+                    request.whole_library
+                    or expected_lookups >= EXPENSIVE_BATCH_LOOKUP_THRESHOLD
+                )
                 and not request.confirm_expensive
             ),
         )
