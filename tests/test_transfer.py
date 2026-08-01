@@ -44,14 +44,25 @@ class StatefulSpotify:
         self.matches = matches or {}
         self.searches = []
         self.playlists = {"existing": ["spotify:track:untouched"]}
+        self.publication_keys = {}
 
-    def publish_provisional_snapshot(self, name, track_uris, description):
+    def account_id(self):
+        return "spotify-user-1"
+
+    def publish_provisional_snapshot(
+        self, name, track_uris, description, publication_key,
+    ):
+        if publication_key in self.publication_keys:
+            playlist_id = self.publication_keys[publication_key]
+            self.playlists[playlist_id]["tracks"] = list(track_uris)
+            return playlist_id
         playlist_id = f"snapshot-{len(self.playlists)}"
         self.playlists[playlist_id] = {
             "name": name,
             "tracks": list(track_uris),
             "description": description,
         }
+        self.publication_keys[publication_key] = playlist_id
         return playlist_id
 
     def delete_provisional_snapshot(self, playlist_id):
@@ -220,8 +231,8 @@ class TestSnapshotPublication:
             ).execute(TransferRequest(source="fixture"))
 
         persisted = next(iter(FileTransferStorage(states.path).transfers.values()))
-        assert persisted["status"] == "paused"
-        assert persisted["next_track_index"] == 1
+        assert persisted.status.value == "paused"
+        assert persisted.next_track_index == 1
 
     def test_abandonment_is_explicit_persisted_and_cannot_be_resumed(self, tmp_path):
         spotify = StatefulSpotify({
@@ -242,7 +253,7 @@ class TestSnapshotPublication:
         transfer.abandon(paused.transfer_id)
 
         reloaded = FileTransferStorage(state_path)
-        assert reloaded.load_transfer(paused.transfer_id)["status"] == "abandoned"
+        assert reloaded.load_transfer(paused.transfer_id).status.value == "abandoned"
         with pytest.raises(ValueError, match="abandoned"):
             Transfer(
                 source=FixtureBeatportSource(FIXTURE), spotify=spotify,
@@ -306,6 +317,69 @@ class TestSnapshotPublication:
         assert repeated.status == "completed"
         assert len([key for key in spotify.playlists if key.startswith("snapshot-")]) == 1
         assert len(publications.publications) == 1
+
+    def test_crash_before_publication_checkpoint_reuses_idempotency_key(self, tmp_path):
+        class CrashAfterSpotifyCreate(StatefulSpotify):
+            def __init__(self, matches):
+                super().__init__(matches)
+                self.crash = True
+
+            def publish_provisional_snapshot(self, *args):
+                playlist_id = super().publish_provisional_snapshot(*args)
+                if self.crash:
+                    self.crash = False
+                    raise KeyboardInterrupt
+                return playlist_id
+
+        matches = {
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+            ("New Artist", "New Track"): _match(
+                "spotify:track:new", "New Track", "New Artist",
+            ),
+        }
+        spotify = CrashAfterSpotifyCreate(matches)
+        knowledge = InMemoryStorage()
+        publications = InMemoryStorage()
+        states = FileTransferStorage(tmp_path / "transfers.json")
+        transfer_id = "durable-publication"
+
+        with pytest.raises(KeyboardInterrupt):
+            Transfer(
+                source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+                matching_knowledge=knowledge, publication_storage=publications,
+                transfer_storage=states,
+            ).execute(TransferRequest(source="fixture", transfer_id=transfer_id))
+
+        Transfer(
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=knowledge, publication_storage=publications,
+            transfer_storage=FileTransferStorage(states.path),
+        ).execute(TransferRequest(source="fixture", transfer_id=transfer_id))
+
+        assert len([key for key in spotify.playlists if key.startswith("snapshot-")]) == 1
+
+    def test_resume_rejects_a_different_spotify_account(self, tmp_path):
+        spotify = StatefulSpotify()
+        states = FileTransferStorage(tmp_path / "transfers.json")
+        transfer = Transfer(
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=InMemoryStorage(),
+            publication_storage=InMemoryStorage(), transfer_storage=states,
+        )
+        transfer.pause()
+        paused = transfer.execute(TransferRequest(source="fixture"))
+        spotify.account_id = lambda: "spotify-user-2"
+
+        with pytest.raises(ValueError, match="another Spotify account"):
+            Transfer(
+                source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+                matching_knowledge=InMemoryStorage(),
+                publication_storage=InMemoryStorage(), transfer_storage=states,
+            ).execute(TransferRequest(
+                source="fixture", transfer_id=paused.transfer_id,
+            ))
 
     def test_publish_creates_provisional_snapshot_and_exact_manifest_after_matching(self):
         spotify = StatefulSpotify({
