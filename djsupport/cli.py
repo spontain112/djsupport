@@ -24,6 +24,7 @@ from djsupport.report import (
     SyncReport,
     print_report,
     save_report,
+    save_review_csv,
 )
 from djsupport.service import ProgressEvent, match_and_sync_playlist
 from djsupport.spotify import (
@@ -313,6 +314,52 @@ DEFAULT_BEATPORT_STATE_PATH = str(default_publication_manifest_path())
 
 
 @cli.command()
+@click.argument("playlist_id")
+@click.option(
+    "--state-path", default=DEFAULT_BEATPORT_STATE_PATH, show_default=True,
+    help="Path to durable Provisional Playlist manifests.",
+)
+@click.option(
+    "--cache-path", default=DEFAULT_BEATPORT_CACHE_PATH, show_default=True,
+    help="Path to durable matching knowledge.",
+)
+def approve(playlist_id: str, state_path: str, cache_path: str) -> None:
+    """Approve one Provisional Playlist after reviewing it in Spotify."""
+    from djsupport.cache import MatchCache
+    from djsupport.transfer import (
+        BeatportChartSource,
+        FilePublicationStorage,
+        MatchCacheKnowledge,
+        SpotifyMatcher,
+        Transfer,
+    )
+
+    cache = MatchCache(cache_path)
+    cache.load()
+    transfer = Transfer(
+        source=BeatportChartSource(),
+        spotify=SpotifyMatcher(get_client()),
+        publishing_guards=AccountPublishingGuards(),
+        matching_knowledge=MatchCacheKnowledge(cache),
+        publication_storage=FilePublicationStorage(state_path),
+    )
+    try:
+        review = transfer.approve(playlist_id)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if review.status.value == "abandoned":
+        click.echo(
+            f"Provisional Playlist {playlist_id} is Abandoned; publication history retained."
+        )
+        return
+    click.echo(
+        f"Provisional Playlist {playlist_id}: "
+        f"{len(review.approved)} approved, {len(review.rejected)} rejected, "
+        f"{len(review.collisions)} collisions."
+    )
+
+
+@cli.command()
 @click.argument("url")
 @click.option("--dry-run", is_flag=True, help="Preview without modifying Spotify.")
 @click.option("--threshold", "-t", default=80, show_default=True, help="Minimum match confidence (0-100).")
@@ -427,7 +474,10 @@ def beatport(
     print_report(report)
     if report_path:
         save_report(report, report_path)
+        review_path = str(Path(report_path).with_suffix(".csv"))
+        save_review_csv(report, review_path)
         click.echo(f"\nDetailed report saved to {report_path}")
+        click.echo(f"Editable review CSV saved to {review_path}")
 
 
 DEFAULT_LABEL_CACHE_PATH = ".djsupport_label_cache.json"

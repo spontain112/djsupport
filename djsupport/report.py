@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -18,6 +19,14 @@ class MatchedTrack:
     score: float
     match_type: str = "exact"
     score_reasons: tuple[str, ...] = ()
+    source_track_id: str = ""
+    spotify_uri: str = ""
+
+
+def _spotify_url(uri: str) -> str:
+    if uri.startswith("spotify:track:"):
+        return f"https://open.spotify.com/track/{uri.removeprefix('spotify:track:')}"
+    return uri
 
 
 @dataclass
@@ -154,12 +163,20 @@ def save_report(report: SyncReport, path: str) -> None:
         lines.append("")
 
         if pl.matched:
-            lines.append(f"| {report.source_label} | Spotify Match | Score | Match Type | Score Reasons |")
-            lines.append("|-----------|---------------|-------|------------|---------------|")
+            lines.append(
+                f"| Source Reference | {report.source_label} | Spotify Proposal"
+                " | Score | Match Type | Score Reasons |"
+            )
+            lines.append(
+                "|------------------|-----------|------------------|-------|------------|---------------|"
+            )
             for m in pl.matched:
                 reasons = "; ".join(m.score_reasons)
+                proposal = f"{m.spotify_artist} - {m.spotify_name}"
+                if m.spotify_uri:
+                    proposal = f"[{proposal}]({_spotify_url(m.spotify_uri)})"
                 lines.append(
-                    f"| {m.source_name} | {m.spotify_artist} - {m.spotify_name}"
+                    f"| {m.source_track_id} | {m.source_name} | {proposal}"
                     f" | {m.score:.1f} | {m.match_type} | {reasons} |"
                 )
             lines.append("")
@@ -212,3 +229,23 @@ def save_report(report: SyncReport, path: str) -> None:
 
     with open(path, "w") as f:
         f.write("\n".join(lines))
+
+
+def save_review_csv(report: SyncReport, path: str) -> None:
+    """Write editable proposal rows keyed by stable source-track references."""
+    with open(path, "w", newline="") as csv_file:
+        writer = csv.writer(csv_file)
+        writer.writerow([
+            "source_track_id", "source_track", "spotify_url", "spotify_track",
+            "score", "match_type",
+        ])
+        for playlist in report.playlists:
+            for match in playlist.matched:
+                writer.writerow([
+                    match.source_track_id,
+                    match.source_name,
+                    _spotify_url(match.spotify_uri),
+                    f"{match.spotify_artist} - {match.spotify_name}",
+                    f"{match.score:.1f}",
+                    match.match_type,
+                ])
