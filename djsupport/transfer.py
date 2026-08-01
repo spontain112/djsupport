@@ -1147,10 +1147,14 @@ class Transfer:
                     return report
                 self._save_transfer(transfer_id, state)
 
+            source_ids_by_uri: dict[str, set[str]] = {}
+            for item in publication_items:
+                source_ids_by_uri.setdefault(item.spotify_uri, set()).add(
+                    item.source_track_id
+                )
             collision_uris = {
-                uri for uri, count in Counter(
-                    item.spotify_uri for item in publication_items
-                ).items() if count > 1
+                uri for uri, source_ids in source_ids_by_uri.items()
+                if len(source_ids) > 1
             }
             if collision_uris:
                 colliding_items = [
@@ -1198,6 +1202,7 @@ class Transfer:
                             snapshot_name,
                             list(dict.fromkeys(
                                 item.spotify_uri for item in publication_items
+                                if item.spotify_uri not in collision_uris
                             )),
                             description,
                             transfer_id,

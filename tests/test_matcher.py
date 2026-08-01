@@ -15,6 +15,7 @@ from djsupport.matcher import (
     _duration_penalty,
     _score_result,
     match_track,
+    match_track_with_alternatives,
 )
 from djsupport.rekordbox import Track
 
@@ -381,6 +382,22 @@ class TestMatchTrack:
         last_call_query = sp.search.call_args_list[-1][1].get("q") or sp.search.call_args_list[-1][0][0]
         assert "artist:" not in last_call_query
         assert "track:" not in last_call_query
+
+    def test_alternative_aware_matching_keeps_normalized_search_strategy(self):
+        sp = MagicMock()
+        candidate = make_spotify_item("Track", "Artist", "uri:normalized")
+        sp.search.side_effect = [
+            {"tracks": {"items": []}},
+            {"tracks": {"items": []}},
+            {"tracks": {"items": [candidate]}},
+        ]
+        track = make_track("Track [Label]", "Artist (UK)")
+
+        result = match_track_with_alternatives(sp, track, threshold=80)
+
+        assert result is not None
+        assert result["uri"] == "uri:normalized"
+        assert sp.search.call_args_list[2].kwargs["q"] == "artist:artist track:track"
 
 
 class TestEarlyExit:

@@ -74,6 +74,16 @@ class MatchCache:
         entry = self.entries.get(key)
         if entry is None and source_duration > 0:
             entry = self.entries.get(self.cache_key(artist, title))
+        if source_duration == 0:
+            identity_prefix = f"{self.cache_key(artist, title)}||"
+            approved = [
+                candidate for candidate_key, candidate in self.entries.items()
+                if candidate_key.startswith(identity_prefix)
+                and candidate.approval_status == "approved"
+            ]
+            approved_uris = {candidate.spotify_uri for candidate in approved}
+            if len(approved_uris) == 1:
+                entry = approved[0]
         if entry is None:
             return None
         if entry.approval_status == "rejected":

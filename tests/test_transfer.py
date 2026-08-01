@@ -299,7 +299,34 @@ class TestProtectedTransferBehavior:
         assert [item.source_track_id for item in playlist.match_collisions] == [
             "bp-1", "bp-2",
         ]
-        assert spotify.playlists[playlist.spotify_playlist_id]["tracks"] == [
+        assert spotify.playlists[playlist.spotify_playlist_id]["tracks"] == []
+
+    def test_repeated_occurrence_of_same_source_track_is_not_a_collision(self):
+        class RepeatedSource:
+            source_label = "Rekordbox"
+
+            def consume(self, reference):
+                track = Track(
+                    track_id="rb-1", artist="Artist", name="Track", album="",
+                    remixer="", label="", genre="", date_added="",
+                )
+                return SourceSelection("Repeated", reference, [track, track])
+
+        spotify = StatefulSpotify({
+            ("Artist", "Track"): _match(
+                "spotify:track:shared", "Track", "Artist",
+            ),
+        })
+        storage = InMemoryStorage()
+
+        report = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=RepeatedSource(), spotify=spotify,
+            matching_knowledge=storage, publication_storage=storage,
+        ).execute(TransferRequest(source="playlist"))
+
+        assert report.playlists[0].match_collisions == []
+        assert spotify.playlists[report.playlists[0].spotify_playlist_id]["tracks"] == [
             "spotify:track:shared",
         ]
 
@@ -1181,6 +1208,17 @@ class TestProvisionalPlaylistApproval:
         assert different_version_spotify.searches == [
             ("Shared Artist", "Shared Track (Extended Mix)", 80),
         ]
+
+        duration_missing_spotify = StatefulSpotify()
+        duration_missing = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=Source("Beatport", "bp-101", duration=0),
+            spotify=duration_missing_spotify,
+            matching_knowledge=MatchCacheKnowledge(cache),
+        ).execute(TransferRequest(source="chart", preview=True))
+
+        assert duration_missing.total_matched == 1
+        assert duration_missing_spotify.searches == []
 
     def test_conflicting_correction_does_not_overwrite_approved_truth(self, tmp_path):
         transfer, spotify, publications, playlist_id = self.publish()
