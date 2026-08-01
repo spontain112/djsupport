@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import tempfile
 from dataclasses import dataclass
@@ -22,6 +23,10 @@ LEGACY_STATE_FILES = (
     ".djsupport_playlists.json",
     ".djsupport_beatport_playlists.json",
 )
+MIGRATION_VERSION = 1
+MATCHING_KNOWLEDGE_VERSION = 1
+SUPPORTED_PUBLICATION_VERSIONS = (1, 2, 3, 4)
+SPOTIFY_TRACK_URI = re.compile(r"^spotify:track:[A-Za-z0-9]{22}$")
 CACHE_FIELDS = {
     "spotify_uri", "spotify_name", "spotify_artist", "score", "matched",
     "timestamp", "threshold", "match_type",
@@ -110,9 +115,12 @@ class LegacyMigration:
         raise OSError("could not allocate backup name")
 
     def _plan(self, legacy: Path) -> tuple[MigrationReport, dict[str, bytes]]:
+        if not legacy.is_dir():
+            raise ValueError("Selected legacy directory is unavailable")
         detected = cache_records = conflicts = skipped = relinks = snapshots = 0
         errors: list[str] = []
         incoming_cache: dict[str, dict] = {}
+        ambiguous_cache_keys: set[str] = set()
         relink_candidates: list[dict] = []
         historical_snapshots: list[dict] = []
 
@@ -131,20 +139,35 @@ class LegacyMigration:
                     elif previous != entry:
                         conflicts += 1
                         skipped += 1
+                        ambiguous_cache_keys.add(key)
             except (OSError, ValueError, TypeError, json.JSONDecodeError):
                 errors.append(f"{name}: malformed or unsupported")
 
+        publication_accounts = self._read_publication_accounts()
         for name in LEGACY_STATE_FILES:
             path = legacy / name
             if not path.is_file() or path.is_symlink():
                 continue
             detected += 1
             try:
-                entries = self._read_state(path)
+                expected_source = (
+                    "rekordbox" if name == ".djsupport_playlists.json"
+                    else "beatport"
+                )
+                entries = self._read_state(path, expected_source)
                 for key, entry in entries.items():
+                    account_id = None
+                    if expected_source == "rekordbox":
+                        accounts = publication_accounts.get((
+                            entry["spotify_id"], entry["source_path"],
+                        ), set())
+                        if len(accounts) == 1:
+                            account_id = next(iter(accounts))
+                        elif len(accounts) > 1:
+                            conflicts += 1
                     record = {
                         "legacy_key": key,
-                        "account_id": None,
+                        "account_id": account_id,
                         "spotify_playlist_id": entry["spotify_id"],
                         "spotify_name": entry["spotify_name"],
                         "source_reference": entry["source_path"],
@@ -168,6 +191,8 @@ class LegacyMigration:
         current = self._read_current_matching()
         proposed = 0
         for key, entry in incoming_cache.items():
+            if key in ambiguous_cache_keys:
+                continue
             legacy_entry = {**entry, "approval_status": None, "source_duration": 0}
             existing = current["entries"].get(key)
             if existing is None:
@@ -230,13 +255,34 @@ class LegacyMigration:
                 raise ValueError("invalid cache entry")
             if set(entry) not in (CACHE_FIELDS, CACHE_FIELDS - {"match_type"}):
                 raise ValueError("invalid cache entry shape")
-            if not isinstance(entry["matched"], bool):
+            if (
+                not isinstance(entry["matched"], bool)
+                or not isinstance(entry["timestamp"], str)
+                or not isinstance(entry["threshold"], int)
+                or not 0 <= entry["threshold"] <= 100
+            ):
                 raise ValueError("invalid cache entry")
+            datetime.fromisoformat(entry["timestamp"])
+            if entry["matched"]:
+                if (
+                    not isinstance(entry["spotify_uri"], str)
+                    or not SPOTIFY_TRACK_URI.fullmatch(entry["spotify_uri"])
+                    or not isinstance(entry["spotify_name"], str)
+                    or not isinstance(entry["spotify_artist"], str)
+                    or not isinstance(entry["score"], (int, float))
+                    or isinstance(entry["score"], bool)
+                    or not 0 <= entry["score"] <= 100
+                ):
+                    raise ValueError("invalid matched cache entry")
+            elif any(entry[field] is not None for field in (
+                "spotify_uri", "spotify_name", "spotify_artist", "score",
+            )):
+                raise ValueError("invalid unmatched cache entry")
             entry.setdefault("match_type", None)
         return data["entries"]
 
     @staticmethod
-    def _read_state(path: Path) -> dict[str, dict]:
+    def _read_state(path: Path, expected_source: str) -> dict[str, dict]:
         data = json.loads(path.read_text())
         if (
             not isinstance(data, dict) or set(data) != {"version", "entries"}
@@ -258,17 +304,24 @@ class LegacyMigration:
                 "source_type",
             )):
                 raise ValueError("invalid playlist-state entry")
+            if entry["source_type"] != expected_source:
+                raise ValueError("playlist-state source type is ambiguous")
+            datetime.fromisoformat(entry["last_synced"])
         return data["entries"]
 
     def _read_current_matching(self) -> dict:
         path = self.app_data / "matching-knowledge.json"
         if not path.exists():
             return {
-                "version": 1, "entries": {}, "local_regressions": [],
+                "version": MATCHING_KNOWLEDGE_VERSION, "entries": {},
+                "local_regressions": [],
                 "approval_conflicts": [],
             }
         data = json.loads(path.read_text())
-        if data.get("version") != 1 or not isinstance(data.get("entries"), dict):
+        if (
+            data.get("version") != MATCHING_KNOWLEDGE_VERSION
+            or not isinstance(data.get("entries"), dict)
+        ):
             raise ValueError("Current matching knowledge is unsupported or malformed")
         return data
 
@@ -276,13 +329,43 @@ class LegacyMigration:
         path = self.app_data / "legacy-migration.json"
         if not path.exists():
             return {
-                "version": 1, "relink_candidates": [],
+                "version": MIGRATION_VERSION, "relink_candidates": [],
                 "historical_snapshots": [],
             }
         data = json.loads(path.read_text())
-        if data.get("version") != 1:
+        if (
+            not isinstance(data, dict)
+            or set(data) != {
+                "version", "relink_candidates", "historical_snapshots",
+            }
+            or data.get("version") != MIGRATION_VERSION
+            or not isinstance(data["relink_candidates"], list)
+            or not isinstance(data["historical_snapshots"], list)
+        ):
             raise ValueError("Current migration records are unsupported")
         return data
+
+    def _read_publication_accounts(self) -> dict[tuple[str, str], set[str]]:
+        path = self.app_data / "publication-manifests.json"
+        if not path.exists():
+            return {}
+        data = json.loads(path.read_text())
+        if (
+            data.get("version") not in SUPPORTED_PUBLICATION_VERSIONS
+            or not isinstance(data.get("manifests", []), list)
+            or not isinstance(data.get("mirrors", []), list)
+        ):
+            raise ValueError("Current publication state is unsupported or malformed")
+        accounts: dict[tuple[str, str], set[str]] = {}
+        for item in [*data.get("manifests", []), *data.get("mirrors", [])]:
+            account = item.get("account_id")
+            playlist = item.get("spotify_playlist_id")
+            reference = item.get("source_reference")
+            if all(isinstance(value, str) and value for value in (
+                account, playlist, reference,
+            )):
+                accounts.setdefault((playlist, reference), set()).add(account)
+        return accounts
 
     def _commit(self, writes: dict[str, bytes]) -> None:
         self.app_data.mkdir(parents=True, exist_ok=True)
@@ -310,7 +393,9 @@ class LegacyMigration:
                 for name in reversed(committed):
                     target = self.app_data / name
                     if existed[name]:
-                        shutil.copy2(originals / name, target)
+                        rollback = staged / f"{name}.rollback"
+                        shutil.copy2(originals / name, rollback)
+                        os.replace(rollback, target)
                     else:
                         target.unlink(missing_ok=True)
                 raise

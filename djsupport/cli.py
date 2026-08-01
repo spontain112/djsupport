@@ -164,7 +164,7 @@ def restore_local_data(
 
 @cli.command("migrate-0-3")
 @click.argument(
-    "legacy_directory", type=click.Path(exists=True, file_okay=False),
+    "legacy_directory", type=click.Path(),
 )
 @click.option("--apply", is_flag=True, help="Apply the validated migration preview.")
 def migrate_0_3(legacy_directory: str, apply: bool) -> None:
