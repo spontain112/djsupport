@@ -1,8 +1,9 @@
 ---
 title: Repo File Hygiene and Access Control
 type: chore
-status: active
+status: superseded
 date: 2026-02-22
+superseded_by: docs/adr/0001-keep-user-data-out-of-the-repository.md
 ---
 
 # Repo File Hygiene and Access Control

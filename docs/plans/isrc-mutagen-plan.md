@@ -1,3 +1,10 @@
+---
+title: ISRC via Mutagen — Test Plan
+type: research
+status: converted-to-issue
+github_issue: https://github.com/spontain112/djsupport/issues/31
+---
+
 # ISRC via Mutagen — Test Plan
 
 ## Goal
