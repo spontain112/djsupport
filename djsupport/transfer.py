@@ -1278,6 +1278,19 @@ class Transfer:
                                 spotify_uri=result["uri"],
                             )
                         )
+                        publication_items.append(PublicationItem(
+                            source_track_id=track.track_id,
+                            source_name=track.display,
+                            source_artist=track.artist,
+                            source_title=track.name,
+                            spotify_uri=result["uri"],
+                            spotify_name=result["name"],
+                            spotify_artist=result["artist"],
+                            score=result["score"],
+                            match_type=result.get("match_type", "exact"),
+                            source_duration=track.duration,
+                            authoritative=True,
+                        ))
                         result = None
                 elif self._knowledge.should_retry(
                     track, request.threshold, request.retry_days, request.retry,
@@ -1413,7 +1426,7 @@ class Transfer:
                     if relationship is not None else None
                 )
                 current_source_ids = {
-                    item.source_track_id for item in publication_items
+                    track.track_id for track in selection.tracks
                 }
                 if previous_manifest is not None:
                     playlist.source_removals = [

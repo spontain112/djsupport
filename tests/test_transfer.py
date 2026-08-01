@@ -781,6 +781,58 @@ class TestRekordboxMirror:
             for item in refreshed.playlists[0].publication_manifest.items
         ] == ["rb-3"]
 
+    def test_unavailable_approved_track_is_not_a_genuine_source_removal(self, tmp_path):
+        fixture = json.loads(MIRROR_REFRESH_FIXTURE.read_text())
+
+        class MirrorSource:
+            source_label = "Rekordbox"
+            default_mode = TransferMode.MIRROR
+
+            def consume(self, reference):
+                return SourceSelection(
+                    fixture["name"], fixture["reference"],
+                    [Track(
+                        track_id=item["track_id"], artist=item["artist"],
+                        name=item["name"], duration=item["duration"], album="",
+                        remixer="", label="", genre="", date_added="",
+                    ) for item in fixture["initial"]],
+                )
+
+        spotify = StatefulSpotify({
+            ("Artist One", "First Track"): _match(
+                "spotify:track:first", "First Track", "Artist One",
+            ),
+            ("Artist Two", "Second Track"): _match(
+                "spotify:track:second", "Second Track", "Artist Two",
+            ),
+        })
+        knowledge = MatchCacheKnowledge(MatchCache(tmp_path / "knowledge.json"))
+        publications = FilePublicationStorage(tmp_path / "publications.json")
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS, source=MirrorSource(),
+            spotify=spotify, matching_knowledge=knowledge,
+            publication_storage=publications,
+        )
+        initial = transfer.execute(TransferRequest(source=fixture["reference"]))
+        playlist_id = initial.playlists[0].spotify_playlist_id
+        transfer.approve(playlist_id)
+        original_spotify_track = spotify.spotify_track
+        spotify.spotify_track = lambda uri: (
+            {**original_spotify_track(uri), "is_playable": False}
+            if uri == "spotify:track:first" else original_spotify_track(uri)
+        )
+
+        refreshed = transfer.execute(TransferRequest(source=fixture["reference"]))
+
+        assert refreshed.playlists[0].source_removals == []
+        assert [
+            item.source_track_id
+            for item in refreshed.playlists[0].unavailable_approved
+        ] == ["rb-1"]
+        assert spotify.playlists[playlist_id]["tracks"] == [
+            "spotify:track:first", "spotify:track:second",
+        ]
+
     def test_refresh_deduplicates_orders_and_reports_genuine_source_removals(
         self, tmp_path,
     ):
