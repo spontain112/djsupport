@@ -5,12 +5,19 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from click.testing import CliRunner
 
 from djsupport.cli import cli
 from djsupport.rekordbox import Track
 from djsupport.report import PlaylistReport, SyncReport
-from djsupport.transfer import SourceSelection, Transfer, TransferRequest
+from djsupport.transfer import (
+    FilePublicationStorage,
+    SourceSelection,
+    Transfer,
+    TransferRequest,
+)
 
 
 class FixtureBeatportSource:
@@ -37,6 +44,18 @@ class StatefulSpotify:
         self.searches = []
         self.playlists = {"existing": ["spotify:track:untouched"]}
 
+    def publish_provisional_snapshot(self, name, track_uris, description):
+        playlist_id = f"snapshot-{len(self.playlists)}"
+        self.playlists[playlist_id] = {
+            "name": name,
+            "tracks": list(track_uris),
+            "description": description,
+        }
+        return playlist_id
+
+    def delete_provisional_snapshot(self, playlist_id):
+        del self.playlists[playlist_id]
+
     def match(self, track, threshold):
         self.searches.append((track.artist, track.name, threshold))
         return self.matches.get((track.artist, track.name))
@@ -49,6 +68,7 @@ class InMemoryStorage:
         self.checkpoints = 0
         self.playlist_state = {"must": "remain unchanged"}
         self.playlist_writes = 0
+        self.publications = []
 
     def lookup(self, track, threshold):
         result = self.matches.get((track.artist, track.name))
@@ -67,6 +87,10 @@ class InMemoryStorage:
 
     def checkpoint(self):
         self.checkpoints += 1
+
+    def retain_publication(self, manifest):
+        self.publications.append(manifest)
+        self.playlist_writes += 1
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "beatport_chart.json"
@@ -128,21 +152,229 @@ def test_preview_with_zero_acceptable_matches_succeeds_with_zero_percent():
     assert spotify.playlists == {"existing": ["spotify:track:untouched"]}
 
 
-@patch("djsupport.transfer.Transfer.execute")
-@patch("djsupport.cli.get_client", return_value=MagicMock())
-def test_cli_beatport_dry_run_enters_transfer_interface(mock_client, execute):
-    execute.return_value = SyncReport(
-        timestamp=datetime.now(), threshold=80, dry_run=True,
-        playlists=[PlaylistReport(name="Fixture", path="fixture", action="preview")],
-        cache_enabled=True, source_label="Beatport",
-    )
+class TestSnapshotPublication:
 
-    result = CliRunner().invoke(cli, [
-        "beatport", "https://www.beatport.com/chart/fixture/14",
-        "--dry-run", "--cache-path", "preview-cache.json",
-    ])
+    def test_publish_creates_provisional_snapshot_and_exact_manifest_after_matching(self):
+        spotify = StatefulSpotify({
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+            ("New Artist", "New Track"): _match(
+                "spotify:track:new", "New Track", "New Artist",
+            ),
+        })
+        storage = InMemoryStorage()
 
-    assert result.exit_code == 0, result.output
-    request = execute.call_args.args[0]
-    assert request.preview is True
-    assert request.source == "https://www.beatport.com/chart/fixture/14"
+        report = Transfer(
+            source=FixtureBeatportSource(FIXTURE),
+            spotify=spotify,
+            matching_knowledge=storage,
+            publication_storage=storage,
+        ).execute(TransferRequest(source="fixture"))
+
+        playlist = report.playlists[0]
+        assert playlist.action == "provisional snapshot created"
+        assert playlist.spotify_playlist_id == "snapshot-1"
+        published = spotify.playlists["snapshot-1"]
+        assert published["tracks"] == ["spotify:track:known", "spotify:track:new"]
+        assert "Beatport" in published["description"]
+        assert "https://www.beatport.com/chart/fixture/14" in published["description"]
+        assert len(storage.publications) == 1
+        manifest = storage.publications[0]
+        assert manifest.spotify_playlist_id == "snapshot-1"
+        assert playlist.publication_manifest is manifest
+        assert manifest.source_label == "Beatport"
+        assert manifest.source_reference == "https://www.beatport.com/chart/fixture/14"
+        assert [item.spotify_uri for item in manifest.items] == [
+            "spotify:track:known", "spotify:track:new",
+        ]
+        assert [item.source_track_id for item in manifest.items] == ["bp-1", "bp-2"]
+        assert storage.checkpoints == 1
+
+
+    def test_repeated_snapshot_is_distinct_and_never_updates_previous_snapshot(self):
+        matches = {
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+            ("New Artist", "New Track"): _match(
+                "spotify:track:new", "New Track", "New Artist",
+            ),
+        }
+        spotify = StatefulSpotify(matches)
+        storage = InMemoryStorage()
+        transfer = Transfer(
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=storage, publication_storage=storage,
+        )
+
+        first = transfer.execute(TransferRequest(source="fixture"))
+        first_id = first.playlists[0].spotify_playlist_id
+        first_snapshot = dict(spotify.playlists[first_id])
+        second = transfer.execute(TransferRequest(source="fixture"))
+        second_id = second.playlists[0].spotify_playlist_id
+
+        assert second_id != first_id
+        assert second.playlists[0].name != first.playlists[0].name
+        assert spotify.playlists[first_id] == first_snapshot
+        assert len(storage.publications) == 2
+
+
+    def test_matching_failure_checkpoints_knowledge_without_partial_publication(self):
+        class InterruptedSpotify(StatefulSpotify):
+            def match(self, track, threshold):
+                if track.track_id == "bp-2":
+                    raise RuntimeError("matching interrupted")
+                return _match("spotify:track:known", "Known Track", "Known Artist")
+
+        spotify = InterruptedSpotify()
+        storage = InMemoryStorage()
+
+        with pytest.raises(RuntimeError, match="matching interrupted"):
+            Transfer(
+                source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+                matching_knowledge=storage, publication_storage=storage,
+            ).execute(TransferRequest(source="fixture"))
+
+        assert spotify.playlists == {"existing": ["spotify:track:untouched"]}
+        assert storage.publications == []
+        assert storage.checkpoints == 1
+
+
+    def test_incomplete_matching_does_not_publish_snapshot(self):
+        spotify = StatefulSpotify({
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+        })
+        storage = InMemoryStorage()
+
+        report = Transfer(
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=storage, publication_storage=storage,
+        ).execute(TransferRequest(source="fixture"))
+
+        assert report.playlists[0].action == "not published: incomplete matching"
+        assert spotify.playlists == {"existing": ["spotify:track:untouched"]}
+        assert storage.publications == []
+
+    def test_empty_chart_does_not_publish_snapshot(self):
+        class EmptySource:
+            source_label = "Beatport"
+
+            def consume(self, reference):
+                return SourceSelection("Empty Chart", reference, [])
+
+        spotify = StatefulSpotify()
+        storage = InMemoryStorage()
+
+        report = Transfer(
+            source=EmptySource(), spotify=spotify,
+            matching_knowledge=storage, publication_storage=storage,
+        ).execute(TransferRequest(source="empty"))
+
+        assert report.playlists[0].action == "not published: empty source"
+        assert spotify.playlists == {"existing": ["spotify:track:untouched"]}
+        assert storage.publications == []
+
+
+    def test_publication_storage_failure_removes_provisional_playlist(self):
+        class FailingPublicationStorage(InMemoryStorage):
+            def retain_publication(self, manifest):
+                raise OSError("disk full")
+
+        matches = {
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+            ("New Artist", "New Track"): _match(
+                "spotify:track:new", "New Track", "New Artist",
+            ),
+        }
+        spotify = StatefulSpotify(matches)
+
+        with pytest.raises(OSError, match="disk full"):
+            Transfer(
+                source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+                matching_knowledge=InMemoryStorage(),
+                publication_storage=FailingPublicationStorage(),
+            ).execute(TransferRequest(source="fixture"))
+
+        assert spotify.playlists == {"existing": ["spotify:track:untouched"]}
+
+
+    def test_file_publication_manifest_survives_reload_through_transfer(self, tmp_path):
+        matches = {
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+            ("New Artist", "New Track"): _match(
+                "spotify:track:new", "New Track", "New Artist",
+            ),
+        }
+        path = tmp_path / "publication-manifests.json"
+        storage = FilePublicationStorage(path)
+
+        report = Transfer(
+            source=FixtureBeatportSource(FIXTURE), spotify=StatefulSpotify(matches),
+            matching_knowledge=InMemoryStorage(), publication_storage=storage,
+        ).execute(TransferRequest(source="fixture"))
+
+        reloaded = FilePublicationStorage(path)
+        assert reloaded.manifests[0]["spotify_playlist_id"] == (
+            report.playlists[0].spotify_playlist_id
+        )
+        assert [item["source_track_id"] for item in reloaded.manifests[0]["items"]] == [
+            "bp-1", "bp-2",
+        ]
+
+
+
+class TestBeatportCliTransfer:
+
+    @patch("djsupport.transfer.Transfer.execute")
+    @patch("djsupport.cli.get_client", return_value=MagicMock())
+    def test_cli_beatport_dry_run_enters_transfer_interface(
+        self, mock_client, execute,
+    ):
+        execute.return_value = SyncReport(
+            timestamp=datetime.now(), threshold=80, dry_run=True,
+            playlists=[PlaylistReport(name="Fixture", path="fixture", action="preview")],
+            cache_enabled=True, source_label="Beatport",
+        )
+
+        result = CliRunner().invoke(cli, [
+            "beatport", "https://www.beatport.com/chart/fixture/14",
+            "--dry-run", "--cache-path", "preview-cache.json",
+        ])
+
+        assert result.exit_code == 0, result.output
+        request = execute.call_args.args[0]
+        assert request.preview is True
+        assert request.source == "https://www.beatport.com/chart/fixture/14"
+
+
+    @patch("djsupport.transfer.Transfer.execute")
+    @patch("djsupport.cli.get_client", return_value=MagicMock())
+    def test_cli_beatport_publish_enters_transfer_interface(
+        self, mock_client, execute, tmp_path,
+    ):
+        execute.return_value = SyncReport(
+            timestamp=datetime.now(), threshold=80, dry_run=False,
+            playlists=[PlaylistReport(
+                name="Fixture — unique", path="fixture",
+                action="provisional snapshot created",
+                spotify_playlist_id="snapshot-1",
+            )],
+            cache_enabled=False, source_label="Beatport",
+        )
+
+        result = CliRunner().invoke(cli, [
+            "beatport", "https://www.beatport.com/chart/fixture/14",
+            "--no-cache", "--state-path", str(tmp_path / "publications.json"),
+        ])
+
+        assert result.exit_code == 0, result.output
+        request = execute.call_args.args[0]
+        assert request.preview is False
+        assert request.source == "https://www.beatport.com/chart/fixture/14"

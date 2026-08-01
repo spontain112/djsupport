@@ -1,7 +1,13 @@
 """Post-sync report generation for terminal and Markdown output."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import datetime
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from djsupport.transfer import PublicationManifest
 
 
 @dataclass
@@ -21,6 +27,7 @@ class PlaylistReport:
     unmatched: list[str] = field(default_factory=list)
     action: str = "dry-run"  # "created", "updated", "unchanged", or "dry-run"
     spotify_playlist_id: str | None = None
+    publication_manifest: PublicationManifest | None = None
     cache_hits: int = 0
     api_lookups: int = 0
     retried: int = 0

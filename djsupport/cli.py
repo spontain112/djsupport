@@ -300,11 +300,14 @@ def list_playlists(xml_path: str | None):
         click.echo(f"  {pl.path} ({len(pl.track_ids)} tracks)")
 
 
-from djsupport.transfer import default_matching_knowledge_path
+from djsupport.transfer import (
+    default_matching_knowledge_path,
+    default_publication_manifest_path,
+)
 
 
 DEFAULT_BEATPORT_CACHE_PATH = str(default_matching_knowledge_path())
-DEFAULT_BEATPORT_STATE_PATH = ".djsupport_beatport_playlists.json"
+DEFAULT_BEATPORT_STATE_PATH = str(default_publication_manifest_path())
 
 
 @cli.command()
@@ -315,7 +318,10 @@ DEFAULT_BEATPORT_STATE_PATH = ".djsupport_beatport_playlists.json"
 @click.option("--retry", is_flag=True, help="Force retry all previously failed matches.")
 @click.option("--retry-days", default=7, show_default=True, help="Auto-retry failures older than N days.")
 @click.option("--cache-path", default=DEFAULT_BEATPORT_CACHE_PATH, show_default=True, help="Path to Beatport match cache.")
-@click.option("--state-path", default=DEFAULT_BEATPORT_STATE_PATH, show_default=True, help="Path to Beatport playlist state.")
+@click.option(
+    "--state-path", default=DEFAULT_BEATPORT_STATE_PATH, show_default=True,
+    help="Path to durable Beatport publication manifests.",
+)
 @click.option("--report", "report_path", type=click.Path(), default=None, help="Save Markdown report.")
 @click.option("--prefix", default="djsupport", show_default=True, help="Prefix for Spotify playlist name.")
 @click.option("--no-prefix", is_flag=True, help="Disable playlist name prefix.")
@@ -344,152 +350,56 @@ def beatport(
     from djsupport.beatport import (
         BeatportParseError,
         InvalidBeatportURL,
-        compose_chart_playlist_name,
-        fetch_chart,
-        validate_url,
     )
 
-    # Preview enters through the deep Transfer seam. It may retain matching
-    # knowledge, but the interface has no playlist publication/state adapter.
-    if dry_run:
-        from djsupport.cache import MatchCache
-        from djsupport.transfer import (
-            BeatportChartSource,
-            EphemeralMatchingKnowledge,
-            MatchCacheKnowledge,
-            SpotifyMatcher,
-            Transfer,
-            TransferRequest,
-        )
+    from djsupport.cache import MatchCache
+    from djsupport.transfer import (
+        BeatportChartSource,
+        EphemeralMatchingKnowledge,
+        FilePublicationStorage,
+        MatchCacheKnowledge,
+        SpotifyMatcher,
+        Transfer,
+        TransferRequest,
+    )
 
-        cache = None if no_cache else MatchCache(cache_path)
-        if cache is not None:
-            cache.load()
-        transfer = Transfer(
-            source=BeatportChartSource(),
-            spotify=SpotifyMatcher(get_client()),
-            matching_knowledge=(
-                EphemeralMatchingKnowledge()
-                if cache is None else MatchCacheKnowledge(cache)
-            ),
-        )
-        try:
-            report = transfer.execute(TransferRequest(
-                source=url,
-                preview=True,
-                threshold=threshold,
-                retry=retry,
-                retry_days=retry_days,
-            ))
-        except InvalidBeatportURL as e:
-            raise click.ClickException(str(e))
-        except BeatportParseError as e:
-            raise click.ClickException(str(e))
-        except requests.RequestException as e:
-            if (
-                hasattr(e, "response")
-                and e.response is not None
-                and e.response.status_code == 404
-            ):
-                raise click.ClickException("Chart not found — check the URL.")
-            raise click.ClickException(f"Failed to fetch chart: {e}")
-        except RateLimitError as e:
-            raise click.ClickException(str(e))
-
-        print_report(report)
-        if report_path:
-            save_report(report, report_path)
-            click.echo(f"\nDetailed report saved to {report_path}")
-        return
-
+    cache = None if no_cache else MatchCache(cache_path)
+    if cache is not None:
+        cache.load()
+    transfer = Transfer(
+        source=BeatportChartSource(),
+        spotify=SpotifyMatcher(get_client()),
+        matching_knowledge=(
+            EphemeralMatchingKnowledge()
+            if cache is None else MatchCacheKnowledge(cache)
+        ),
+        publication_storage=(
+            None if dry_run else FilePublicationStorage(state_path)
+        ),
+    )
     try:
-        url = validate_url(url)
+        report = transfer.execute(TransferRequest(
+            source=url,
+            preview=dry_run,
+            threshold=threshold,
+            retry=retry,
+            retry_days=retry_days,
+            playlist_prefix=None if no_prefix else prefix,
+        ))
     except InvalidBeatportURL as e:
         raise click.ClickException(str(e))
-
-    click.echo("Fetching chart from Beatport...")
-    try:
-        chart_name, curator, tracks = fetch_chart(url)
     except BeatportParseError as e:
         raise click.ClickException(str(e))
     except requests.RequestException as e:
-        if hasattr(e, "response") and e.response is not None and e.response.status_code == 404:
+        if (
+            hasattr(e, "response")
+            and e.response is not None
+            and e.response.status_code == 404
+        ):
             raise click.ClickException("Chart not found — check the URL.")
         raise click.ClickException(f"Failed to fetch chart: {e}")
-
-    if not tracks:
-        click.echo(f"Chart '{chart_name}' has no tracks.")
-        return
-
-    playlist_name = compose_chart_playlist_name(chart_name, curator)
-    click.echo(f"Chart: {chart_name} by {curator}. {len(tracks)} tracks.")
-
-    # Initialize cache (separate from Rekordbox)
-    cache = None
-    if not no_cache:
-        from djsupport.cache import MatchCache
-        cache = MatchCache(cache_path)
-        cache.load()
-        if cache.entries:
-            click.echo(f"Loaded {len(cache.entries)} cached Beatport matches from {cache_path}")
-
-    # Resolve prefix
-    actual_prefix = None if no_prefix else prefix
-
-    # Initialize Beatport-specific playlist state
-    from djsupport.state import PlaylistStateManager
-    state_mgr = PlaylistStateManager(state_path)
-    state_mgr.load()
-
-    # Spotify client
-    sp = get_client()
-    existing = get_user_playlists(sp) if not dry_run else None
-
-    # Match and sync via shared helper
-    report = SyncReport(
-        timestamp=datetime.now(),
-        threshold=threshold,
-        dry_run=dry_run,
-        cache_enabled=cache is not None,
-        source_label="Beatport",
-    )
-
-    try:
-        pl_report = _cli_match_and_sync(
-            tracks,
-            playlist_name,
-            url,
-            sp=sp,
-            cache=cache,
-            state_mgr=state_mgr,
-            existing_playlists=existing,
-            threshold=threshold,
-            dry_run=dry_run,
-            incremental=incremental,
-            prefix=actual_prefix,
-            retry_days=retry_days,
-            retry=retry,
-            source_type="beatport",
-        )
     except RateLimitError as e:
-        click.echo(f"\n{e}", err=True)
-        if cache is not None:
-            cache.save()
-            click.echo(f"Cache saved to {cache_path} ({len(cache.entries)} entries).", err=True)
-        print_report(report)
-        if report_path:
-            save_report(report, report_path)
-        sys.exit(1)
-
-    report.playlists.append(pl_report)
-
-    # Save cache
-    if cache is not None:
-        cache.save()
-
-    # Save state
-    if not dry_run:
-        state_mgr.save()
+        raise click.ClickException(str(e))
 
     print_report(report)
     if report_path:
