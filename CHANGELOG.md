@@ -57,6 +57,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   returned URLs, caps pagination, and reports malformed page data safely.
 - Matcher version recognition includes standalone Original and Interpretation
   descriptors.
+- Matcher title comparison preserves one copy of immediately adjacent repeated
+  parenthetical subtitles, without changing source or matching identities.
 
 ### Known limitations
 
@@ -65,9 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Provisional Playlist descriptions retain an opaque Transfer marker and
   machine timestamp because crash recovery and duplicate-publication prevention
   currently depend on that marker (#61).
-- Material duration differences can still be classified as exact, and repeated
-  parenthetical subtitles can reduce a valid candidate below threshold (#56,
-  #57). Review proposals before Approval and use a Correction when needed.
+- Material duration differences can still be classified as exact (#56). Review
+  proposals before Approval and use a Correction when needed.
 - Broader Spotify candidate recall, noisy-source cleanup, and ISRC-first lookup
   remain research work rather than release behavior (#31, #32, #39, #42).
 

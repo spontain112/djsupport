@@ -193,6 +193,42 @@ class TestMatchCacheLookup:
         assert entry.spotify_uri == "spotify:track:approved"
         assert entry.score == 88.0
 
+    def test_repeated_subtitle_keeps_distinct_approved_match_identity(self, cache):
+        repeated = "Signal (Sunrise Mix) (Sunrise Mix)"
+        single = "Signal (Sunrise Mix)"
+        cache.record_approval(
+            "Synthetic Artist", repeated, "approved",
+            _matched_result(uri="spotify:track:signal", name=single),
+        )
+
+        assert cache.cache_key("Synthetic Artist", repeated) != cache.cache_key(
+            "Synthetic Artist", single,
+        )
+        assert cache.lookup("Synthetic Artist", repeated, 100) is not None
+        assert cache.lookup("Synthetic Artist", single, 100) is None
+
+    def test_repeated_subtitle_correction_persists_original_identity(self, tmp_path):
+        path = tmp_path / "matching-knowledge.json"
+        repeated = "Signal (Sunrise Mix) (Sunrise Mix)"
+        correction = {
+            "source_track_id": "synthetic-1",
+            "source_artist": "Synthetic Artist",
+            "source_title": repeated,
+            "source_duration": 360,
+            "spotify_uri": "spotify:track:signal",
+            "spotify_name": "Signal (Sunrise Mix)",
+            "spotify_artist": "Synthetic Artist",
+        }
+        knowledge = MatchCache(path=str(path))
+
+        knowledge.record_correction(correction)
+        knowledge.save()
+        reloaded = MatchCache(path=str(path))
+        reloaded.load()
+
+        assert reloaded.local_regressions == [correction]
+        assert reloaded.local_regressions[0]["source_title"] == repeated
+
 
 class TestMatchCacheRetryEligibility:
     def test_not_eligible_for_recent_failed_entry(self, cache):
