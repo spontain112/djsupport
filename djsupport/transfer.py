@@ -33,9 +33,17 @@ else:
     import fcntl
 
 from djsupport.cache import MatchCache
-from djsupport.matcher import match_track
+from djsupport.matcher import match_track_with_alternatives
 from djsupport.rekordbox import Track
-from djsupport.report import MatchedTrack, PlaylistReport, SyncReport
+from djsupport.report import (
+    AlternativeCandidate,
+    MatchCollision,
+    MatchedTrack,
+    PlaylistReport,
+    SyncReport,
+    UnmatchedAlternatives,
+    UnavailableApprovedMatch,
+)
 from djsupport.spotify import MAX_RATE_LIMIT_WAIT, RateLimitError, _parse_retry_after
 
 
@@ -185,6 +193,7 @@ class TransferState:
     matched: list[dict]
     unmatched: list[str]
     publication_items: list[dict]
+    alternatives: list[dict]
     spotify_playlist_id: str | None = None
     spotify_playlist_name: str | None = None
     publication_manifest: dict | None = None
@@ -192,7 +201,10 @@ class TransferState:
 
     @classmethod
     def from_dict(cls, value: dict) -> TransferState:
-        return cls(**{**value, "status": TransferStatus(value["status"])})
+        return cls(**{
+            "alternatives": [], **value,
+            "status": TransferStatus(value["status"]),
+        })
 
 
 @dataclass(frozen=True)
@@ -217,6 +229,7 @@ class PublicationItem:
     spotify_artist: str
     score: float
     match_type: str
+    source_duration: int = 0
 
 
 @dataclass(frozen=True)
@@ -244,6 +257,16 @@ class ApprovalOutcome:
     rejected: tuple[PublicationItem, ...] = ()
     collisions: tuple[PublicationItem, ...] = ()
     corrections: tuple[PublicationItem, ...] = ()
+    conflicts: tuple[ApprovalConflict, ...] = ()
+
+
+@dataclass(frozen=True)
+class ApprovalConflict:
+    source_artist: str
+    source_title: str
+    source_duration: int
+    approved_spotify_uri: str
+    proposed_spotify_uri: str
 
 
 class SourceAdapter(Protocol):
@@ -422,11 +445,11 @@ class MatchingKnowledge(Protocol):
 
     def checkpoint(self) -> None: ...
 
-    def approve(self, item: PublicationItem) -> None: ...
+    def approve(self, item: PublicationItem) -> ApprovalConflict | None: ...
 
     def reject(self, item: PublicationItem) -> None: ...
 
-    def correct(self, item: PublicationItem) -> None: ...
+    def correct(self, item: PublicationItem) -> ApprovalConflict | None: ...
 
 
 class BeatportChartSource:
@@ -460,7 +483,9 @@ class SpotifyMatcher:
         return self._client.current_user()["id"]
 
     def match(self, track: Track, threshold: int) -> dict | None:
-        return match_track(self._client, track, threshold=threshold)
+        return match_track_with_alternatives(
+            self._client, track, threshold=threshold,
+        )
 
     def publish_provisional_snapshot(
         self, name: str, track_uris: list[str], description: str,
@@ -547,7 +572,9 @@ class MatchCacheKnowledge:
         self._cache = cache
 
     def lookup(self, track: Track, threshold: int) -> dict | None:
-        entry = self._cache.lookup(track.artist, track.name, threshold)
+        entry = self._cache.lookup(
+            track.artist, track.name, threshold, track.duration,
+        )
         if entry is None or not entry.matched:
             return None
         return {
@@ -556,12 +583,15 @@ class MatchCacheKnowledge:
             "artist": entry.spotify_artist,
             "score": entry.score,
             "match_type": entry.match_type or "exact",
+            "authoritative": entry.approval_status == "approved",
         }
 
     def should_retry(
         self, track: Track, threshold: int, retry_days: int, force: bool,
     ) -> bool:
-        entry = self._cache.lookup(track.artist, track.name, threshold)
+        entry = self._cache.lookup(
+            track.artist, track.name, threshold, track.duration,
+        )
         if entry is None:
             return True
         if entry.matched:
@@ -574,8 +604,8 @@ class MatchCacheKnowledge:
     def checkpoint(self) -> None:
         self._cache.save()
 
-    def approve(self, item: PublicationItem) -> None:
-        self._cache.record_approval(
+    def approve(self, item: PublicationItem) -> ApprovalConflict | None:
+        conflict = self._cache.record_approval(
             item.source_artist, item.source_title, ApprovalStatus.APPROVED.value,
             {
                 "uri": item.spotify_uri,
@@ -583,8 +613,9 @@ class MatchCacheKnowledge:
                 "artist": item.spotify_artist,
                 "score": item.score,
                 "match_type": item.match_type,
-            },
+            }, item.source_duration,
         )
+        return ApprovalConflict(**conflict) if conflict else None
 
     def reject(self, item: PublicationItem) -> None:
         self._cache.record_approval(
@@ -595,11 +626,13 @@ class MatchCacheKnowledge:
                 "artist": item.spotify_artist,
                 "score": item.score,
                 "match_type": item.match_type,
-            },
+            }, item.source_duration,
         )
 
-    def correct(self, item: PublicationItem) -> None:
-        self.approve(item)
+    def correct(self, item: PublicationItem) -> ApprovalConflict | None:
+        conflict = self.approve(item)
+        if conflict is not None:
+            return conflict
         self._cache.record_correction({
             "source_track_id": item.source_track_id,
             "source_artist": item.source_artist,
@@ -608,6 +641,7 @@ class MatchCacheKnowledge:
             "spotify_name": item.spotify_name,
             "spotify_artist": item.spotify_artist,
         })
+        return None
 
 
 class EphemeralMatchingKnowledge:
@@ -748,13 +782,34 @@ class Transfer:
                         if item.source_track_id in corrected_items
                     ),
                 )
+                conflicts: list[ApprovalConflict] = []
                 for item in outcome.approved:
                     if item.source_track_id in corrected_items:
-                        self._knowledge.correct(item)
+                        conflict = self._knowledge.correct(item)
                     else:
-                        self._knowledge.approve(item)
+                        conflict = self._knowledge.approve(item)
+                    if conflict is not None:
+                        conflicts.append(conflict)
                 for item in outcome.rejected:
                     self._knowledge.reject(item)
+                if conflicts:
+                    conflict_identities = {
+                        (item.source_artist, item.source_title, item.source_duration)
+                        for item in conflicts
+                    }
+                    outcome = replace(
+                        outcome,
+                        status=ApprovalStatus.NEEDS_REVIEW,
+                        approved=tuple(item for item in outcome.approved if (
+                            item.source_artist, item.source_title,
+                            item.source_duration,
+                        ) not in conflict_identities),
+                        corrections=tuple(item for item in outcome.corrections if (
+                            item.source_artist, item.source_title,
+                            item.source_duration,
+                        ) not in conflict_identities),
+                        conflicts=tuple(conflicts),
+                    )
                 self._knowledge.checkpoint()
             self._publication_storage.retain_approval(outcome)
             return outcome
@@ -918,6 +973,7 @@ class Transfer:
                 matched=[],
                 unmatched=[],
                 publication_items=[],
+                alternatives=[],
             )
             self._save_transfer(transfer_id, state)
         else:
@@ -954,6 +1010,17 @@ class Transfer:
         )
         playlist.matched = [MatchedTrack(**item) for item in state.matched]
         playlist.unmatched = list(state.unmatched)
+        playlist.alternatives = [
+            UnmatchedAlternatives(
+                source_track_id=item["source_track_id"],
+                source_name=item["source_name"],
+                candidates=tuple(
+                    AlternativeCandidate(**candidate)
+                    for candidate in item["candidates"]
+                ),
+            )
+            for item in state.alternatives
+        ]
         publication_items = [
             PublicationItem(**item) for item in state.publication_items
         ]
@@ -982,8 +1049,6 @@ class Transfer:
                     )
             elif not request.preview and not selection.tracks:
                 playlist.action = "not published: empty source"
-            elif not request.preview and playlist.unmatched:
-                playlist.action = "not published: incomplete matching"
             return report
 
         try:
@@ -992,6 +1057,17 @@ class Transfer:
                 result = self._knowledge.lookup(track, request.threshold)
                 if result is not None:
                     playlist.cache_hits += 1
+                    if result.get("authoritative") and not self._approved_available(
+                        result["uri"]
+                    ):
+                        playlist.unavailable_approved.append(
+                            UnavailableApprovedMatch(
+                                source_track_id=track.track_id,
+                                source_name=track.display,
+                                spotify_uri=result["uri"],
+                            )
+                        )
+                        result = None
                 elif self._knowledge.should_retry(
                     track, request.threshold, request.retry_days, request.retry,
                 ):
@@ -999,13 +1075,37 @@ class Transfer:
                         lambda: self._spotify.match(track, request.threshold)
                     )
                     playlist.api_lookups += 1
-                    self._knowledge.retain(track, request.threshold, result)
+                    self._knowledge.retain(
+                        track, request.threshold,
+                        None if result and "alternatives" in result else result,
+                    )
                 else:
                     result = None
                     playlist.cache_hits += 1
 
-                if result is None:
+                if result is None or "alternatives" in result:
                     playlist.unmatched.append(track.display)
+                    candidates = tuple(
+                        AlternativeCandidate(
+                            rank=rank,
+                            spotify_uri=candidate["uri"],
+                            spotify_name=candidate["name"],
+                            spotify_artist=candidate["artist"],
+                            version=candidate.get("version", "default version"),
+                            duration_ms=candidate.get("duration_ms", 0),
+                            score=candidate["score"],
+                            score_reasons=tuple(candidate.get("score_reasons", ())),
+                        )
+                        for rank, candidate in enumerate(
+                            (result or {}).get("alternatives", ())[:3], start=1,
+                        )
+                    )
+                    if candidates:
+                        playlist.alternatives.append(UnmatchedAlternatives(
+                            source_track_id=track.track_id,
+                            source_name=track.display,
+                            candidates=candidates,
+                        ))
                 else:
                     matched_track = MatchedTrack(
                         source_name=track.display,
@@ -1027,11 +1127,13 @@ class Transfer:
                         spotify_artist=matched_track.spotify_artist,
                         score=matched_track.score,
                         match_type=matched_track.match_type,
+                        source_duration=track.duration,
                     ))
 
                 state.next_track_index = index + 1
                 state.matched = [asdict(item) for item in playlist.matched]
                 state.unmatched = list(playlist.unmatched)
+                state.alternatives = [asdict(item) for item in playlist.alternatives]
                 state.publication_items = [
                     asdict(item) for item in publication_items
                 ]
@@ -1045,10 +1147,38 @@ class Transfer:
                     return report
                 self._save_transfer(transfer_id, state)
 
+            collision_uris = {
+                uri for uri, count in Counter(
+                    item.spotify_uri for item in publication_items
+                ).items() if count > 1
+            }
+            if collision_uris:
+                colliding_items = [
+                    item for item in publication_items
+                    if item.spotify_uri in collision_uris
+                ]
+                playlist.match_collisions = [
+                    MatchCollision(
+                        item.source_track_id, item.source_name, item.spotify_uri,
+                    )
+                    for item in colliding_items
+                ]
+                colliding_ids = {
+                    item.source_track_id for item in colliding_items
+                }
+                playlist.matched = [
+                    item for item in playlist.matched
+                    if item.source_track_id not in colliding_ids
+                ]
+                playlist.unmatched.extend(
+                    item.source_name for item in colliding_items
+                    if item.source_name not in playlist.unmatched
+                )
+                state.matched = [asdict(item) for item in playlist.matched]
+                state.unmatched = list(playlist.unmatched)
+
             if not request.preview and not selection.tracks:
                 playlist.action = "not published: empty source"
-            elif not request.preview and playlist.unmatched:
-                playlist.action = "not published: incomplete matching"
             elif not request.preview:
                 playlist_id = state.spotify_playlist_id
                 snapshot_name = state.spotify_playlist_name
@@ -1066,7 +1196,9 @@ class Transfer:
                     playlist_id = self._retry_policy.run(
                         lambda: self._spotify.publish_provisional_snapshot(
                             snapshot_name,
-                            [item.spotify_uri for item in publication_items],
+                            list(dict.fromkeys(
+                                item.spotify_uri for item in publication_items
+                            )),
                             description,
                             transfer_id,
                         )
@@ -1141,3 +1273,14 @@ class Transfer:
     def _save_transfer(self, transfer_id: str, state: TransferState) -> None:
         if self._transfer_storage is not None:
             self._transfer_storage.save_transfer(transfer_id, state)
+
+    def _approved_available(self, spotify_uri: str) -> bool:
+        try:
+            track = self._retry_policy.run(
+                lambda: self._spotify.spotify_track(spotify_uri)
+            )
+        except spotipy.SpotifyException as exc:
+            if exc.http_status == 404:
+                return False
+            raise
+        return track.get("is_playable", True) is not False

@@ -328,6 +328,45 @@ def match_track(sp, track: Track, threshold: int = 80) -> dict | None:
     return _select_best(track, all_results, threshold)
 
 
+def match_track_with_alternatives(
+    sp, track: Track, threshold: int = 80,
+) -> dict | None:
+    """Return an acceptable match or up to three explained alternatives."""
+    all_results: list[dict] = []
+    all_results.extend(search_track(sp, track.artist, track.name))
+    stripped = _strip_mix_info(track.name)
+    if stripped != track.name:
+        all_results.extend(search_track(sp, track.artist, stripped))
+    if track.remixer:
+        all_results.extend(search_track(
+            sp, f"{track.artist} {track.remixer}", track.name,
+        ))
+    if not all_results:
+        all_results.extend(search_track(sp, track.artist, track.name, plain=True))
+    match = _select_best(track, all_results, threshold)
+    if match is not None:
+        return match
+    unique = {candidate["uri"]: candidate for candidate in all_results}
+    ranked = []
+    for candidate in unique.values():
+        components = _score_components(track, candidate)
+        score = _score_result(track, candidate, components)
+        ranked.append({
+            **candidate,
+            "score": score,
+            "version": (
+                _extract_mix_descriptor(candidate["name"]) or "default version"
+            ),
+            "score_reasons": [
+                "title similarity "
+                f"{max(components['raw_title_score'], components['stripped_title_score']):.0f}",
+                f"artist similarity {components['artist_score']:.0f}",
+            ],
+        })
+    ranked.sort(key=lambda item: item["score"], reverse=True)
+    return {"alternatives": ranked[:3]} if ranked else None
+
+
 def match_track_cached(
     sp, track: Track, cache: "MatchCache", threshold: int = 80,
     retry_days: int = 7, force_retry: bool = False,
