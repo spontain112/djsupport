@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Playlist-scoped Provisional Playlist approval with durable approved, rejected,
+  and abandoned review outcomes
+- Clickable Spotify proposals and stable source references in Markdown reports,
+  plus editable CSV review files for Beatport Transfers
 - Account-scoped Provisional Playlist state, per-account publishing serialization,
   and bounded Spotify retries with safe Transfer checkpointing
 - Beatport chart playlists now include the curator/DJ name — e.g. `"Adam Beyer - Tech House Vibes"` instead of just `"Tech House Vibes"`

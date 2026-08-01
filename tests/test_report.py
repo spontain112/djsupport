@@ -6,12 +6,19 @@ from unittest.mock import patch
 
 import pytest
 
-from djsupport.report import MatchedTrack, PlaylistReport, SyncReport, save_report
+from djsupport.report import (
+    MatchedTrack,
+    PlaylistReport,
+    SyncReport,
+    save_report,
+    save_review_csv,
+)
 
 
 def _matched(
     name="Track A", spotify_name="Track A", artist="Artist", score=95.0,
-    match_type="exact", score_reasons=(),
+    match_type="exact", score_reasons=(), source_track_id="source-1",
+    spotify_uri="spotify:track:abc123",
 ):
     return MatchedTrack(
         source_name=name,
@@ -20,6 +27,8 @@ def _matched(
         score=score,
         match_type=match_type,
         score_reasons=score_reasons,
+        source_track_id=source_track_id,
+        spotify_uri=spotify_uri,
     )
 
 
@@ -144,6 +153,14 @@ class TestSaveReport:
         content = (tmp_path / "report.md").read_text()
         assert "Peak Time" in content
 
+    def test_review_table_has_stable_source_reference_and_clickable_proposal(self, tmp_path):
+        path = str(tmp_path / "report.md")
+        save_report(_report(playlists=[_playlist(matched=[_matched()])]), path)
+
+        content = (tmp_path / "report.md").read_text()
+        assert "source-1" in content
+        assert "[Artist - Track A](https://open.spotify.com/track/abc123)" in content
+
     def test_file_contains_unmatched_tracks(self, tmp_path):
         path = str(tmp_path / "report.md")
         pl = _playlist(unmatched=["Obscure Track"])
@@ -193,3 +210,16 @@ class TestSaveReport:
         save_report(r, path)
         content = (tmp_path / "report.md").read_text()
         assert "Low Confidence" not in content
+
+
+class TestSaveReviewCsv:
+    def test_writes_editable_rows_with_stable_reference_and_spotify_url(self, tmp_path):
+        path = str(tmp_path / "review.csv")
+
+        save_review_csv(
+            _report(playlists=[_playlist(matched=[_matched()])]), path,
+        )
+
+        content = (tmp_path / "review.csv").read_text()
+        assert "source_track_id,source_track,spotify_url" in content
+        assert "source-1,Track A,https://open.spotify.com/track/abc123" in content

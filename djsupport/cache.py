@@ -23,6 +23,7 @@ class CacheEntry:
     timestamp: str
     threshold: int
     match_type: str | None = None
+    approval_status: str | None = None
 
 
 class MatchCache:
@@ -63,6 +64,10 @@ class MatchCache:
         entry = self.entries.get(key)
         if entry is None:
             return None
+        if entry.approval_status == "rejected":
+            return None
+        if entry.approval_status == "approved":
+            return entry
         if entry.matched and entry.score is not None and entry.score >= threshold:
             return entry
         if not entry.matched and entry.threshold <= threshold:
@@ -98,6 +103,27 @@ class MatchCache:
         self._dirty_count += 1
         if self._dirty_count >= CHECKPOINT_INTERVAL:
             self.save()
+
+    def record_approval(
+        self, artist: str, title: str, status: str, result: dict,
+    ) -> None:
+        """Mark retained matching knowledge as explicitly approved or rejected."""
+        key = self.cache_key(artist, title)
+        entry = self.entries.get(key)
+        if entry is None or status == "approved":
+            entry = CacheEntry(
+                spotify_uri=result["uri"],
+                spotify_name=result["name"],
+                spotify_artist=result["artist"],
+                score=result["score"],
+                matched=True,
+                timestamp=datetime.now().isoformat(),
+                threshold=0,
+                match_type=result.get("match_type"),
+            )
+            self.entries[key] = entry
+        entry.approval_status = status
+        self._dirty_count += 1
 
     def is_retry_eligible(self, artist: str, title: str,
                           retry_days: int = DEFAULT_RETRY_DAYS,

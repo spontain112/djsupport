@@ -164,6 +164,35 @@ class TestMatchCacheLookup:
         entry = populated_cache.lookup("SOLOMUN", "VULTORA (ORIGINAL MIX)", 80)
         assert entry is not None
 
+    def test_rejected_match_is_not_reused(self, populated_cache):
+        populated_cache.record_approval(
+            "Solomun", "Vultora (Original Mix)", "rejected", _matched_result(),
+        )
+
+        assert populated_cache.lookup("Solomun", "Vultora (Original Mix)", 80) is None
+
+    def test_approved_match_is_authoritative_above_original_threshold(self, cache):
+        cache.record_approval(
+            "Artist", "Track", "approved", _matched_result(score=81.0),
+        )
+
+        entry = cache.lookup("Artist", "Track", 99)
+        assert entry is not None
+        assert entry.approval_status == "approved"
+
+    def test_approval_replaces_stale_cached_candidate(self, cache):
+        cache.store("Artist", "Track", 80, _matched_result(uri="spotify:track:old"))
+
+        cache.record_approval(
+            "Artist", "Track", "approved",
+            _matched_result(uri="spotify:track:approved", score=88.0),
+        )
+
+        entry = cache.lookup("Artist", "Track", 99)
+        assert entry is not None
+        assert entry.spotify_uri == "spotify:track:approved"
+        assert entry.score == 88.0
+
 
 class TestMatchCacheRetryEligibility:
     def test_not_eligible_for_recent_failed_entry(self, cache):

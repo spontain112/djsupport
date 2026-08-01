@@ -25,9 +25,12 @@ from djsupport.transfer import (
     MatchCacheKnowledge,
     PublishingTransferConflict,
     RetryPolicy,
+    SpotifyMatcher,
     SourceSelection,
     Transfer,
     TransferRequest,
+    ApprovalStatus,
+    ApprovalOutcome,
 )
 
 
@@ -78,6 +81,12 @@ class StatefulSpotify:
     def delete_provisional_snapshot(self, playlist_id):
         del self.playlists[playlist_id]
 
+    def provisional_playlist_track_uris(self, playlist_id):
+        playlist = self.playlists.get(playlist_id)
+        if playlist is None:
+            return None
+        return list(playlist["tracks"])
+
     def match(self, track, threshold):
         self.searches.append((track.artist, track.name, threshold))
         return self.matches.get((track.artist, track.name))
@@ -91,6 +100,9 @@ class InMemoryStorage:
         self.playlist_state = {"must": "remain unchanged"}
         self.playlist_writes = 0
         self.publications = []
+        self.approvals = []
+        self.approved_matches = []
+        self.rejected_matches = []
 
     def lookup(self, track, threshold):
         result = self.matches.get((track.artist, track.name))
@@ -113,6 +125,25 @@ class InMemoryStorage:
     def retain_publication(self, manifest):
         self.publications.append(manifest)
         self.playlist_writes += 1
+
+    def publication_for_playlist(self, account_id, playlist_id):
+        return next(
+            (
+                manifest for manifest in self.publications
+                if manifest.account_id == account_id
+                and manifest.spotify_playlist_id == playlist_id
+            ),
+            None,
+        )
+
+    def retain_approval(self, outcome):
+        self.approvals.append(outcome)
+
+    def approve(self, item):
+        self.approved_matches.append(item)
+
+    def reject(self, item):
+        self.rejected_matches.append(item)
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "beatport_chart.json"
@@ -824,6 +855,149 @@ class TestSnapshotPublication:
             for item in reloaded.manifests_for_account("spotify-user-2")
         } == {"spotify-user-2"}
 
+class TestProvisionalPlaylistApproval:
+    def publish(self):
+        matches = {
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+            ("New Artist", "New Track"): _match(
+                "spotify:track:new", "New Track", "New Artist",
+            ),
+        }
+        spotify = StatefulSpotify(matches)
+        storage = InMemoryStorage()
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=storage, publication_storage=storage,
+        )
+        report = transfer.execute(TransferRequest(source="fixture"))
+        return transfer, spotify, storage, report.playlists[0].spotify_playlist_id
+
+    def test_approval_is_scoped_to_one_playlist_and_records_review_outcomes(self):
+        transfer, spotify, storage, playlist_id = self.publish()
+        spotify.playlists[playlist_id]["tracks"] = [
+            "spotify:track:known", "spotify:track:manual",
+        ]
+
+        review = transfer.approve(playlist_id)
+
+        assert review.status == ApprovalStatus.APPROVED
+        assert [item.source_track_id for item in review.approved] == ["bp-1"]
+        assert [item.source_track_id for item in review.rejected] == ["bp-2"]
+        assert spotify.playlists[playlist_id]["tracks"] == [
+            "spotify:track:known", "spotify:track:manual",
+        ]
+        assert storage.approvals == [review]
+        assert storage.approved_matches == list(review.approved)
+        assert storage.rejected_matches == list(review.rejected)
+
+    def test_deleted_provisional_playlist_is_abandoned_with_history_retained(self):
+        transfer, spotify, storage, playlist_id = self.publish()
+        del spotify.playlists[playlist_id]
+
+        review = transfer.approve(playlist_id)
+
+        assert review.status == ApprovalStatus.ABANDONED
+        assert review.approved == ()
+        assert review.rejected == ()
+        assert len(storage.publications) == 1
+        assert storage.publications[0].spotify_playlist_id == playlist_id
+        assert storage.approvals == [review]
+
+    def test_cannot_approve_an_unknown_or_other_account_playlist(self):
+        transfer, _, _, _ = self.publish()
+
+        with pytest.raises(ValueError, match="No Provisional Playlist"):
+            transfer.approve("not-owned")
+
+    def test_file_storage_persists_review_without_removing_publication_history(
+        self, tmp_path,
+    ):
+        transfer, spotify, memory, playlist_id = self.publish()
+        path = tmp_path / "publication-manifests.json"
+        storage = FilePublicationStorage(path)
+        storage.retain_publication(memory.publications[0])
+        spotify.playlists[playlist_id]["tracks"] = ["spotify:track:known"]
+        file_transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=memory, publication_storage=storage,
+        )
+
+        file_transfer.approve(playlist_id)
+
+        reloaded = FilePublicationStorage(path)
+        assert len(reloaded.manifests) == 1
+        assert reloaded.approvals[0]["status"] == "approved"
+        assert [item["source_track_id"] for item in reloaded.approvals[0]["rejected"]] == [
+            "bp-2",
+        ]
+
+    def test_colliding_proposals_are_withheld_for_explicit_resolution(self):
+        transfer, spotify, storage, playlist_id = self.publish()
+        manifest = storage.publications[0]
+        duplicate = type(manifest)(
+            **{
+                **manifest.__dict__,
+                "items": (
+                    manifest.items[0],
+                    type(manifest.items[1])(
+                        **{
+                            **manifest.items[1].__dict__,
+                            "spotify_uri": manifest.items[0].spotify_uri,
+                        }
+                    ),
+                ),
+            }
+        )
+        storage.publications[0] = duplicate
+        spotify.playlists[playlist_id]["tracks"] = [manifest.items[0].spotify_uri]
+
+        outcome = transfer.approve(playlist_id)
+
+        assert outcome.approved == ()
+        assert outcome.rejected == ()
+        assert outcome.status == ApprovalStatus.NEEDS_REVIEW
+        assert [item.source_track_id for item in outcome.collisions] == ["bp-1", "bp-2"]
+
+    def test_later_abandonment_appends_to_approval_history(self):
+        transfer, spotify, storage, playlist_id = self.publish()
+        transfer.approve(playlist_id)
+        del spotify.playlists[playlist_id]
+
+        transfer.approve(playlist_id)
+
+        assert [outcome.status for outcome in storage.approvals] == [
+            ApprovalStatus.APPROVED, ApprovalStatus.ABANDONED,
+        ]
+
+
+class TestSpotifyApprovalAdapter:
+    def test_reads_all_current_playlist_track_uris(self):
+        client = MagicMock()
+        client.playlist_items.return_value = {
+            "items": [{"track": {"uri": "spotify:track:one"}}],
+            "next": "page-2",
+        }
+        client.next.return_value = {
+            "items": [
+                {"track": {"uri": "spotify:track:two"}},
+                {"track": None},
+            ],
+            "next": None,
+        }
+
+        assert SpotifyMatcher(client).provisional_playlist_track_uris("snapshot-1") == [
+            "spotify:track:one", "spotify:track:two",
+        ]
+
+    def test_missing_playlist_is_reported_without_hiding_other_errors(self):
+        client = MagicMock()
+        client.playlist_items.side_effect = _spotify_error(404)
+
+        assert SpotifyMatcher(client).provisional_playlist_track_uris("gone") is None
 
 
 class TestBeatportCliTransfer:
@@ -910,3 +1084,26 @@ class TestBeatportCliTransfer:
         assert result.exit_code == 0, result.output
         abandon.assert_called_once_with("stop-me")
         assert "Transfer stop-me abandoned" in result.output
+
+    @patch("djsupport.transfer.Transfer.approve")
+    @patch("djsupport.cli.get_client", return_value=MagicMock())
+    def test_cli_approves_one_provisional_playlist(
+        self, mock_client, approve, tmp_path,
+    ):
+        approve.return_value = ApprovalOutcome(
+            account_id="spotify-user-1",
+            spotify_playlist_id="snapshot-1",
+            reviewed_at=datetime.now(),
+            status=ApprovalStatus.APPROVED,
+            approved=(MagicMock(),),
+            rejected=(MagicMock(), MagicMock()),
+        )
+
+        result = CliRunner().invoke(cli, [
+            "approve", "snapshot-1", "--state-path", str(tmp_path / "state.json"),
+        ])
+
+        assert result.exit_code == 0, result.output
+        approve.assert_called_once_with("snapshot-1")
+        assert "1 approved" in result.output
+        assert "2 rejected" in result.output

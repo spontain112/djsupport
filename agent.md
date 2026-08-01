@@ -84,6 +84,7 @@ djsupport beatport <url> --state-path my.json        # Custom publication manife
 djsupport beatport <url> --prefix "dj"               # Prefix for playlist name
 djsupport beatport <url> --no-prefix                 # No prefix
 djsupport beatport <url> --report report.md          # Save Markdown report
+djsupport approve <spotify-playlist-id>              # Approve one reviewed Provisional Playlist
 djsupport beatport <url> --incremental               # Incremental updates (default)
 djsupport beatport <url> --resume <transfer-id>      # Resume a paused Transfer
 djsupport beatport <url> --abandon <transfer-id>     # Explicitly abandon a Transfer

@@ -145,6 +145,18 @@ Save a detailed Markdown report:
 djsupport sync --report report.md
 ```
 
+Beatport publication reports also create an editable CSV beside the Markdown
+file. Review the Provisional Playlist in Spotify, remove incorrect proposals,
+then approve that one playlist:
+
+```bash
+djsupport beatport <chart-url> --report review.md
+djsupport approve <spotify-playlist-id>
+```
+
+Approval records surviving proposals as approved, removed proposals as rejected,
+and a deleted Provisional Playlist as abandoned while retaining its history.
+
 ### Playlist naming
 
 Spotify playlists are prefixed with `djsupport /` by default. Change or disable the prefix:

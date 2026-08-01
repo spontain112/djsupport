@@ -13,6 +13,7 @@ import os
 import sys
 import tempfile
 import time
+from collections import Counter
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -71,6 +72,12 @@ class TransferStatus(str, Enum):
     RETAINING_PUBLICATION = "retaining publication"
     COMPLETED = "completed"
     ABANDONED = "abandoned"
+
+
+class ApprovalStatus(str, Enum):
+    APPROVED = "approved"
+    ABANDONED = "abandoned"
+    NEEDS_REVIEW = "needs review"
 
 
 @dataclass(frozen=True)
@@ -219,6 +226,19 @@ class PublicationManifest:
     items: tuple[PublicationItem, ...]
 
 
+@dataclass(frozen=True)
+class ApprovalOutcome:
+    """The durable outcome of approving one Provisional Playlist."""
+
+    account_id: str
+    spotify_playlist_id: str
+    reviewed_at: datetime
+    status: ApprovalStatus
+    approved: tuple[PublicationItem, ...] = ()
+    rejected: tuple[PublicationItem, ...] = ()
+    collisions: tuple[PublicationItem, ...] = ()
+
+
 class SourceAdapter(Protocol):
     source_label: str
 
@@ -237,9 +257,19 @@ class SpotifyAdapter(Protocol):
 
     def delete_provisional_snapshot(self, playlist_id: str) -> None: ...
 
+    def provisional_playlist_track_uris(
+        self, playlist_id: str,
+    ) -> list[str] | None: ...
+
 
 class PublicationStorage(Protocol):
     def retain_publication(self, manifest: PublicationManifest) -> None: ...
+
+    def publication_for_playlist(
+        self, account_id: str, playlist_id: str,
+    ) -> PublicationManifest | None: ...
+
+    def retain_approval(self, outcome: ApprovalOutcome) -> None: ...
 
 
 class FilePublicationStorage:
@@ -248,6 +278,7 @@ class FilePublicationStorage:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.manifests: list[dict] = []
+        self.approvals: list[dict] = []
         self.load()
 
     def load(self) -> None:
@@ -260,6 +291,19 @@ class FilePublicationStorage:
         if data.get("version") != PUBLICATION_MANIFEST_VERSION:
             return
         self.manifests = data.get("manifests", [])
+        self.approvals = data.get("approvals", data.get("reviews", []))
+
+    def _save(self, manifests: list[dict], approvals: list[dict]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.with_suffix(f"{self.path.suffix}.tmp")
+        temporary.write_text(json.dumps({
+            "version": PUBLICATION_MANIFEST_VERSION,
+            "manifests": manifests,
+            "approvals": approvals,
+        }, indent=2))
+        os.replace(temporary, self.path)
+        self.manifests = manifests
+        self.approvals = approvals
 
     def retain_publication(self, manifest: PublicationManifest) -> None:
         stored = asdict(manifest)
@@ -272,14 +316,7 @@ class FilePublicationStorage:
             )
         ]
         next_manifests.append(stored)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_suffix(f"{self.path.suffix}.tmp")
-        temporary.write_text(json.dumps({
-            "version": PUBLICATION_MANIFEST_VERSION,
-            "manifests": next_manifests,
-        }, indent=2))
-        os.replace(temporary, self.path)
-        self.manifests = next_manifests
+        self._save(next_manifests, self.approvals)
 
     def manifests_for_account(self, account_id: str) -> list[dict]:
         """Return only playlist-management state owned by one account."""
@@ -287,6 +324,29 @@ class FilePublicationStorage:
             manifest for manifest in self.manifests
             if manifest.get("account_id") == account_id
         ]
+
+    def publication_for_playlist(
+        self, account_id: str, playlist_id: str,
+    ) -> PublicationManifest | None:
+        stored = next((
+            manifest for manifest in self.manifests
+            if manifest.get("account_id") == account_id
+            and manifest.get("spotify_playlist_id") == playlist_id
+        ), None)
+        if stored is None:
+            return None
+        return PublicationManifest(
+            **{
+                **stored,
+                "created_at": datetime.fromisoformat(stored["created_at"]),
+                "items": tuple(PublicationItem(**item) for item in stored["items"]),
+            }
+        )
+
+    def retain_approval(self, outcome: ApprovalOutcome) -> None:
+        stored = asdict(outcome)
+        stored["reviewed_at"] = outcome.reviewed_at.isoformat()
+        self._save(self.manifests, [*self.approvals, stored])
 
 
 class TransferStorage(Protocol):
@@ -348,6 +408,10 @@ class MatchingKnowledge(Protocol):
     def retain(self, track: Track, threshold: int, result: dict | None) -> None: ...
 
     def checkpoint(self) -> None: ...
+
+    def approve(self, item: PublicationItem) -> None: ...
+
+    def reject(self, item: PublicationItem) -> None: ...
 
 
 class BeatportChartSource:
@@ -423,6 +487,24 @@ class SpotifyMatcher:
     def delete_provisional_snapshot(self, playlist_id: str) -> None:
         self._client.current_user_unfollow_playlist(playlist_id)
 
+    def provisional_playlist_track_uris(self, playlist_id: str) -> list[str] | None:
+        try:
+            page = self._client.playlist_items(playlist_id)
+        except spotipy.SpotifyException as exc:
+            if exc.http_status == 404:
+                return None
+            raise
+        uris: list[str] = []
+        while page:
+            for item in page.get("items", []):
+                track = item.get("track") or {}
+                if track.get("uri"):
+                    uris.append(track["uri"])
+            if not page.get("next"):
+                break
+            page = self._client.next(page)
+        return uris
+
 
 class MatchCacheKnowledge:
     """Expose the existing durable match cache as Transfer storage."""
@@ -460,6 +542,30 @@ class MatchCacheKnowledge:
     def checkpoint(self) -> None:
         self._cache.save()
 
+    def approve(self, item: PublicationItem) -> None:
+        self._cache.record_approval(
+            item.source_artist, item.source_title, ApprovalStatus.APPROVED.value,
+            {
+                "uri": item.spotify_uri,
+                "name": item.spotify_name,
+                "artist": item.spotify_artist,
+                "score": item.score,
+                "match_type": item.match_type,
+            },
+        )
+
+    def reject(self, item: PublicationItem) -> None:
+        self._cache.record_approval(
+            item.source_artist, item.source_title, "rejected",
+            {
+                "uri": item.spotify_uri,
+                "name": item.spotify_name,
+                "artist": item.spotify_artist,
+                "score": item.score,
+                "match_type": item.match_type,
+            },
+        )
+
 
 class EphemeralMatchingKnowledge:
     """Non-persistent matching knowledge used for explicit ``--no-cache``."""
@@ -478,6 +584,12 @@ class EphemeralMatchingKnowledge:
         pass
 
     def checkpoint(self) -> None:
+        pass
+
+    def approve(self, item: PublicationItem) -> None:
+        pass
+
+    def reject(self, item: PublicationItem) -> None:
         pass
 
 
@@ -521,6 +633,69 @@ class Transfer:
             raise ValueError("A Transfer cannot be abandoned under another Spotify account")
         state.status = TransferStatus.ABANDONED
         self._transfer_storage.save_transfer(transfer_id, state)
+
+    def approve(self, playlist_id: str) -> ApprovalOutcome:
+        """Review exactly one retained Provisional Playlist against Spotify."""
+        if self._publication_storage is None:
+            raise ValueError("Approval requires publication storage")
+        account_id = self._spotify.account_id()
+        manifest = self._publication_storage.publication_for_playlist(
+            account_id, playlist_id,
+        )
+        if manifest is None:
+            raise ValueError(
+                f"No Provisional Playlist {playlist_id} belongs to this Spotify account"
+            )
+        with self._publishing_guards.acquire(account_id):
+            current_uris = self._retry_policy.run(
+                lambda: self._spotify.provisional_playlist_track_uris(playlist_id)
+            )
+            if current_uris is None:
+                outcome = ApprovalOutcome(
+                    account_id=account_id,
+                    spotify_playlist_id=playlist_id,
+                    reviewed_at=datetime.now(),
+                    status=ApprovalStatus.ABANDONED,
+                )
+            else:
+                remaining = Counter(current_uris)
+                approved: list[PublicationItem] = []
+                rejected: list[PublicationItem] = []
+                proposed_counts = Counter(
+                    item.spotify_uri for item in manifest.items
+                )
+                collision_uris = {
+                    uri for uri, count in proposed_counts.items() if count > 1
+                }
+                collisions: list[PublicationItem] = []
+                for item in manifest.items:
+                    if item.spotify_uri in collision_uris:
+                        collisions.append(item)
+                        continue
+                    if remaining[item.spotify_uri] > 0:
+                        approved.append(item)
+                        remaining[item.spotify_uri] -= 1
+                    else:
+                        rejected.append(item)
+                outcome = ApprovalOutcome(
+                    account_id=account_id,
+                    spotify_playlist_id=playlist_id,
+                    reviewed_at=datetime.now(),
+                    status=(
+                        ApprovalStatus.NEEDS_REVIEW
+                        if collisions else ApprovalStatus.APPROVED
+                    ),
+                    approved=tuple(approved),
+                    rejected=tuple(rejected),
+                    collisions=tuple(collisions),
+                )
+                for item in outcome.approved:
+                    self._knowledge.approve(item)
+                for item in outcome.rejected:
+                    self._knowledge.reject(item)
+                self._knowledge.checkpoint()
+            self._publication_storage.retain_approval(outcome)
+            return outcome
 
     def execute(self, request: TransferRequest) -> SyncReport:
         """Execute at most one publishing Transfer per Spotify account."""
@@ -666,6 +841,8 @@ class Transfer:
                         spotify_artist=result["artist"],
                         score=result["score"],
                         match_type=result.get("match_type", "exact"),
+                        source_track_id=track.track_id,
+                        spotify_uri=result["uri"],
                     )
                     playlist.matched.append(matched_track)
                     publication_items.append(PublicationItem(
