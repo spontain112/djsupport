@@ -1584,6 +1584,12 @@ class TestRekordboxBatchExecution:
     def test_resume_after_shared_failure_keeps_completed_publication(self, tmp_path):
         class RecoveringSpotify(StatefulSpotify):
             unavailable = True
+            authentication_unavailable = False
+
+            def account_id(self):
+                if self.authentication_unavailable:
+                    raise spotipy.SpotifyException(401, -1, "expired token")
+                return super().account_id()
 
             def match(self, track, threshold):
                 if track.name == "Für Immer" and self.unavailable:
@@ -1626,6 +1632,22 @@ class TestRekordboxBatchExecution:
         assert len(publications.publications) == 1
         completed_searches = list(spotify.searches)
 
+        spotify.authentication_unavailable = True
+        auth_stopped = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=RekordboxPlaylistSource(REKORDBOX_FIXTURE), spotify=spotify,
+            matching_knowledge=InMemoryStorage(), publication_storage=publications,
+            transfer_storage=FileTransferStorage(states.path),
+            retry_policy=RetryPolicy(max_attempts=1, sleep=lambda _: None),
+        ).execute_batch(plan, transfer_id=stopped.transfer_id)
+
+        assert auth_stopped.status == "partial success"
+        assert [playlist.outcome for playlist in auth_stopped.playlists] == [
+            "completed", "pending",
+        ]
+        assert len(publications.publications) == 1
+
+        spotify.authentication_unavailable = False
         spotify.unavailable = False
         resumed = Transfer(
             publishing_guards=TEST_PUBLISHING_GUARDS,

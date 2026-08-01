@@ -1177,15 +1177,30 @@ class Transfer:
                 raise
             batch.status = BatchStatus.PAUSED
             self._transfer_storage.save_batch(batch_id, batch)
-            return self._batch_report(
-                batch_id, batch, [
-                    self._batch_playlist_report(
-                        item, "pending: shared authentication failure",
-                        PlaylistOutcome.PENDING,
-                    )
+            authentication_actions = {
+                PlaylistOutcome.COMPLETED: (
+                    "completed before shared authentication failure"
+                ),
+                PlaylistOutcome.FAILED: "failed before shared authentication failure",
+                PlaylistOutcome.SKIPPED: "skipped after shared failure",
+                PlaylistOutcome.PENDING: "pending: shared authentication failure",
+            }
+            playlists = [
+                self._batch_playlist_report(
+                    item, authentication_actions[item.outcome], item.outcome,
+                )
+                for item in batch.playlists
+            ]
+            report_status = (
+                BatchStatus.PARTIAL_SUCCESS
+                if any(
+                    item.outcome == PlaylistOutcome.COMPLETED
                     for item in batch.playlists
-                ],
-                BatchStatus.PAUSED,
+                )
+                else BatchStatus.PAUSED
+            )
+            return self._batch_report(
+                batch_id, batch, playlists, report_status,
             )
         if batch.account_id is None:
             batch.account_id = account_id
