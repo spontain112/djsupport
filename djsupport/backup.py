@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import tempfile
 import zipfile
@@ -15,13 +16,6 @@ from typing import Callable
 
 
 BACKUP_VERSION = 1
-DATA_FILES = (
-    "matching-knowledge.json",
-    "transfers.json",
-    "publication-manifests.transfers.json",
-    "publication-manifests.json",
-    "playlist-state.json",
-)
 SUPPORTED_SCHEMAS = {
     "matching-knowledge.json": (1,),
     "transfers.json": (1,),
@@ -29,6 +23,7 @@ SUPPORTED_SCHEMAS = {
     "publication-manifests.json": (1, 2, 3),
     "playlist-state.json": (1, 2),
 }
+DATA_FILES = tuple(SUPPORTED_SCHEMAS)
 SECRET_KEYS = {
     "access_token", "refresh_token", "client_secret", "client_id",
     "authorization", "password",
@@ -79,7 +74,6 @@ class LocalDataBackup:
     ) -> Path:
         created_at = now or datetime.now()
         destination = Path(destination)
-        destination.mkdir(parents=True, exist_ok=True)
         archive = destination / (
             f"djsupport-backup-{created_at:%Y%m%dT%H%M%S}.zip"
         )
@@ -117,6 +111,7 @@ class LocalDataBackup:
             "created_at": created_at.isoformat(),
             "entries": entries,
         }
+        destination.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(archive, "x", zipfile.ZIP_DEFLATED) as bundle:
             bundle.writestr("backup-manifest.json", json.dumps(manifest, indent=2))
             for path in members:
@@ -127,7 +122,7 @@ class LocalDataBackup:
     def _contains_secret_key(cls, value) -> bool:
         if isinstance(value, dict):
             return any(
-                str(key).casefold() in SECRET_KEYS
+                cls._is_secret_key(str(key))
                 or cls._contains_secret_key(item)
                 for key, item in value.items()
             )
@@ -136,9 +131,24 @@ class LocalDataBackup:
         return False
 
     @staticmethod
+    def _is_secret_key(key: str) -> bool:
+        normalized = re.sub(r"[^a-z0-9]+", "_", key.casefold()).strip("_")
+        return any(
+            normalized == secret or normalized.endswith(f"_{secret}")
+            for secret in SECRET_KEYS
+        )
+
+    @staticmethod
     def _report_contains_secret(path: Path) -> bool:
         text = path.read_text(errors="replace").casefold()
-        return any(f"{key}=" in text or f'"{key}"' in text for key in SECRET_KEYS)
+        key_pattern = "|".join(
+            re.escape(key).replace(r"\_", r"[ _-]?") for key in SECRET_KEYS
+        )
+        return bool(re.search(
+            rf"(?:spotipy[ _-])?(?:{key_pattern})\s*[:=]"
+            rf"|authorization\s*:\s*(?:bearer|basic)\s+",
+            text,
+        ))
 
     def preview(self, archive: str | Path) -> RestorePreview:
         try:
@@ -219,7 +229,14 @@ class LocalDataBackup:
                 elif current_path.read_bytes() == content:
                     merged[path] = content
                 else:
-                    merged[path] = current_path.read_bytes()
+                    holder = {"content": current_path.read_bytes()}
+                    self._resolve_conflict(
+                        holder, "content", content, "report", path,
+                        conflicts, resolutions,
+                    )
+                    merged[path] = holder["content"]
+                    if resolutions.get(f"report:{path}:content") == "archive":
+                        changes.append(f"replace report: {path.removeprefix('reports/')}")
                 continue
             incoming_data = json.loads(content)
             if not current_path.exists():

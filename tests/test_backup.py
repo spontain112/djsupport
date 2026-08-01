@@ -79,6 +79,38 @@ class TestBackup:
         with zipfile.ZipFile(archive) as bundle:
             assert "reports/linked.md" not in bundle.namelist()
 
+    @pytest.mark.parametrize(
+        "credential",
+        [
+            "Authorization: Bearer spotify-oauth-token",
+            "SPOTIPY_CLIENT_SECRET=spotify-secret",
+            "SPOTIPY_CLIENT_ID=spotify-client-id",
+        ],
+    )
+    def test_excludes_reports_with_common_oauth_credential_forms(
+        self, tmp_path, credential,
+    ):
+        app_data = tmp_path / "app-data"
+        _write_json(app_data / "matching-knowledge.json", {"version": 1})
+        (app_data / "reports").mkdir()
+        (app_data / "reports" / "unsafe.md").write_text(credential)
+
+        archive = LocalDataBackup(app_data).create(tmp_path / "backups")
+
+        with zipfile.ZipFile(archive) as bundle:
+            assert "reports/unsafe.md" not in bundle.namelist()
+
+    def test_refuses_supported_data_with_env_style_oauth_fields(self, tmp_path):
+        app_data = tmp_path / "app-data"
+        _write_json(app_data / "matching-knowledge.json", {
+            "version": 1, "SPOTIPY_CLIENT_SECRET": "never-export",
+        })
+
+        with pytest.raises(ValueError, match="Credential fields"):
+            LocalDataBackup(app_data).create(tmp_path / "backups")
+
+        assert not (tmp_path / "backups").exists()
+
 
 class TestRestorePreview:
     def test_validates_integrity_and_previews_without_mutating(self, tmp_path):
@@ -222,3 +254,21 @@ class TestRestore:
         assert result.restored is True
         restored = json.loads((target / "matching-knowledge.json").read_text())
         assert restored["entries"]["track"]["spotify_uri"] == "incoming"
+
+    def test_differing_reports_are_surfaced_and_never_silently_overwritten(
+        self, tmp_path,
+    ):
+        source = tmp_path / "source"
+        target = tmp_path / "target"
+        for root, text in ((source, "archive report"), (target, "current report")):
+            (root / "reports").mkdir(parents=True)
+            (root / "reports" / "transfer.md").write_text(text)
+        archive = LocalDataBackup(source).create(tmp_path / "backups")
+        service = LocalDataBackup(target)
+
+        preview = service.preview(archive)
+        result = service.restore(archive)
+
+        assert preview.conflicts[0].kind == "report"
+        assert result.restored is False
+        assert (target / "reports" / "transfer.md").read_text() == "current report"
