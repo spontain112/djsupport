@@ -88,6 +88,8 @@ class PlaylistReport:
     source_removals: list[SourceRemoval] = field(default_factory=list)
     playlist_drift: list[PlaylistDrift] = field(default_factory=list)
     drift_choices: tuple[str, ...] = ()
+    mirror_dispositions: tuple[str, ...] = ()
+    mirror_disposition: str | None = None
     action: str = "dry-run"  # "created", "updated", "unchanged", or "dry-run"
     spotify_playlist_id: str | None = None
     publication_manifest: PublicationManifest | None = None
@@ -195,6 +197,8 @@ def save_report(report: SyncReport, path: str) -> None:
     lines.append(f"**Mode:** {mode}  |  **Threshold:** {report.threshold}")
     if report.transfer_id:
         lines.append(f"**Transfer:** {report.transfer_id}  |  **Status:** {report.status}")
+    elif report.status != "completed":
+        lines.append(f"**Status:** {report.status}")
     lines.append("")
 
     for pl in report.playlists:
@@ -287,6 +291,21 @@ def save_report(report: SyncReport, path: str) -> None:
                 )
             lines.append(
                 "Choose explicitly: " + " or ".join(pl.drift_choices)
+            )
+            lines.append("")
+
+        if pl.mirror_dispositions:
+            lines.append("### Orphaned Mirror (decision required)")
+            lines.append("")
+            lines.append(
+                "Choose explicitly: " + ", ".join(pl.mirror_dispositions[:-1])
+                + f", or {pl.mirror_dispositions[-1]}"
+            )
+            lines.append("")
+
+        if pl.mirror_disposition:
+            lines.append(
+                f"**Orphaned Mirror disposition:** {pl.mirror_disposition}"
             )
             lines.append("")
 
