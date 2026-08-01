@@ -185,6 +185,15 @@ class MatchCache:
         self.local_regressions.append(correction)
         self._dirty_count += 1
 
+    def revoke_approval(
+        self, artist: str, title: str, source_duration: int = 0,
+    ) -> None:
+        """Remove authoritative knowledge after an explicit user decision."""
+        self.entries.pop(self.cache_key(artist, title, source_duration), None)
+        if source_duration > 0:
+            self.entries.pop(self.cache_key(artist, title), None)
+        self._dirty_count += 1
+
     def is_retry_eligible(self, artist: str, title: str,
                           retry_days: int = DEFAULT_RETRY_DAYS,
                           force: bool = False) -> bool:

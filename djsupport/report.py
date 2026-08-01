@@ -56,6 +56,20 @@ class MatchCollision:
     spotify_uri: str
 
 
+@dataclass(frozen=True)
+class SourceRemoval:
+    source_track_id: str
+    source_name: str
+    spotify_uri: str
+
+
+@dataclass(frozen=True)
+class PlaylistDrift:
+    source_track_id: str
+    source_name: str
+    spotify_uri: str
+
+
 def _spotify_url(uri: str) -> str:
     if uri.startswith("spotify:track:"):
         return f"https://open.spotify.com/track/{uri.removeprefix('spotify:track:')}"
@@ -71,6 +85,9 @@ class PlaylistReport:
     alternatives: list[UnmatchedAlternatives] = field(default_factory=list)
     unavailable_approved: list[UnavailableApprovedMatch] = field(default_factory=list)
     match_collisions: list[MatchCollision] = field(default_factory=list)
+    source_removals: list[SourceRemoval] = field(default_factory=list)
+    playlist_drift: list[PlaylistDrift] = field(default_factory=list)
+    drift_choices: tuple[str, ...] = ()
     action: str = "dry-run"  # "created", "updated", "unchanged", or "dry-run"
     spotify_playlist_id: str | None = None
     publication_manifest: PublicationManifest | None = None
@@ -248,6 +265,29 @@ def save_report(report: SyncReport, path: str) -> None:
                     f"- {collision.source_track_id}: {collision.source_name} → "
                     f"`{collision.spotify_uri}`"
                 )
+            lines.append("")
+
+        if pl.source_removals:
+            lines.append("### Source Removals")
+            lines.append("")
+            for removal in pl.source_removals:
+                lines.append(
+                    f"- {removal.source_track_id}: {removal.source_name} → "
+                    f"`{removal.spotify_uri}` removed from the Mirror"
+                )
+            lines.append("")
+
+        if pl.playlist_drift:
+            lines.append("### Playlist Drift (decision required)")
+            lines.append("")
+            for drift in pl.playlist_drift:
+                lines.append(
+                    f"- {drift.source_track_id}: {drift.source_name} → "
+                    f"`{drift.spotify_uri}` is missing in Spotify"
+                )
+            lines.append(
+                "Choose explicitly: " + " or ".join(pl.drift_choices)
+            )
             lines.append("")
 
         if pl.unmatched:

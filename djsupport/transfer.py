@@ -39,15 +39,17 @@ from djsupport.report import (
     AlternativeCandidate,
     MatchCollision,
     MatchedTrack,
+    PlaylistDrift,
     PlaylistReport,
     SyncReport,
+    SourceRemoval,
     UnmatchedAlternatives,
     UnavailableApprovedMatch,
 )
 from djsupport.spotify import MAX_RATE_LIMIT_WAIT, RateLimitError, _parse_retry_after
 
 
-PUBLICATION_MANIFEST_VERSION = 2
+PUBLICATION_MANIFEST_VERSION = 3
 TRANSFER_STATE_VERSION = 1
 SPOTIFY_TRACK_URI = re.compile(r"^spotify:track:([A-Za-z0-9]{22})$")
 SPOTIFY_TRACK_URL = re.compile(
@@ -72,6 +74,11 @@ class TransferMode(str, Enum):
     MIRROR = "mirror"
 
 
+class DriftResolution(str, Enum):
+    RESTORE = "restore"
+    REVOKE = "revoke"
+
+
 @dataclass(frozen=True)
 class TransferRequest:
     """Everything an adapter must provide to start one Transfer."""
@@ -84,6 +91,7 @@ class TransferRequest:
     retry_days: int = 7
     playlist_prefix: str | None = "djsupport"
     transfer_id: str | None = None
+    drift_resolution: DriftResolution | None = None
 
 class TransferStatus(str, Enum):
     MATCHING = "matching"
@@ -235,6 +243,7 @@ class PublicationItem:
     score: float
     match_type: str
     source_duration: int = 0
+    authoritative: bool = False
 
 
 @dataclass(frozen=True)
@@ -249,6 +258,7 @@ class PublicationManifest:
     created_at: datetime
     items: tuple[PublicationItem, ...]
     mode: TransferMode = TransferMode.SNAPSHOT
+    managed_items: tuple[PublicationItem, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -327,6 +337,10 @@ class PublicationStorage(Protocol):
 
     def retain_mirror(self, relationship: MirrorRelationship) -> None: ...
 
+    def mirror_for_source(
+        self, account_id: str, source_label: str, source_reference: str,
+    ) -> MirrorRelationship | None: ...
+
 
 class FilePublicationStorage:
     """Versioned, durable publication manifests for later review."""
@@ -345,7 +359,7 @@ class FilePublicationStorage:
             data = json.loads(self.path.read_text())
         except (json.JSONDecodeError, OSError):
             return
-        if data.get("version") not in (1, PUBLICATION_MANIFEST_VERSION):
+        if data.get("version") not in (1, 2, PUBLICATION_MANIFEST_VERSION):
             return
         self.manifests = data.get("manifests", [])
         self.approvals = data.get("approvals", data.get("reviews", []))
@@ -402,6 +416,10 @@ class FilePublicationStorage:
                 ),
                 "created_at": datetime.fromisoformat(stored["created_at"]),
                 "items": tuple(PublicationItem(**item) for item in stored["items"]),
+                "managed_items": tuple(
+                    PublicationItem(**item)
+                    for item in stored.get("managed_items", stored["items"])
+                ),
             }
         )
 
@@ -433,6 +451,15 @@ class FilePublicationStorage:
             for item in self.mirrors
             if item.get("account_id") == account_id
         ]
+
+    def mirror_for_source(
+        self, account_id: str, source_label: str, source_reference: str,
+    ) -> MirrorRelationship | None:
+        return next((
+            mirror for mirror in self.mirrors_for_account(account_id)
+            if mirror.source_label == source_label
+            and mirror.source_reference == source_reference
+        ), None)
 
 
 class TransferStorage(Protocol):
@@ -500,6 +527,8 @@ class MatchingKnowledge(Protocol):
     def reject(self, item: PublicationItem) -> None: ...
 
     def correct(self, item: PublicationItem) -> ApprovalConflict | None: ...
+
+    def revoke(self, item: PublicationItem) -> None: ...
 
 
 class BeatportChartSource:
@@ -768,6 +797,11 @@ class MatchCacheKnowledge:
         })
         return None
 
+    def revoke(self, item: PublicationItem) -> None:
+        self._cache.revoke_approval(
+            item.source_artist, item.source_title, item.source_duration,
+        )
+
 
 class EphemeralMatchingKnowledge:
     """Non-persistent matching knowledge used for explicit ``--no-cache``."""
@@ -795,6 +829,9 @@ class EphemeralMatchingKnowledge:
         pass
 
     def correct(self, item: PublicationItem) -> None:
+        pass
+
+    def revoke(self, item: PublicationItem) -> None:
         pass
 
 
@@ -1107,6 +1144,10 @@ class Transfer:
                     "retry": request.retry,
                     "retry_days": request.retry_days,
                     "playlist_prefix": request.playlist_prefix,
+                    "drift_resolution": (
+                        request.drift_resolution.value
+                        if request.drift_resolution else None
+                    ),
                 },
                 selection={
                     "name": selection.name,
@@ -1133,6 +1174,10 @@ class Transfer:
                     **state.request,
                     "mode": TransferMode(
                         state.request.get("mode", TransferMode.SNAPSHOT.value)
+                    ),
+                    "drift_resolution": (
+                        DriftResolution(state.request["drift_resolution"])
+                        if state.request.get("drift_resolution") else None
                     ),
                 },
                 transfer_id=transfer_id,
@@ -1204,6 +1249,12 @@ class Transfer:
                             "items": tuple(
                                 PublicationItem(**item)
                                 for item in stored_manifest["items"]
+                            ),
+                            "managed_items": tuple(
+                                PublicationItem(**item)
+                                for item in stored_manifest.get(
+                                    "managed_items", stored_manifest["items"],
+                                )
                             ),
                         }
                     )
@@ -1288,6 +1339,7 @@ class Transfer:
                         score=matched_track.score,
                         match_type=matched_track.match_type,
                         source_duration=track.duration,
+                        authoritative=bool(result.get("authoritative")),
                     ))
 
                 state.next_track_index = index + 1
@@ -1307,10 +1359,14 @@ class Transfer:
                     return report
                 self._save_transfer(transfer_id, state)
 
-            source_ids_by_uri: dict[str, set[str]] = {}
+            source_ids_by_uri: dict[str, set[tuple[str, str, int]]] = {}
             for item in publication_items:
                 source_ids_by_uri.setdefault(item.spotify_uri, set()).add(
-                    item.source_track_id
+                    (
+                        item.source_artist.casefold(),
+                        item.source_title.casefold(),
+                        item.source_duration,
+                    )
                 )
             collision_uris = {
                 uri for uri, source_ids in source_ids_by_uri.items()
@@ -1340,6 +1396,95 @@ class Transfer:
                 )
                 state.matched = [asdict(item) for item in playlist.matched]
                 state.unmatched = list(playlist.unmatched)
+
+            if request.mode == TransferMode.MIRROR:
+                assert self._publication_storage is not None or request.preview
+                relationship = (
+                    self._publication_storage.mirror_for_source(
+                        state.account_id, self._source.source_label,
+                        selection.reference,
+                    )
+                    if self._publication_storage is not None else None
+                )
+                previous_manifest = (
+                    self._publication_storage.publication_for_playlist(
+                        state.account_id, relationship.spotify_playlist_id,
+                    )
+                    if relationship is not None else None
+                )
+                current_source_ids = {
+                    item.source_track_id for item in publication_items
+                }
+                if previous_manifest is not None:
+                    playlist.source_removals = [
+                        SourceRemoval(
+                            item.source_track_id, item.source_name,
+                            item.spotify_uri,
+                        )
+                        for item in (
+                            previous_manifest.managed_items
+                            or previous_manifest.items
+                        )
+                        if item.source_track_id not in current_source_ids
+                    ]
+                if relationship is not None:
+                    current_uris = self._retry_policy.run(
+                        lambda: self._spotify.provisional_playlist_track_uris(
+                            relationship.spotify_playlist_id
+                        )
+                    )
+                    current_uri_set = set(current_uris or ())
+                    playlist.playlist_drift = [
+                        PlaylistDrift(
+                            item.source_track_id, item.source_name,
+                            item.spotify_uri,
+                        )
+                        for item in publication_items
+                        if item.authoritative
+                        and item.spotify_uri not in current_uri_set
+                    ]
+                    if (
+                        playlist.playlist_drift
+                        and request.drift_resolution is None
+                    ):
+                        playlist.action = "restore or revoke required"
+                        playlist.drift_choices = tuple(
+                            choice.value for choice in DriftResolution
+                        )
+                        report.status = "playlist drift"
+                        return report
+                    if (
+                        playlist.playlist_drift
+                        and request.drift_resolution == DriftResolution.REVOKE
+                    ):
+                        drifted_ids = {
+                            item.source_track_id for item in playlist.playlist_drift
+                        }
+                        revoked_items = [
+                            item for item in publication_items
+                            if item.source_track_id in drifted_ids
+                        ]
+                        for item in revoked_items:
+                            self._knowledge.revoke(item)
+                        self._knowledge.checkpoint()
+                        publication_items = [
+                            item for item in publication_items
+                            if item.source_track_id not in drifted_ids
+                        ]
+                        playlist.matched = [
+                            item for item in playlist.matched
+                            if item.source_track_id not in drifted_ids
+                        ]
+                        playlist.unmatched.extend(
+                            item.source_name for item in revoked_items
+                            if item.source_name not in playlist.unmatched
+                        )
+                        state.publication_items = [
+                            asdict(item) for item in publication_items
+                        ]
+                        state.matched = [asdict(item) for item in playlist.matched]
+                        state.unmatched = list(playlist.unmatched)
+                        self._save_transfer(transfer_id, state)
 
             if not request.preview and not selection.tracks:
                 playlist.action = "not published: empty source"
@@ -1391,6 +1536,10 @@ class Transfer:
                         report.status = "paused"
                         return report
                 assert snapshot_name is not None
+                managed_items_by_uri: dict[str, PublicationItem] = {}
+                for item in publication_items:
+                    if item.spotify_uri not in collision_uris:
+                        managed_items_by_uri.setdefault(item.spotify_uri, item)
                 manifest = PublicationManifest(
                     account_id=state.account_id,
                     spotify_playlist_id=playlist_id,
@@ -1398,8 +1547,13 @@ class Transfer:
                     source_label=self._source.source_label,
                     source_reference=selection.reference,
                     created_at=created_at,
-                    items=tuple(publication_items),
+                    items=tuple(
+                        item for item in publication_items
+                        if not item.authoritative
+                        and item.spotify_uri not in collision_uris
+                    ),
                     mode=request.mode,
+                    managed_items=tuple(managed_items_by_uri.values()),
                 )
                 stored_manifest = asdict(manifest)
                 stored_manifest["created_at"] = manifest.created_at.isoformat()

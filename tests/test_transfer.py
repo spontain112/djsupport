@@ -17,7 +17,7 @@ from click.testing import CliRunner
 from djsupport.cli import cli
 from djsupport.cache import MatchCache
 from djsupport.rekordbox import Track
-from djsupport.report import PlaylistReport, SyncReport
+from djsupport.report import PlaylistReport, SyncReport, save_report
 from djsupport.spotify import RateLimitError
 from djsupport.transfer import (
     AccountPublishingGuards,
@@ -31,6 +31,7 @@ from djsupport.transfer import (
     Transfer,
     TransferMode,
     TransferRequest,
+    DriftResolution,
     ApprovalStatus,
     ApprovalOutcome,
     BeatportLabelSource,
@@ -162,6 +163,14 @@ class InMemoryStorage:
     def retain_mirror(self, relationship):
         self.mirrors.append(relationship)
 
+    def mirror_for_source(self, account_id, source_label, source_reference):
+        return next((
+            mirror for mirror in self.mirrors
+            if mirror.account_id == account_id
+            and mirror.source_label == source_label
+            and mirror.source_reference == source_reference
+        ), None)
+
     def approve(self, item):
         self.approved_matches.append(item)
 
@@ -171,6 +180,9 @@ class InMemoryStorage:
     def correct(self, item):
         self.corrections.append(item)
 
+    def revoke(self, item):
+        self.matches.pop((item.source_artist, item.source_title), None)
+
 
 FIXTURE = Path(__file__).parent / "fixtures" / "beatport_chart.json"
 REKORDBOX_FIXTURE = Path(__file__).parent / "fixtures" / "library.xml"
@@ -178,6 +190,9 @@ INCOMPLETE_REKORDBOX_FIXTURE = (
     Path(__file__).parent / "fixtures" / "rekordbox_missing_track.xml"
 )
 LABEL_FIXTURE = Path(__file__).parent / "fixtures" / "beatport_label_page.json"
+MIRROR_REFRESH_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "rekordbox_mirror_refresh.json"
+)
 TEST_PUBLISHING_GUARDS = AccountPublishingGuards()
 
 
@@ -604,6 +619,232 @@ class TestSnapshotPublication:
 
 
 class TestRekordboxMirror:
+    def test_refresh_reports_playlist_drift_without_silently_restoring(self, tmp_path):
+        fixture = json.loads(MIRROR_REFRESH_FIXTURE.read_text())
+
+        class MirrorSource:
+            source_label = "Rekordbox"
+            default_mode = TransferMode.MIRROR
+
+            def consume(self, reference):
+                return SourceSelection(
+                    fixture["name"], fixture["reference"],
+                    [Track(
+                        track_id=item["track_id"], artist=item["artist"],
+                        name=item["name"], duration=item["duration"], album="",
+                        remixer="", label="", genre="", date_added="",
+                    ) for item in fixture["initial"]],
+                )
+
+        spotify = StatefulSpotify({
+            ("Artist One", "First Track"): _match(
+                "spotify:track:first", "First Track", "Artist One",
+            ),
+            ("Artist Two", "Second Track"): _match(
+                "spotify:track:second", "Second Track", "Artist Two",
+            ),
+        })
+        knowledge = MatchCacheKnowledge(MatchCache(tmp_path / "knowledge.json"))
+        publications = FilePublicationStorage(tmp_path / "publications.json")
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS, source=MirrorSource(),
+            spotify=spotify, matching_knowledge=knowledge,
+            publication_storage=publications,
+        )
+        initial = transfer.execute(TransferRequest(source=fixture["reference"]))
+        playlist_id = initial.playlists[0].spotify_playlist_id
+        transfer.approve(playlist_id)
+        spotify.playlists[playlist_id]["tracks"] = ["spotify:track:second"]
+
+        drifted = transfer.execute(TransferRequest(source=fixture["reference"]))
+
+        assert drifted.status == "playlist drift"
+        assert drifted.playlists[0].action == "restore or revoke required"
+        assert [item.source_track_id for item in drifted.playlists[0].playlist_drift] == [
+            "rb-1"
+        ]
+        assert drifted.playlists[0].drift_choices == (
+            DriftResolution.RESTORE.value, DriftResolution.REVOKE.value,
+        )
+        assert spotify.playlists[playlist_id]["tracks"] == ["spotify:track:second"]
+
+        restored = transfer.execute(TransferRequest(
+            source=fixture["reference"],
+            drift_resolution=DriftResolution.RESTORE,
+        ))
+
+        assert restored.status == "completed"
+        assert spotify.playlists[playlist_id]["tracks"] == [
+            "spotify:track:first", "spotify:track:second",
+        ]
+
+    def test_refresh_can_explicitly_revoke_a_drifted_approved_match(self, tmp_path):
+        fixture = json.loads(MIRROR_REFRESH_FIXTURE.read_text())
+
+        class MirrorSource:
+            source_label = "Rekordbox"
+            default_mode = TransferMode.MIRROR
+
+            def consume(self, reference):
+                return SourceSelection(
+                    fixture["name"], fixture["reference"],
+                    [Track(
+                        track_id=item["track_id"], artist=item["artist"],
+                        name=item["name"], duration=item["duration"], album="",
+                        remixer="", label="", genre="", date_added="",
+                    ) for item in fixture["initial"]],
+                )
+
+        spotify = StatefulSpotify({
+            ("Artist One", "First Track"): _match(
+                "spotify:track:first", "First Track", "Artist One",
+            ),
+            ("Artist Two", "Second Track"): _match(
+                "spotify:track:second", "Second Track", "Artist Two",
+            ),
+        })
+        cache = MatchCache(tmp_path / "knowledge.json")
+        knowledge = MatchCacheKnowledge(cache)
+        publications = FilePublicationStorage(tmp_path / "publications.json")
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS, source=MirrorSource(),
+            spotify=spotify, matching_knowledge=knowledge,
+            publication_storage=publications,
+        )
+        initial = transfer.execute(TransferRequest(source=fixture["reference"]))
+        playlist_id = initial.playlists[0].spotify_playlist_id
+        transfer.approve(playlist_id)
+        spotify.playlists[playlist_id]["tracks"] = ["spotify:track:second"]
+
+        revoked = transfer.execute(TransferRequest(
+            source=fixture["reference"],
+            drift_resolution=DriftResolution.REVOKE,
+        ))
+
+        assert revoked.status == "completed"
+        assert spotify.playlists[playlist_id]["tracks"] == ["spotify:track:second"]
+        assert knowledge.lookup(
+            Track(
+                track_id="rb-1", artist="Artist One", name="First Track",
+                duration=301, album="", remixer="", label="", genre="",
+                date_added="",
+            ), 80,
+        ) is None
+
+    def test_refresh_reuses_approved_matches_without_repeated_review(self, tmp_path):
+        fixture = json.loads(MIRROR_REFRESH_FIXTURE.read_text())
+
+        class RefreshSource:
+            source_label = "Rekordbox"
+            default_mode = TransferMode.MIRROR
+            phase = "initial"
+
+            def consume(self, reference):
+                tracks = [
+                    Track(
+                        track_id=item["track_id"], artist=item["artist"],
+                        name=item["name"], duration=item["duration"], album="",
+                        remixer="", label="", genre="", date_added="",
+                    )
+                    for item in fixture[self.phase]
+                ]
+                return SourceSelection(fixture["name"], fixture["reference"], tracks)
+
+        source = RefreshSource()
+        spotify = StatefulSpotify({
+            ("Artist One", "First Track"): _match(
+                "spotify:track:first", "First Track", "Artist One",
+            ),
+            ("Artist Two", "Second Track"): _match(
+                "spotify:track:second", "Second Track", "Artist Two",
+            ),
+            ("Artist Three", "Third Track"): _match(
+                "spotify:track:third", "Third Track", "Artist Three",
+            ),
+        })
+        knowledge = MatchCacheKnowledge(MatchCache(tmp_path / "knowledge.json"))
+        publications = FilePublicationStorage(tmp_path / "publications.json")
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS, source=source,
+            spotify=spotify, matching_knowledge=knowledge,
+            publication_storage=publications,
+        )
+        initial = transfer.execute(TransferRequest(source=fixture["reference"]))
+        transfer.approve(initial.playlists[0].spotify_playlist_id)
+
+        source.phase = "refreshed"
+        refreshed = transfer.execute(TransferRequest(source=fixture["reference"]))
+
+        assert spotify.searches.count(("Artist Two", "Second Track", 80)) == 1
+        assert [
+            item.source_track_id
+            for item in refreshed.playlists[0].publication_manifest.items
+        ] == ["rb-3"]
+
+    def test_refresh_deduplicates_orders_and_reports_genuine_source_removals(
+        self, tmp_path,
+    ):
+        fixture = json.loads(MIRROR_REFRESH_FIXTURE.read_text())
+
+        class RefreshSource:
+            source_label = "Rekordbox"
+            default_mode = TransferMode.MIRROR
+            phase = "initial"
+
+            def consume(self, reference):
+                return SourceSelection(
+                    fixture["name"], fixture["reference"],
+                    [Track(
+                        track_id=item["track_id"], artist=item["artist"],
+                        name=item["name"], duration=item["duration"], album="",
+                        remixer="", label="", genre="", date_added="",
+                    ) for item in fixture[self.phase]],
+                )
+
+        source = RefreshSource()
+        spotify = StatefulSpotify({
+            ("Artist One", "First Track"): _match(
+                "spotify:track:first", "First Track", "Artist One",
+            ),
+            ("Artist Two", "Second Track"): _match(
+                "spotify:track:second", "Second Track", "Artist Two",
+            ),
+            ("Artist Three", "Third Track"): _match(
+                "spotify:track:third", "Third Track", "Artist Three",
+            ),
+        })
+        knowledge = MatchCacheKnowledge(MatchCache(tmp_path / "knowledge.json"))
+        publications = FilePublicationStorage(tmp_path / "publications.json")
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS, source=source,
+            spotify=spotify, matching_knowledge=knowledge,
+            publication_storage=publications,
+        )
+        initial = transfer.execute(TransferRequest(source=fixture["reference"]))
+        transfer.approve(initial.playlists[0].spotify_playlist_id)
+
+        source.phase = "refreshed"
+        refreshed = transfer.execute(TransferRequest(source=fixture["reference"]))
+        playlist = refreshed.playlists[0]
+
+        assert spotify.playlists[playlist.spotify_playlist_id]["tracks"] == [
+            "spotify:track:second", "spotify:track:third",
+        ]
+        assert [removal.source_track_id for removal in playlist.source_removals] == [
+            "rb-1"
+        ]
+        report_path = tmp_path / "refresh-report.md"
+        save_report(refreshed, str(report_path))
+        assert "rb-1: Artist One - First Track" in report_path.read_text()
+
+        transfer.approve(playlist.spotify_playlist_id)
+        source.phase = "final"
+        final = transfer.execute(TransferRequest(source=fixture["reference"]))
+
+        assert [removal.source_track_id for removal in final.playlists[0].source_removals] == [
+            "rb-2"
+        ]
+
     def test_missing_rekordbox_track_stops_before_matching_or_publication(self):
         spotify = StatefulSpotify()
         storage = InMemoryStorage()
@@ -1163,7 +1404,7 @@ class TestTransferPublicationLifecycle:
             approved_at=datetime(2026, 8, 1),
         ))
 
-        assert json.loads(path.read_text())["version"] == 2
+        assert json.loads(path.read_text())["version"] == 3
         assert len(FilePublicationStorage(path).mirrors_for_account(
             "spotify-user-1"
         )) == 1
