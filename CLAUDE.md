@@ -79,7 +79,7 @@ djsupport beatport <url> --no-cache                  # Bypass Beatport match cac
 djsupport beatport <url> --retry                     # Retry previously failed matches
 djsupport beatport <url> --retry-days 3              # Auto-retry failures older than N days (default 7)
 djsupport beatport <url> --cache-path my.json        # Custom Beatport cache file
-djsupport beatport <url> --state-path my.json        # Custom Beatport state file
+djsupport beatport <url> --state-path my.json        # Custom publication manifest file
 djsupport beatport <url> --prefix "dj"               # Prefix for playlist name
 djsupport beatport <url> --no-prefix                 # No prefix
 djsupport beatport <url> --report report.md          # Save Markdown report
