@@ -41,6 +41,7 @@ from djsupport.report import (
     MatchedTrack,
     PlaylistDrift,
     PlaylistReport,
+    ReviewTrack,
     SyncReport,
     SourceRemoval,
     UnmatchedAlternatives,
@@ -49,7 +50,7 @@ from djsupport.report import (
 from djsupport.spotify import MAX_RATE_LIMIT_WAIT, RateLimitError, _parse_retry_after
 
 
-PUBLICATION_MANIFEST_VERSION = 3
+PUBLICATION_MANIFEST_VERSION = 4
 TRANSFER_STATE_VERSION = 1
 EXPENSIVE_BATCH_LOOKUP_THRESHOLD = 100
 SPOTIFY_TRACK_URI = re.compile(r"^spotify:track:([A-Za-z0-9]{22})$")
@@ -387,11 +388,11 @@ class PublicationItem:
     source_name: str
     source_artist: str
     source_title: str
-    spotify_uri: str
-    spotify_name: str
-    spotify_artist: str
-    score: float
-    match_type: str
+    spotify_uri: str = ""
+    spotify_name: str = ""
+    spotify_artist: str = ""
+    score: float = 0.0
+    match_type: str = "unmatched"
     source_duration: int = 0
     authoritative: bool = False
 
@@ -523,7 +524,7 @@ class FilePublicationStorage:
             data = json.loads(self.path.read_text())
         except (json.JSONDecodeError, OSError):
             return
-        if data.get("version") not in (1, 2, PUBLICATION_MANIFEST_VERSION):
+        if data.get("version") not in (1, 2, 3, PUBLICATION_MANIFEST_VERSION):
             return
         self.manifests = data.get("manifests", [])
         self.approvals = data.get("approvals", data.get("reviews", []))
@@ -1553,6 +1554,8 @@ class Transfer:
                 }
                 collisions: list[PublicationItem] = []
                 for item in reviewed_items:
+                    if not item.spotify_uri:
+                        continue
                     if item.spotify_uri in collision_uris:
                         collisions.append(item)
                         continue
@@ -1960,6 +1963,7 @@ class Transfer:
         publication_items = [
             PublicationItem(**item) for item in state.publication_items
         ]
+        playlist.review_items = self._review_tracks(publication_items)
         if state.status == TransferStatus.COMPLETED:
             report.status = "completed"
             if state.spotify_playlist_id:
@@ -2052,6 +2056,20 @@ class Transfer:
 
                 if result is None or "alternatives" in result:
                     playlist.unmatched.append(track.display)
+                    if track.track_id and not any(
+                        item.source_track_id == track.track_id
+                        and item.source_artist == track.artist
+                        and item.source_title == track.name
+                        and item.source_duration == track.duration
+                        for item in publication_items
+                    ):
+                        publication_items.append(PublicationItem(
+                            source_track_id=track.track_id,
+                            source_name=track.display,
+                            source_artist=track.artist,
+                            source_title=track.name,
+                            source_duration=track.duration,
+                        ))
                     candidates = tuple(
                         AlternativeCandidate(
                             rank=rank,
@@ -2084,19 +2102,26 @@ class Transfer:
                         spotify_uri=result["uri"],
                     )
                     playlist.matched.append(matched_track)
-                    publication_items.append(PublicationItem(
-                        source_track_id=track.track_id,
-                        source_name=track.display,
-                        source_artist=track.artist,
-                        source_title=track.name,
-                        spotify_uri=result["uri"],
-                        spotify_name=matched_track.spotify_name,
-                        spotify_artist=matched_track.spotify_artist,
-                        score=matched_track.score,
-                        match_type=matched_track.match_type,
-                        source_duration=track.duration,
-                        authoritative=bool(result.get("authoritative")),
-                    ))
+                    if track.track_id and not any(
+                        item.source_track_id == track.track_id
+                        and item.source_artist == track.artist
+                        and item.source_title == track.name
+                        and item.source_duration == track.duration
+                        for item in publication_items
+                    ):
+                        publication_items.append(PublicationItem(
+                            source_track_id=track.track_id,
+                            source_name=track.display,
+                            source_artist=track.artist,
+                            source_title=track.name,
+                            spotify_uri=result["uri"],
+                            spotify_name=matched_track.spotify_name,
+                            spotify_artist=matched_track.spotify_artist,
+                            score=matched_track.score,
+                            match_type=matched_track.match_type,
+                            source_duration=track.duration,
+                            authoritative=bool(result.get("authoritative")),
+                        ))
 
                 state.next_track_index = index + 1
                 state.matched = [asdict(item) for item in playlist.matched]
@@ -2105,6 +2130,7 @@ class Transfer:
                 state.publication_items = [
                     asdict(item) for item in publication_items
                 ]
+                playlist.review_items = self._review_tracks(publication_items)
                 self._knowledge.checkpoint()
                 if self._pause_requested:
                     state.status = TransferStatus.PAUSED
@@ -2117,6 +2143,8 @@ class Transfer:
 
             source_ids_by_uri: dict[str, set[tuple[str, str, int]]] = {}
             for item in publication_items:
+                if not item.spotify_uri:
+                    continue
                 source_ids_by_uri.setdefault(item.spotify_uri, set()).add(
                     (
                         item.source_artist.casefold(),
@@ -2284,7 +2312,8 @@ class Transfer:
                             snapshot_name,
                             list(dict.fromkeys(
                                 item.spotify_uri for item in publication_items
-                                if item.spotify_uri not in collision_uris
+                                if item.spotify_uri
+                                and item.spotify_uri not in collision_uris
                             )),
                             description,
                             publication_key,
@@ -2309,14 +2338,15 @@ class Transfer:
                             playlist_id,
                             list(dict.fromkeys(
                                 item.spotify_uri for item in publication_items
-                                if item.spotify_uri not in collision_uris
+                                if item.spotify_uri
+                                and item.spotify_uri not in collision_uris
                             )),
                         )
                     )
                 assert snapshot_name is not None
                 managed_items_by_uri: dict[str, PublicationItem] = {}
                 for item in publication_items:
-                    if item.spotify_uri not in collision_uris:
+                    if item.spotify_uri and item.spotify_uri not in collision_uris:
                         managed_items_by_uri.setdefault(item.spotify_uri, item)
                 manifest = PublicationManifest(
                     account_id=state.account_id,
@@ -2421,6 +2451,24 @@ class Transfer:
     def _save_transfer(self, transfer_id: str, state: TransferState) -> None:
         if self._transfer_storage is not None:
             self._transfer_storage.save_transfer(transfer_id, state)
+
+    @staticmethod
+    def _review_tracks(items: list[PublicationItem]) -> list[ReviewTrack]:
+        return [
+            ReviewTrack(
+                source_track_id=item.source_track_id,
+                source_name=item.source_name,
+                source_artist=item.source_artist,
+                source_title=item.source_title,
+                source_duration=item.source_duration,
+                spotify_uri=item.spotify_uri,
+                spotify_name=item.spotify_name,
+                spotify_artist=item.spotify_artist,
+                score=item.score,
+                match_type=item.match_type,
+            )
+            for item in items
+        ]
 
     def _approved_available(self, spotify_uri: str) -> bool:
         try:

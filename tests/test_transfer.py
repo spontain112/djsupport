@@ -18,7 +18,7 @@ from djsupport.cli import cli
 from djsupport.cache import MatchCache
 from djsupport.rekordbox import Track
 from djsupport.regression import load_local_regressions
-from djsupport.report import PlaylistReport, SyncReport, save_report
+from djsupport.report import PlaylistReport, SyncReport, save_report, save_review_csv
 from djsupport.spotify import RateLimitError
 from djsupport.transfer import (
     AccountPublishingGuards,
@@ -1817,6 +1817,44 @@ class TestRekordboxBatchExecution:
 
 
 class TestTransferPublicationLifecycle:
+    def test_mixed_publication_retains_one_review_entry_per_source_track(
+        self, tmp_path,
+    ):
+        spotify = StatefulSpotify({
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+        })
+        storage = InMemoryStorage()
+
+        report = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=storage, publication_storage=storage,
+        ).execute(TransferRequest(source="fixture"))
+        manifest = report.playlists[0].publication_manifest
+        review_csv = tmp_path / "review.csv"
+        save_review_csv(report, str(review_csv))
+
+        assert [item.source_track_id for item in manifest.items] == ["bp-1", "bp-2"]
+        assert [item.spotify_uri for item in manifest.items] == [
+            "spotify:track:known", "",
+        ]
+        with review_csv.open(newline="") as csv_file:
+            rows = list(csv.DictReader(csv_file))
+        assert [row["source_track_id"] for row in rows] == ["bp-1", "bp-2"]
+        assert rows[1] == {
+            "source_track_id": "bp-2",
+            "source_track": "New Artist - New Track",
+            "source_artist": "New Artist",
+            "source_title": "New Track",
+            "source_duration": "420",
+            "spotify_url": "",
+            "spotify_track": "",
+            "score": "",
+            "match_type": "unmatched",
+        }
+
     def test_prepared_transfer_is_visible_before_source_intake_and_resumes(self, tmp_path):
         class CountingSource(FixtureBeatportSource):
             consumptions = 0
@@ -2406,10 +2444,49 @@ class TestTransferPublicationLifecycle:
             approved_at=datetime(2026, 8, 1),
         ))
 
-        assert json.loads(path.read_text())["version"] == 3
+        assert json.loads(path.read_text())["version"] == 4
         assert len(FilePublicationStorage(path).mirrors_for_account(
             "spotify-user-1"
         )) == 1
+
+    def test_version_three_publication_without_unmatched_entries_remains_readable(
+        self, tmp_path,
+    ):
+        path = tmp_path / "publication-manifests.json"
+        path.write_text(json.dumps({
+            "version": 3,
+            "manifests": [{
+                "account_id": "spotify-user-1",
+                "spotify_playlist_id": "legacy-playlist",
+                "spotify_playlist_name": "Legacy",
+                "source_label": "Beatport",
+                "source_reference": "legacy-chart",
+                "created_at": "2026-07-31T12:00:00",
+                "mode": "snapshot",
+                "items": [{
+                    "source_track_id": "legacy-1",
+                    "source_name": "Legacy Artist - Legacy Track",
+                    "source_artist": "Legacy Artist",
+                    "source_title": "Legacy Track",
+                    "spotify_uri": "spotify:track:abcdefghijklmnopqrstuv",
+                    "spotify_name": "Legacy Track",
+                    "spotify_artist": "Legacy Artist",
+                    "score": 95.0,
+                    "match_type": "exact",
+                }],
+            }],
+            "approvals": [],
+            "mirrors": [],
+        }))
+
+        manifest = FilePublicationStorage(path).publication_for_playlist(
+            "spotify-user-1", "legacy-playlist",
+        )
+
+        assert manifest is not None
+        assert manifest.items[0].source_duration == 0
+        assert manifest.items[0].authoritative is False
+        assert manifest.managed_items == manifest.items
 
 class TestProvisionalPlaylistApproval:
     def publish(self):
@@ -2489,6 +2566,101 @@ class TestProvisionalPlaylistApproval:
         assert review.corrections == (review.approved[1],)
         assert storage.corrections == [review.approved[1]]
 
+    def test_unmatched_row_can_be_corrected_in_source_order_and_is_idempotent(
+        self, tmp_path,
+    ):
+        spotify = StatefulSpotify({
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+        })
+        storage = InMemoryStorage()
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=storage, publication_storage=storage,
+        )
+        report = transfer.execute(TransferRequest(source="fixture"))
+        playlist_id = report.playlists[0].spotify_playlist_id
+        spotify.playlists[playlist_id]["tracks"] = [
+            "spotify:track:manual-before",
+            "spotify:track:known",
+            "spotify:track:manual-after",
+        ]
+        review_csv = tmp_path / "review.csv"
+        review_csv.write_text(
+            "source_track_id,spotify_url\n"
+            "bp-2,spotify:track:abcdefghijklmnopqrstuv\n"
+        )
+
+        first = transfer.approve(playlist_id, corrections=review_csv)
+        second = transfer.approve(playlist_id, corrections=review_csv)
+
+        assert spotify.playlists[playlist_id]["tracks"] == [
+            "spotify:track:manual-before",
+            "spotify:track:known",
+            "spotify:track:abcdefghijklmnopqrstuv",
+            "spotify:track:manual-after",
+        ]
+        assert [item.source_track_id for item in first.approved] == ["bp-1", "bp-2"]
+        assert first.rejected == ()
+        assert first.corrections == (first.approved[1],)
+        assert second.approved == first.approved
+        assert spotify.playlist_replacements == 1
+        assert storage.corrections == [first.approved[1], second.approved[1]]
+
+    def test_blank_unmatched_row_remains_unresolved_not_rejected(self, tmp_path):
+        spotify = StatefulSpotify({
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+        })
+        storage = InMemoryStorage()
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=storage, publication_storage=storage,
+        )
+        report = transfer.execute(TransferRequest(source="fixture"))
+        playlist_id = report.playlists[0].spotify_playlist_id
+        review_csv = tmp_path / "review.csv"
+        review_csv.write_text("source_track_id,spotify_url\nbp-2,\n")
+
+        outcome = transfer.approve(playlist_id, corrections=review_csv)
+
+        assert [item.source_track_id for item in outcome.approved] == ["bp-1"]
+        assert outcome.rejected == ()
+        assert storage.rejected_matches == []
+
+    def test_preview_reports_unmatched_review_rows_without_publication(
+        self, tmp_path,
+    ):
+        spotify = StatefulSpotify({
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+        })
+        storage = InMemoryStorage()
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=storage, publication_storage=storage,
+        )
+
+        report = transfer.execute(TransferRequest(source="fixture", preview=True))
+        review_csv = tmp_path / "preview.csv"
+        save_review_csv(report, str(review_csv))
+
+        with review_csv.open(newline="") as csv_file:
+            rows = list(csv.DictReader(csv_file))
+        assert [(row["source_track_id"], row["spotify_url"]) for row in rows] == [
+            ("bp-1", "https://open.spotify.com/track/known"), ("bp-2", ""),
+        ]
+        assert storage.publications == []
+        assert spotify.playlists == {"existing": ["spotify:track:untouched"]}
+        with pytest.raises(ValueError, match="No Provisional Playlist"):
+            transfer.approve("preview-only", corrections=review_csv)
+
     def test_unchanged_review_rows_are_ordinary_approvals(self, tmp_path):
         transfer, _, storage, playlist_id = self.publish()
         review_csv = tmp_path / "review.csv"
@@ -2511,6 +2683,7 @@ class TestProvisionalPlaylistApproval:
         ("rows", "message"),
         [
             ([{"source_track_id": "missing", "spotify_url": "spotify:track:abcdefghijklmnopqrstuv"}], "unknown source_track_id"),
+            ([{"source_track_id": "", "spotify_url": "spotify:track:abcdefghijklmnopqrstuv"}], "unknown source_track_id"),
             ([{"source_track_id": "bp-1", "spotify_url": "https://example.com/track/abcdefghijklmnopqrstuv"}], "invalid Spotify track"),
             ([{"source_track_id": "bp-1", "spotify_url": "https://example.com/track/known"}], "invalid Spotify track"),
             ([
@@ -2541,6 +2714,32 @@ class TestProvisionalPlaylistApproval:
 
         assert spotify.playlists[playlist_id]["tracks"] == original
         assert storage.approvals == []
+        assert storage.corrections == []
+
+    def test_unresolvable_correction_fails_before_playlist_or_knowledge_mutation(
+        self, tmp_path,
+    ):
+        transfer, spotify, storage, playlist_id = self.publish()
+        original = list(spotify.playlists[playlist_id]["tracks"])
+        spotify.spotify_track = lambda uri: {
+            "uri": "spotify:track:zyxwvutsrqponmlkjihgfe",
+            "name": "Different Track",
+            "artist": "Different Artist",
+        }
+        review_csv = tmp_path / "review.csv"
+        review_csv.write_text(
+            "source_track_id,spotify_url\n"
+            "bp-2,spotify:track:abcdefghijklmnopqrstuv\n"
+        )
+
+        with pytest.raises(ValueError, match="did not resolve"):
+            transfer.approve(playlist_id, corrections=review_csv)
+
+        assert spotify.playlists[playlist_id]["tracks"] == original
+        assert spotify.playlist_replacements == 0
+        assert storage.approvals == []
+        assert storage.approved_matches == []
+        assert storage.rejected_matches == []
         assert storage.corrections == []
 
     def test_correction_is_durable_approved_knowledge_and_local_regression(
