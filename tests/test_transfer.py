@@ -371,7 +371,7 @@ class TestProtectedTransferBehavior:
             "title similarity 92", "artist similarity 88",
         )
 
-    def test_match_collision_is_reported_and_not_counted_as_representation(self):
+    def test_match_collision_is_reported_and_retained_for_correction(self, tmp_path):
         shared = _match("spotify:track:shared", "Shared", "Artist")
         spotify = StatefulSpotify({
             ("Known Artist", "Known Track"): shared,
@@ -379,11 +379,12 @@ class TestProtectedTransferBehavior:
         })
         storage = InMemoryStorage()
 
-        report = Transfer(
+        transfer = Transfer(
             publishing_guards=TEST_PUBLISHING_GUARDS,
             source=FixtureBeatportSource(FIXTURE), spotify=spotify,
             matching_knowledge=storage, publication_storage=storage,
-        ).execute(TransferRequest(source="fixture"))
+        )
+        report = transfer.execute(TransferRequest(source="fixture"))
 
         playlist = report.playlists[0]
         assert report.total_matched == 0
@@ -391,7 +392,27 @@ class TestProtectedTransferBehavior:
         assert [item.source_track_id for item in playlist.match_collisions] == [
             "bp-1", "bp-2",
         ]
+        assert [
+            item.source_track_id for item in playlist.publication_manifest.items
+        ] == ["bp-1", "bp-2"]
         assert spotify.playlists[playlist.spotify_playlist_id]["tracks"] == []
+
+        review_csv = tmp_path / "collisions.csv"
+        review_csv.write_text(
+            "source_track_id,spotify_url\n"
+            "bp-1,spotify:track:abcdefghijklmnopqrstuv\n"
+            "bp-2,spotify:track:zyxwvutsrqponmlkjihgfe\n"
+        )
+        outcome = transfer.approve(
+            playlist.spotify_playlist_id, corrections=review_csv,
+        )
+
+        assert outcome.status == ApprovalStatus.APPROVED
+        assert [item.source_track_id for item in outcome.approved] == ["bp-1", "bp-2"]
+        assert spotify.playlists[playlist.spotify_playlist_id]["tracks"] == [
+            "spotify:track:abcdefghijklmnopqrstuv",
+            "spotify:track:zyxwvutsrqponmlkjihgfe",
+        ]
 
     def test_repeated_occurrence_of_same_source_track_is_not_a_collision(self):
         class RepeatedSource:
@@ -2599,8 +2620,8 @@ class TestProvisionalPlaylistApproval:
         assert spotify.playlists[playlist_id]["tracks"] == [
             "spotify:track:manual-before",
             "spotify:track:known",
-            "spotify:track:abcdefghijklmnopqrstuv",
             "spotify:track:manual-after",
+            "spotify:track:abcdefghijklmnopqrstuv",
         ]
         assert [item.source_track_id for item in first.approved] == ["bp-1", "bp-2"]
         assert first.rejected == ()
@@ -2692,6 +2713,10 @@ class TestProvisionalPlaylistApproval:
             ], "repeats source_track_id"),
             ([
                 {"source_track_id": "bp-1", "spotify_url": "spotify:track:known"},
+                {"source_track_id": "bp-1", "spotify_url": "spotify:track:abcdefghijklmnopqrstuv"},
+            ], "repeats source_track_id"),
+            ([
+                {"source_track_id": "bp-1", "spotify_url": ""},
                 {"source_track_id": "bp-1", "spotify_url": "spotify:track:abcdefghijklmnopqrstuv"},
             ], "repeats source_track_id"),
         ],
@@ -2936,8 +2961,8 @@ class TestProvisionalPlaylistApproval:
 
         assert spotify.playlists[playlist_id]["tracks"] == [
             "spotify:track:known",
-            "spotify:track:abcdefghijklmnopqrstuv",
             "spotify:track:manual",
+            "spotify:track:abcdefghijklmnopqrstuv",
         ]
         assert spotify.playlist_replacements == 1
 

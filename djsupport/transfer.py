@@ -1645,8 +1645,6 @@ class Transfer:
             for row_number, row in enumerate(reader, start=2):
                 source_track_id = (row.get("source_track_id") or "").strip()
                 spotify_reference = (row.get("spotify_url") or "").strip()
-                if not spotify_reference:
-                    continue
                 if not source_track_id or source_track_id not in manifest_items:
                     raise ValueError(
                         f"Correction row {row_number} has an unknown source_track_id"
@@ -1662,6 +1660,8 @@ class Transfer:
                         f"{source_track_id}"
                     )
                 seen_source_references.add(source_track_id)
+                if not spotify_reference:
+                    continue
                 original = manifest_items[source_track_id]
                 if spotify_reference == original.spotify_uri:
                     continue
@@ -1717,15 +1717,19 @@ class Transfer:
             elif present[item.spotify_uri] and item.spotify_uri not in desired:
                 desired.append(item.spotify_uri)
 
-        first_managed = next(
-            (index for index, uri in enumerate(current_uris) if uri in managed_uris),
-            0,
-        )
-        manual = [uri for uri in current_uris if uri not in managed_uris]
-        insertion = sum(
-            1 for uri in current_uris[:first_managed] if uri not in managed_uris
-        )
-        repaired = [*manual[:insertion], *desired, *manual[insertion:]]
+        manual_by_managed_boundary: dict[int, list[str]] = {}
+        managed_seen = 0
+        for uri in current_uris:
+            if uri in managed_uris:
+                managed_seen += 1
+                continue
+            boundary = min(managed_seen, len(desired))
+            manual_by_managed_boundary.setdefault(boundary, []).append(uri)
+        repaired: list[str] = []
+        for boundary in range(len(desired) + 1):
+            repaired.extend(manual_by_managed_boundary.get(boundary, ()))
+            if boundary < len(desired):
+                repaired.append(desired[boundary])
         if repaired != current_uris:
             self._retry_policy.run(
                 lambda: self._spotify.replace_provisional_playlist_tracks(
@@ -2056,13 +2060,7 @@ class Transfer:
 
                 if result is None or "alternatives" in result:
                     playlist.unmatched.append(track.display)
-                    if track.track_id and not any(
-                        item.source_track_id == track.track_id
-                        and item.source_artist == track.artist
-                        and item.source_title == track.name
-                        and item.source_duration == track.duration
-                        for item in publication_items
-                    ):
+                    if self._is_new_reviewable_source(track, publication_items):
                         publication_items.append(PublicationItem(
                             source_track_id=track.track_id,
                             source_name=track.display,
@@ -2102,13 +2100,7 @@ class Transfer:
                         spotify_uri=result["uri"],
                     )
                     playlist.matched.append(matched_track)
-                    if track.track_id and not any(
-                        item.source_track_id == track.track_id
-                        and item.source_artist == track.artist
-                        and item.source_title == track.name
-                        and item.source_duration == track.duration
-                        for item in publication_items
-                    ):
+                    if self._is_new_reviewable_source(track, publication_items):
                         publication_items.append(PublicationItem(
                             source_track_id=track.track_id,
                             source_name=track.display,
@@ -2358,7 +2350,6 @@ class Transfer:
                     items=tuple(
                         item for item in publication_items
                         if not item.authoritative
-                        and item.spotify_uri not in collision_uris
                     ),
                     mode=request.mode,
                     managed_items=tuple(managed_items_by_uri.values()),
@@ -2469,6 +2460,20 @@ class Transfer:
             )
             for item in items
         ]
+
+    @staticmethod
+    def _is_new_reviewable_source(
+        track: Track, items: list[PublicationItem],
+    ) -> bool:
+        if not track.track_id:
+            return False
+        return not any(
+            item.source_track_id == track.track_id
+            and item.source_artist == track.artist
+            and item.source_title == track.name
+            and item.source_duration == track.duration
+            for item in items
+        )
 
     def _approved_available(self, spotify_uri: str) -> bool:
         try:
