@@ -47,7 +47,7 @@ from djsupport.report import (
 from djsupport.spotify import MAX_RATE_LIMIT_WAIT, RateLimitError, _parse_retry_after
 
 
-PUBLICATION_MANIFEST_VERSION = 1
+PUBLICATION_MANIFEST_VERSION = 2
 TRANSFER_STATE_VERSION = 1
 SPOTIFY_TRACK_URI = re.compile(r"^spotify:track:([A-Za-z0-9]{22})$")
 SPOTIFY_TRACK_URL = re.compile(
@@ -77,7 +77,7 @@ class TransferRequest:
     """Everything an adapter must provide to start one Transfer."""
 
     source: str
-    mode: TransferMode = TransferMode.SNAPSHOT
+    mode: TransferMode | None = None
     preview: bool = False
     threshold: int = 80
     retry: bool = False
@@ -252,6 +252,18 @@ class PublicationManifest:
 
 
 @dataclass(frozen=True)
+class MirrorRelationship:
+    """An Approved, account-owned relationship to one source playlist."""
+
+    account_id: str
+    source_label: str
+    source_reference: str
+    spotify_playlist_id: str
+    spotify_playlist_name: str
+    approved_at: datetime
+
+
+@dataclass(frozen=True)
 class ApprovalOutcome:
     """The durable outcome of approving one Provisional Playlist."""
 
@@ -313,6 +325,8 @@ class PublicationStorage(Protocol):
 
     def retain_approval(self, outcome: ApprovalOutcome) -> None: ...
 
+    def retain_mirror(self, relationship: MirrorRelationship) -> None: ...
+
 
 class FilePublicationStorage:
     """Versioned, durable publication manifests for later review."""
@@ -321,6 +335,7 @@ class FilePublicationStorage:
         self.path = Path(path)
         self.manifests: list[dict] = []
         self.approvals: list[dict] = []
+        self.mirrors: list[dict] = []
         self.load()
 
     def load(self) -> None:
@@ -330,10 +345,11 @@ class FilePublicationStorage:
             data = json.loads(self.path.read_text())
         except (json.JSONDecodeError, OSError):
             return
-        if data.get("version") != PUBLICATION_MANIFEST_VERSION:
+        if data.get("version") not in (1, PUBLICATION_MANIFEST_VERSION):
             return
         self.manifests = data.get("manifests", [])
         self.approvals = data.get("approvals", data.get("reviews", []))
+        self.mirrors = data.get("mirrors", [])
 
     def _save(self, manifests: list[dict], approvals: list[dict]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -342,6 +358,7 @@ class FilePublicationStorage:
             "version": PUBLICATION_MANIFEST_VERSION,
             "manifests": manifests,
             "approvals": approvals,
+            "mirrors": self.mirrors,
         }, indent=2))
         os.replace(temporary, self.path)
         self.manifests = manifests
@@ -392,6 +409,30 @@ class FilePublicationStorage:
         stored = asdict(outcome)
         stored["reviewed_at"] = outcome.reviewed_at.isoformat()
         self._save(self.manifests, [*self.approvals, stored])
+
+    def retain_mirror(self, relationship: MirrorRelationship) -> None:
+        stored = asdict(relationship)
+        stored["approved_at"] = relationship.approved_at.isoformat()
+        self.mirrors = [
+            item for item in self.mirrors
+            if not (
+                item.get("account_id") == relationship.account_id
+                and item.get("source_label") == relationship.source_label
+                and item.get("source_reference") == relationship.source_reference
+            )
+        ]
+        self.mirrors.append(stored)
+        self._save(self.manifests, self.approvals)
+
+    def mirrors_for_account(self, account_id: str) -> list[MirrorRelationship]:
+        return [
+            MirrorRelationship(**{
+                **item,
+                "approved_at": datetime.fromisoformat(item["approved_at"]),
+            })
+            for item in self.mirrors
+            if item.get("account_id") == account_id
+        ]
 
 
 class TransferStorage(Protocol):
@@ -465,6 +506,7 @@ class BeatportChartSource:
     """Production source adapter for one Beatport chart."""
 
     source_label = "Beatport"
+    default_mode = TransferMode.SNAPSHOT
 
     def consume(self, reference: str) -> SourceSelection:
         from djsupport.beatport import (
@@ -486,6 +528,7 @@ class BeatportLabelSource:
     """Production source adapter for one Beatport record-label selection."""
 
     source_label = "Beatport label"
+    default_mode = TransferMode.SNAPSHOT
 
     def __init__(
         self,
@@ -511,6 +554,45 @@ class BeatportLabelSource:
         if self._on_deduplicated is not None:
             self._on_deduplicated(duplicates_removed, len(unique_tracks))
         return SourceSelection(label_name, url, unique_tracks)
+
+
+class RekordboxPlaylistSource:
+    """Fixture-friendly intake for one explicitly selected Rekordbox playlist."""
+
+    source_label = "Rekordbox"
+    default_mode = TransferMode.MIRROR
+
+    def __init__(self, xml_path: str | Path) -> None:
+        self._xml_path = Path(xml_path)
+
+    def consume(self, reference: str) -> SourceSelection:
+        from djsupport.rekordbox import parse_xml
+
+        tracks, playlists = parse_xml(self._xml_path)
+        selected = [
+            playlist for playlist in playlists
+            if playlist.path == reference or playlist.name == reference
+        ]
+        if not selected:
+            raise ValueError(f"Rekordbox playlist not found: {reference}")
+        if len(selected) > 1:
+            raise ValueError(
+                f"Rekordbox playlist name is ambiguous; select its path: {reference}"
+            )
+        playlist = selected[0]
+        missing_track_ids = [
+            track_id for track_id in playlist.track_ids if track_id not in tracks
+        ]
+        if missing_track_ids:
+            raise ValueError(
+                "Rekordbox playlist has missing track references: "
+                + ", ".join(missing_track_ids)
+            )
+        return SourceSelection(
+            playlist.name,
+            playlist.path,
+            [tracks[track_id] for track_id in playlist.track_ids],
+        )
 
 
 class SpotifyMatcher:
@@ -854,6 +936,18 @@ class Transfer:
                         conflicts=tuple(conflicts),
                     )
                 self._knowledge.checkpoint()
+                if (
+                    outcome.status == ApprovalStatus.APPROVED
+                    and manifest.mode == TransferMode.MIRROR
+                ):
+                    self._publication_storage.retain_mirror(MirrorRelationship(
+                        account_id=account_id,
+                        source_label=manifest.source_label,
+                        source_reference=manifest.source_reference,
+                        spotify_playlist_id=manifest.spotify_playlist_id,
+                        spotify_playlist_name=manifest.spotify_playlist_name,
+                        approved_at=outcome.reviewed_at,
+                    ))
             self._publication_storage.retain_approval(outcome)
             return outcome
 
@@ -985,6 +1079,13 @@ class Transfer:
         """
         if not request.preview and self._publication_storage is None:
             raise ValueError("Publishing Transfers require publication storage")
+
+        if request.mode is None:
+            # Older internal/test adapters predate source-owned mode policy.
+            request = replace(
+                request,
+                mode=getattr(self._source, "default_mode", TransferMode.SNAPSHOT),
+            )
 
         transfer_id = request.transfer_id or uuid4().hex
         state = (

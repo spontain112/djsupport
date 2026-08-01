@@ -34,6 +34,8 @@ from djsupport.transfer import (
     ApprovalStatus,
     ApprovalOutcome,
     BeatportLabelSource,
+    RekordboxPlaylistSource,
+    MirrorRelationship,
 )
 
 
@@ -120,6 +122,7 @@ class InMemoryStorage:
         self.approved_matches = []
         self.rejected_matches = []
         self.corrections = []
+        self.mirrors = []
 
     def lookup(self, track, threshold):
         result = self.matches.get((track.artist, track.name))
@@ -156,6 +159,9 @@ class InMemoryStorage:
     def retain_approval(self, outcome):
         self.approvals.append(outcome)
 
+    def retain_mirror(self, relationship):
+        self.mirrors.append(relationship)
+
     def approve(self, item):
         self.approved_matches.append(item)
 
@@ -167,6 +173,10 @@ class InMemoryStorage:
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "beatport_chart.json"
+REKORDBOX_FIXTURE = Path(__file__).parent / "fixtures" / "library.xml"
+INCOMPLETE_REKORDBOX_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "rekordbox_missing_track.xml"
+)
 LABEL_FIXTURE = Path(__file__).parent / "fixtures" / "beatport_label_page.json"
 TEST_PUBLISHING_GUARDS = AccountPublishingGuards()
 
@@ -593,6 +603,85 @@ class TestSnapshotPublication:
         assert second.playlists[0].publication_manifest.mode == TransferMode.MIRROR
 
 
+class TestRekordboxMirror:
+    def test_missing_rekordbox_track_stops_before_matching_or_publication(self):
+        spotify = StatefulSpotify()
+        storage = InMemoryStorage()
+
+        with pytest.raises(ValueError, match="missing track references: missing"):
+            Transfer(
+                publishing_guards=TEST_PUBLISHING_GUARDS,
+                source=RekordboxPlaylistSource(INCOMPLETE_REKORDBOX_FIXTURE),
+                spotify=spotify, matching_knowledge=storage,
+                publication_storage=storage,
+            ).execute(TransferRequest(source="Incomplete"))
+
+        assert spotify.searches == []
+        assert spotify.playlists == {"existing": ["spotify:track:untouched"]}
+        assert storage.publications == []
+
+    def test_one_selected_playlist_previews_publishes_and_approval_retains_mirror(
+        self, tmp_path,
+    ):
+        matches = {
+            ("Solomun", "Vultora (Original Mix)"): _match(
+                "spotify:track:vultora", "Vultora (Original Mix)", "Solomun",
+            ),
+            ("Eagles & Butterflies", "Sapphire (Joris Voorn Remix)"): _match(
+                "spotify:track:sapphire", "Sapphire (Joris Voorn Remix)",
+                "Eagles & Butterflies",
+            ),
+        }
+        spotify = StatefulSpotify(matches)
+        cache = MatchCache(str(tmp_path / "matching-knowledge.json"))
+        knowledge = MatchCacheKnowledge(cache)
+        publications = FilePublicationStorage(tmp_path / "playlist-state.json")
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=RekordboxPlaylistSource(REKORDBOX_FIXTURE), spotify=spotify,
+            matching_knowledge=knowledge, publication_storage=publications,
+        )
+
+        preview = transfer.execute(TransferRequest(
+            source="My Playlists/Peak Time", preview=True,
+        ))
+        published = transfer.execute(TransferRequest(
+            source="My Playlists/Peak Time",
+        ))
+
+        playlist = published.playlists[0]
+        assert preview.playlists[0].action == "preview"
+        assert preview.total_matched == 2
+        assert spotify.searches == [
+            ("Solomun", "Vultora (Original Mix)", 80),
+            ("Eagles & Butterflies", "Sapphire (Joris Voorn Remix)", 80),
+        ]
+        assert playlist.action == "provisional mirror updated"
+        assert playlist.publication_manifest.mode == TransferMode.MIRROR
+        assert spotify.playlists[playlist.spotify_playlist_id]["tracks"] == [
+            "spotify:track:vultora", "spotify:track:sapphire",
+        ]
+        assert publications.mirrors_for_account("spotify-user-1") == []
+
+        approval = transfer.approve(playlist.spotify_playlist_id)
+
+        assert approval.status == ApprovalStatus.APPROVED
+        reloaded_state = FilePublicationStorage(tmp_path / "playlist-state.json")
+        mirrors = reloaded_state.mirrors_for_account("spotify-user-1")
+        assert len(mirrors) == 1
+        assert mirrors[0].source_reference == "My Playlists/Peak Time"
+        assert mirrors[0].spotify_playlist_id == playlist.spotify_playlist_id
+        assert MatchCacheKnowledge(cache).lookup(
+            Track(
+                track_id="another-source-id", name="Vultora (Original Mix)",
+                artist="Solomun", album="", remixer="", label="", genre="",
+                date_added="", duration=412,
+            ),
+            80,
+        )["authoritative"] is True
+
+
+class TestTransferPublicationLifecycle:
     def test_paused_transfer_reloads_and_resumes_without_repeating_work(self, tmp_path):
         matches = {
             ("Known Artist", "Known Track"): _match(
@@ -1053,6 +1142,31 @@ class TestSnapshotPublication:
             item["account_id"]
             for item in reloaded.manifests_for_account("spotify-user-2")
         } == {"spotify-user-2"}
+
+    def test_version_one_publication_state_migrates_when_mirror_state_is_saved(
+        self, tmp_path,
+    ):
+        path = tmp_path / "publication-manifests.json"
+        path.write_text(json.dumps({
+            "version": 1,
+            "manifests": [],
+            "approvals": [],
+        }))
+        storage = FilePublicationStorage(path)
+
+        storage.retain_mirror(MirrorRelationship(
+            account_id="spotify-user-1",
+            source_label="Rekordbox",
+            source_reference="My Playlists/Peak Time",
+            spotify_playlist_id="mirror-1",
+            spotify_playlist_name="Peak Time",
+            approved_at=datetime(2026, 8, 1),
+        ))
+
+        assert json.loads(path.read_text())["version"] == 2
+        assert len(FilePublicationStorage(path).mirrors_for_account(
+            "spotify-user-1"
+        )) == 1
 
 class TestProvisionalPlaylistApproval:
     def publish(self):

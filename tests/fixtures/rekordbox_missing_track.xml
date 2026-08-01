@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DJ_PLAYLISTS Version="1.0.0">
+    <COLLECTION Entries="1">
+        <TRACK TrackID="1" Name="Complete Track" Artist="Fixture Artist"
+               Album="" Remixer="" Label="" Genre="" DateAdded="2026-08-01"
+               TotalTime="240"/>
+    </COLLECTION>
+    <PLAYLISTS>
+        <NODE Type="0" Name="ROOT" Count="1">
+            <NODE Type="1" Name="Incomplete" KeyType="0" Entries="2">
+                <TRACK Key="1"/>
+                <TRACK Key="missing"/>
+            </NODE>
+        </NODE>
+    </PLAYLISTS>
+</DJ_PLAYLISTS>
