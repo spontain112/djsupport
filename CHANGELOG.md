@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Account-scoped Provisional Playlist state, per-account publishing serialization,
+  and bounded Spotify retries with safe Transfer checkpointing
 - Beatport chart playlists now include the curator/DJ name — e.g. `"Adam Beyer - Tech House Vibes"` instead of just `"Tech House Vibes"`
 - `compose_chart_playlist_name()` helper in `beatport.py` for chart name composition (curator omitted when `"Unknown"`, empty, or `None`)
 

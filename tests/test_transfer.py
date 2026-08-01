@@ -1,20 +1,30 @@
 """Behavior tests at the public Transfer seam."""
 
 import json
-from datetime import datetime
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
+import spotipy
 
 from click.testing import CliRunner
 
 from djsupport.cli import cli
+from djsupport.cache import MatchCache
 from djsupport.rekordbox import Track
 from djsupport.report import PlaylistReport, SyncReport
+from djsupport.spotify import RateLimitError
 from djsupport.transfer import (
+    AccountPublishingGuards,
     FilePublicationStorage,
     FileTransferStorage,
+    MatchCacheKnowledge,
+    PublishingTransferConflict,
+    RetryPolicy,
     SourceSelection,
     Transfer,
     TransferRequest,
@@ -106,6 +116,7 @@ class InMemoryStorage:
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "beatport_chart.json"
+TEST_PUBLISHING_GUARDS = AccountPublishingGuards()
 
 
 def _match(uri, name, artist):
@@ -113,6 +124,13 @@ def _match(uri, name, artist):
         "uri": uri, "name": name, "artist": artist,
         "score": 96.0, "match_type": "exact",
     }
+
+
+def _spotify_error(status, *, retry_after=None):
+    headers = {} if retry_after is None else {"Retry-After": str(retry_after)}
+    return spotipy.SpotifyException(
+        status, -1, "Spotify failure", headers=headers,
+    )
 
 
 def test_preview_reuses_and_retains_matching_knowledge_without_playlist_writes():
@@ -130,6 +148,7 @@ def test_preview_reuses_and_retains_matching_knowledge_without_playlist_writes()
     original_state = dict(storage.playlist_state)
 
     report = Transfer(
+        publishing_guards=TEST_PUBLISHING_GUARDS,
         source=source, spotify=spotify, matching_knowledge=storage,
     ).execute(TransferRequest(source="fixture", preview=True))
 
@@ -152,6 +171,7 @@ def test_preview_with_zero_acceptable_matches_succeeds_with_zero_percent():
     storage = InMemoryStorage()
 
     report = Transfer(
+        publishing_guards=TEST_PUBLISHING_GUARDS,
         source=FixtureBeatportSource(FIXTURE),
         spotify=spotify,
         matching_knowledge=storage,
@@ -162,6 +182,186 @@ def test_preview_with_zero_acceptable_matches_succeeds_with_zero_percent():
     assert report.total_unmatched == 2
     assert storage.checkpoints >= 1
     assert spotify.playlists == {"existing": ["spotify:track:untouched"]}
+
+
+class TestProtectedTransferBehavior:
+
+    def test_previously_unmatched_tracks_retry_only_when_explicitly_requested(
+        self, tmp_path,
+    ):
+        cache = MatchCache(str(tmp_path / "matching-knowledge.json"))
+        for artist, title in (
+            ("Known Artist", "Known Track"), ("New Artist", "New Track"),
+        ):
+            cache.store(artist, title, 80, None)
+            cache.entries[cache.cache_key(artist, title)].timestamp = (
+                datetime.now() - timedelta(days=30)
+            ).isoformat()
+        spotify = StatefulSpotify({
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+            ("New Artist", "New Track"): _match(
+                "spotify:track:new", "New Track", "New Artist",
+            ),
+        })
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=MatchCacheKnowledge(cache),
+        )
+
+        skipped = transfer.execute(TransferRequest(source="fixture", preview=True))
+        retried = transfer.execute(TransferRequest(
+            source="fixture", preview=True, retry=True,
+        ))
+
+        assert skipped.total_unmatched == 2
+        assert skipped.playlists[0].api_lookups == 0
+        assert retried.total_matched == 2
+        assert retried.playlists[0].api_lookups == 2
+
+
+    def test_transient_timeouts_retry_with_bounded_backoff(self):
+        class TimeoutThenMatch(StatefulSpotify):
+            def __init__(self):
+                super().__init__()
+                self.attempts = 0
+
+            def match(self, track, threshold):
+                self.attempts += 1
+                if self.attempts < 3:
+                    raise requests.Timeout("Spotify timed out")
+                return _match("spotify:track:known", track.name, track.artist)
+
+        spotify = TimeoutThenMatch()
+        sleeps = []
+        report = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=InMemoryStorage(),
+            retry_policy=RetryPolicy(sleep=sleeps.append),
+        ).execute(TransferRequest(source="fixture", preview=True))
+
+        assert report.total_matched == 2
+        assert spotify.attempts == 4
+        assert sleeps == [1.0, 2.0]
+
+
+    def test_server_failure_retries_are_bounded(self):
+        class UnavailableSpotify(StatefulSpotify):
+            def __init__(self):
+                super().__init__()
+                self.attempts = 0
+
+            def match(self, track, threshold):
+                self.attempts += 1
+                raise _spotify_error(503)
+
+        spotify = UnavailableSpotify()
+        with pytest.raises(spotipy.SpotifyException) as raised:
+            Transfer(
+                publishing_guards=TEST_PUBLISHING_GUARDS,
+                source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+                matching_knowledge=InMemoryStorage(),
+                retry_policy=RetryPolicy(sleep=lambda _delay: None),
+            ).execute(TransferRequest(source="fixture", preview=True))
+
+        assert raised.value.http_status == 503
+        assert spotify.attempts == 3
+
+
+    def test_short_rate_limit_retries_using_retry_after(self):
+        class RateLimitedOnce(StatefulSpotify):
+            def __init__(self):
+                super().__init__()
+                self.rate_limited = False
+
+            def match(self, track, threshold):
+                if not self.rate_limited:
+                    self.rate_limited = True
+                    raise _spotify_error(429, retry_after=4)
+                return _match("spotify:track:match", track.name, track.artist)
+
+        sleeps = []
+        report = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=FixtureBeatportSource(FIXTURE), spotify=RateLimitedOnce(),
+            matching_knowledge=InMemoryStorage(),
+            retry_policy=RetryPolicy(sleep=sleeps.append),
+        ).execute(TransferRequest(source="fixture", preview=True))
+
+        assert report.total_matched == 2
+        assert sleeps == [4]
+
+
+    @pytest.mark.parametrize(
+        ("failure", "expected_exception"),
+        [
+            (_spotify_error(401), spotipy.SpotifyException),
+            (_spotify_error(429, retry_after=2), spotipy.SpotifyException),
+            (_spotify_error(429, retry_after=3600), RateLimitError),
+        ],
+    )
+    def test_shared_spotify_failures_checkpoint_and_stop_safely(
+        self, tmp_path, failure, expected_exception,
+    ):
+        class FailingSpotify(StatefulSpotify):
+            def match(self, track, threshold):
+                raise failure
+
+        state_path = tmp_path / "transfers.json"
+        knowledge = InMemoryStorage()
+        with pytest.raises(expected_exception):
+            Transfer(
+                publishing_guards=TEST_PUBLISHING_GUARDS,
+                source=FixtureBeatportSource(FIXTURE), spotify=FailingSpotify(),
+                matching_knowledge=knowledge,
+                transfer_storage=FileTransferStorage(state_path),
+                retry_policy=RetryPolicy(sleep=lambda _delay: None),
+            ).execute(TransferRequest(source="fixture", preview=True))
+
+        persisted = next(iter(FileTransferStorage(state_path).transfers.values()))
+        assert persisted.status.value == "paused"
+        assert persisted.next_track_index == 0
+        assert knowledge.checkpoints >= 1
+
+
+    def test_second_publishing_transfer_for_same_account_cannot_race_first(self):
+        entered_publication = threading.Event()
+        release_publication = threading.Event()
+
+        class BlockingSpotify(StatefulSpotify):
+            def publish_provisional_snapshot(self, *args):
+                entered_publication.set()
+                assert release_publication.wait(timeout=2)
+                return super().publish_provisional_snapshot(*args)
+
+        matches = {
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+            ("New Artist", "New Track"): _match(
+                "spotify:track:new", "New Track", "New Artist",
+            ),
+        }
+        spotify = BlockingSpotify(matches)
+
+        def publish():
+            storage = InMemoryStorage()
+            return Transfer(
+                publishing_guards=AccountPublishingGuards(),
+                source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+                matching_knowledge=storage, publication_storage=storage,
+            ).execute(TransferRequest(source="fixture"))
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            first = executor.submit(publish)
+            assert entered_publication.wait(timeout=2)
+            with pytest.raises(PublishingTransferConflict, match="spotify-user-1"):
+                publish()
+            release_publication.set()
+            assert first.result(timeout=2).status == "completed"
 
 
 class TestSnapshotPublication:
@@ -179,6 +379,7 @@ class TestSnapshotPublication:
         knowledge = InMemoryStorage()
         state_path = tmp_path / "transfers.json"
         first = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
             source=FixtureBeatportSource(FIXTURE), spotify=spotify,
             matching_knowledge=knowledge, publication_storage=knowledge,
             transfer_storage=FileTransferStorage(state_path),
@@ -194,6 +395,7 @@ class TestSnapshotPublication:
 
         resumed_knowledge = InMemoryStorage()
         resumed = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
             source=FixtureBeatportSource(FIXTURE), spotify=spotify,
             matching_knowledge=resumed_knowledge, publication_storage=knowledge,
             transfer_storage=FileTransferStorage(state_path),
@@ -225,6 +427,7 @@ class TestSnapshotPublication:
         states = FileTransferStorage(tmp_path / "transfers.json")
         with pytest.raises(KeyboardInterrupt):
             Transfer(
+                publishing_guards=TEST_PUBLISHING_GUARDS,
                 source=FixtureBeatportSource(FIXTURE), spotify=CancellingSpotify(),
                 matching_knowledge=InMemoryStorage(),
                 publication_storage=InMemoryStorage(), transfer_storage=states,
@@ -242,6 +445,7 @@ class TestSnapshotPublication:
         })
         state_path = tmp_path / "transfers.json"
         transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
             source=FixtureBeatportSource(FIXTURE), spotify=spotify,
             matching_knowledge=InMemoryStorage(),
             publication_storage=InMemoryStorage(),
@@ -256,6 +460,7 @@ class TestSnapshotPublication:
         assert reloaded.load_transfer(paused.transfer_id).status.value == "abandoned"
         with pytest.raises(ValueError, match="abandoned"):
             Transfer(
+                publishing_guards=TEST_PUBLISHING_GUARDS,
                 source=FixtureBeatportSource(FIXTURE), spotify=spotify,
                 matching_knowledge=InMemoryStorage(),
                 publication_storage=InMemoryStorage(), transfer_storage=reloaded,
@@ -263,6 +468,24 @@ class TestSnapshotPublication:
                 source="fixture", transfer_id=paused.transfer_id,
             ))
         assert "snapshot-1" not in spotify.playlists
+
+    def test_transfer_cannot_be_abandoned_by_another_spotify_account(self, tmp_path):
+        spotify = StatefulSpotify()
+        states = FileTransferStorage(tmp_path / "transfers.json")
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=InMemoryStorage(),
+            publication_storage=InMemoryStorage(), transfer_storage=states,
+        )
+        transfer.pause()
+        paused = transfer.execute(TransferRequest(source="fixture"))
+        spotify.account_id = lambda: "spotify-user-2"
+
+        with pytest.raises(ValueError, match="another Spotify account"):
+            transfer.abandon(paused.transfer_id)
+
+        assert states.load_transfer(paused.transfer_id).status.value == "paused"
 
     def test_resume_after_publishing_does_not_duplicate_spotify_effect(self, tmp_path):
         class InterruptedPublicationStorage(InMemoryStorage):
@@ -289,6 +512,7 @@ class TestSnapshotPublication:
         publications = InterruptedPublicationStorage()
         states = FileTransferStorage(tmp_path / "transfers.json")
         transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
             source=FixtureBeatportSource(FIXTURE), spotify=spotify,
             matching_knowledge=knowledge, publication_storage=publications,
             transfer_storage=states,
@@ -299,6 +523,7 @@ class TestSnapshotPublication:
         transfer_id = next(iter(states.transfers))
 
         resumed = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
             source=FixtureBeatportSource(FIXTURE), spotify=spotify,
             matching_knowledge=knowledge, publication_storage=publications,
             transfer_storage=FileTransferStorage(states.path),
@@ -309,6 +534,7 @@ class TestSnapshotPublication:
         assert len(publications.publications) == 1
 
         repeated = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
             source=FixtureBeatportSource(FIXTURE), spotify=spotify,
             matching_knowledge=knowledge, publication_storage=publications,
             transfer_storage=FileTransferStorage(states.path),
@@ -347,12 +573,14 @@ class TestSnapshotPublication:
 
         with pytest.raises(KeyboardInterrupt):
             Transfer(
+                publishing_guards=TEST_PUBLISHING_GUARDS,
                 source=FixtureBeatportSource(FIXTURE), spotify=spotify,
                 matching_knowledge=knowledge, publication_storage=publications,
                 transfer_storage=states,
             ).execute(TransferRequest(source="fixture", transfer_id=transfer_id))
 
         Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
             source=FixtureBeatportSource(FIXTURE), spotify=spotify,
             matching_knowledge=knowledge, publication_storage=publications,
             transfer_storage=FileTransferStorage(states.path),
@@ -364,6 +592,7 @@ class TestSnapshotPublication:
         spotify = StatefulSpotify()
         states = FileTransferStorage(tmp_path / "transfers.json")
         transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
             source=FixtureBeatportSource(FIXTURE), spotify=spotify,
             matching_knowledge=InMemoryStorage(),
             publication_storage=InMemoryStorage(), transfer_storage=states,
@@ -374,6 +603,7 @@ class TestSnapshotPublication:
 
         with pytest.raises(ValueError, match="another Spotify account"):
             Transfer(
+                publishing_guards=TEST_PUBLISHING_GUARDS,
                 source=FixtureBeatportSource(FIXTURE), spotify=spotify,
                 matching_knowledge=InMemoryStorage(),
                 publication_storage=InMemoryStorage(), transfer_storage=states,
@@ -393,6 +623,7 @@ class TestSnapshotPublication:
         storage = InMemoryStorage()
 
         report = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
             source=FixtureBeatportSource(FIXTURE),
             spotify=spotify,
             matching_knowledge=storage,
@@ -412,6 +643,7 @@ class TestSnapshotPublication:
         assert playlist.publication_manifest is manifest
         assert manifest.source_label == "Beatport"
         assert manifest.source_reference == "https://www.beatport.com/chart/fixture/14"
+        assert manifest.account_id == "spotify-user-1"
         assert [item.spotify_uri for item in manifest.items] == [
             "spotify:track:known", "spotify:track:new",
         ]
@@ -431,6 +663,7 @@ class TestSnapshotPublication:
         spotify = StatefulSpotify(matches)
         storage = InMemoryStorage()
         transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
             source=FixtureBeatportSource(FIXTURE), spotify=spotify,
             matching_knowledge=storage, publication_storage=storage,
         )
@@ -459,6 +692,7 @@ class TestSnapshotPublication:
 
         with pytest.raises(RuntimeError, match="matching interrupted"):
             Transfer(
+                publishing_guards=TEST_PUBLISHING_GUARDS,
                 source=FixtureBeatportSource(FIXTURE), spotify=spotify,
                 matching_knowledge=storage, publication_storage=storage,
             ).execute(TransferRequest(source="fixture"))
@@ -477,6 +711,7 @@ class TestSnapshotPublication:
         storage = InMemoryStorage()
 
         report = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
             source=FixtureBeatportSource(FIXTURE), spotify=spotify,
             matching_knowledge=storage, publication_storage=storage,
         ).execute(TransferRequest(source="fixture"))
@@ -496,6 +731,7 @@ class TestSnapshotPublication:
         storage = InMemoryStorage()
 
         report = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
             source=EmptySource(), spotify=spotify,
             matching_knowledge=storage, publication_storage=storage,
         ).execute(TransferRequest(source="empty"))
@@ -522,6 +758,7 @@ class TestSnapshotPublication:
 
         with pytest.raises(OSError, match="disk full"):
             Transfer(
+                publishing_guards=TEST_PUBLISHING_GUARDS,
                 source=FixtureBeatportSource(FIXTURE), spotify=spotify,
                 matching_knowledge=InMemoryStorage(),
                 publication_storage=FailingPublicationStorage(),
@@ -543,6 +780,7 @@ class TestSnapshotPublication:
         storage = FilePublicationStorage(path)
 
         report = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
             source=FixtureBeatportSource(FIXTURE), spotify=StatefulSpotify(matches),
             matching_knowledge=InMemoryStorage(), publication_storage=storage,
         ).execute(TransferRequest(source="fixture"))
@@ -554,6 +792,37 @@ class TestSnapshotPublication:
         assert [item["source_track_id"] for item in reloaded.manifests[0]["items"]] == [
             "bp-1", "bp-2",
         ]
+
+    def test_file_publication_state_is_scoped_to_spotify_account(self, tmp_path):
+        matches = {
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+            ("New Artist", "New Track"): _match(
+                "spotify:track:new", "New Track", "New Artist",
+            ),
+        }
+        path = tmp_path / "publication-manifests.json"
+        storage = FilePublicationStorage(path)
+        for account_id in ("spotify-user-1", "spotify-user-2"):
+            spotify = StatefulSpotify(matches)
+            spotify.account_id = lambda value=account_id: value
+            Transfer(
+                publishing_guards=TEST_PUBLISHING_GUARDS,
+                source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+                matching_knowledge=InMemoryStorage(),
+                publication_storage=storage,
+            ).execute(TransferRequest(source="fixture"))
+
+        reloaded = FilePublicationStorage(path)
+        assert {
+            item["account_id"]
+            for item in reloaded.manifests_for_account("spotify-user-1")
+        } == {"spotify-user-1"}
+        assert {
+            item["account_id"]
+            for item in reloaded.manifests_for_account("spotify-user-2")
+        } == {"spotify-user-2"}
 
 
 
