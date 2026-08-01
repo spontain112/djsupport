@@ -1,51 +1,105 @@
-"""Run match_test_data.csv against the live matcher and report accuracy.
+"""Run local regression knowledge against the live matcher and report accuracy.
 
 Usage:
-    python -m tests.test_match_accuracy
+    python -m tests.test_match_accuracy [--knowledge-path PATH]
 
 Requires SPOTIPY_CLIENT_ID, SPOTIPY_CLIENT_SECRET, SPOTIPY_REDIRECT_URI
-in .env (same as normal djsupport usage).
+in .env (same as normal djsupport usage). The input stays in versioned local
+application storage and is never loaded from a repository fixture.
 """
 
-import csv
-import sys
+import argparse
+import json
 from pathlib import Path
+
+import pytest
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from djsupport.matcher import match_track, _score_components, _classify_version_match
+from djsupport.matcher import match_track
 from djsupport.rekordbox import Track
 from djsupport.spotify import get_client
-
-
-def _uri_from_url(url: str) -> str:
-    """Convert Spotify URL to URI. e.g. https://open.spotify.com/track/ABC -> spotify:track:ABC"""
-    track_id = url.rstrip("/").split("/")[-1].split("?")[0]
-    return f"spotify:track:{track_id}"
+from djsupport.cache import MatchCache
+from djsupport.transfer import default_matching_knowledge_path
 
 
 def load_test_data(path: Path) -> list[dict]:
-    """Load tab-separated test data CSV."""
+    """Load user-approved regression cases from local matching knowledge."""
+    cache = MatchCache(str(path))
+    cache.load()
     rows = []
-    with open(path, encoding="utf-8-sig") as f:
-        reader = csv.DictReader(f, delimiter="\t")
-        for row in reader:
-            url = row.get("Spotify URL", "").strip()
-            if url:
-                rows.append({
-                    "artist": row["Artist Name"].strip(),
-                    "song": row["Song Name"].strip(),
-                    "expected_uri": _uri_from_url(url),
-                    "expected_url": url,
-                })
+    required = ("source_artist", "source_title", "spotify_uri")
+    for row_number, regression in enumerate(cache.local_regressions, start=1):
+        if not all(regression.get(field) for field in required):
+            raise ValueError(
+                f"Invalid local regression row {row_number}: "
+                "source artist, source title, and Spotify URI are required"
+            )
+        rows.append({
+            "artist": regression["source_artist"],
+            "song": regression["source_title"],
+            "expected_uri": regression["spotify_uri"],
+            "duration": int(regression.get("source_duration", 0) or 0),
+        })
     return rows
 
 
-def run_accuracy_test():
-    csv_path = Path(__file__).parent / "fixtures" / "match_test_data.csv"
-    test_data = load_test_data(csv_path)
+def test_load_test_data_reads_only_local_regression_knowledge(tmp_path):
+    path = tmp_path / "matching-knowledge.json"
+    path.write_text(json.dumps({
+        "version": 1,
+        "entries": {
+            "synthetic artist||cached proposal": {
+                "spotify_uri": "spotify:track:0000000000000000000000",
+                "spotify_name": "Cached Proposal",
+                "spotify_artist": "Synthetic Artist",
+                "score": 90,
+                "matched": True,
+                "timestamp": "2026-01-01T00:00:00",
+                "threshold": 80,
+            },
+        },
+        "local_regressions": [{
+            "source_track_id": "synthetic-1",
+            "source_artist": "Synthetic Artist",
+            "source_title": "Synthetic Track",
+            "spotify_uri": "spotify:track:1111111111111111111111",
+        }],
+    }))
+
+    assert load_test_data(path) == [{
+        "artist": "Synthetic Artist",
+        "song": "Synthetic Track",
+        "expected_uri": "spotify:track:1111111111111111111111",
+        "duration": 0,
+    }]
+
+
+def test_load_test_data_rejects_non_local_or_invalid_regression_rows(tmp_path):
+    path = tmp_path / "matching-knowledge.json"
+    path.write_text(json.dumps({
+        "version": 1,
+        "entries": {},
+        "local_regressions": [{
+            "source_artist": "Incomplete",
+            "source_title": "Missing URI",
+        }],
+    }))
+
+    with pytest.raises(ValueError, match="local regression row 1"):
+        load_test_data(path)
+
+
+def run_accuracy_test(knowledge_path: Path | None = None):
+    knowledge_path = knowledge_path or default_matching_knowledge_path()
+    test_data = load_test_data(knowledge_path)
+    if not test_data:
+        raise ValueError(
+            f"No local regression knowledge found at {knowledge_path}. "
+            "Approve a Correction before running live accuracy."
+        )
     print(f"Loaded {len(test_data)} test tracks\n")
 
     sp = get_client()
@@ -163,4 +217,9 @@ def run_accuracy_test():
 
 
 if __name__ == "__main__":
-    run_accuracy_test()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--knowledge-path", type=Path, default=default_matching_knowledge_path(),
+        help="Versioned local matching-knowledge file (never a repository fixture).",
+    )
+    run_accuracy_test(parser.parse_args().knowledge_path)
