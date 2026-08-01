@@ -55,6 +55,8 @@ design-exports/
 screenshots/
 reports/
 docs/reports/
+/*.html
+/djsupport/*.pen
 *.djsupport-report.md
 *.djsupport-report.csv
 report.md

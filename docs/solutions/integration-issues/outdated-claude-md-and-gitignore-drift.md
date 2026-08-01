@@ -106,6 +106,7 @@ Does this file contain:
 
 ## Related Documentation
 
-- `docs/plans/2026-02-22-chore-repo-file-hygiene-and-access-control-plan.md` — Original plan that introduced the gitignore cleanup
+- Git history — the superseded repository-hygiene plan that introduced the
+  original gitignore cleanup remains recoverable from commit `5de4910`
 - `CHANGELOG.md` — Documents all version changes
 - `docs/isrc-mutagen-plan.md` — Example of tracked planning doc
