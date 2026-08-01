@@ -28,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- All production flows now enter the public Transfer interface; the replaced
+  shallow `service.py` orchestration and its implementation-coupled tests were
+  removed. Rekordbox work now requires explicit playlist selection or an
+  opt-in whole-library Batch, with Preview and lookup preflight owned by Transfer.
+- User and contributor documentation now uses the canonical Transfer, Preview,
+  Mirror, Snapshot, Approval, and Correction vocabulary. Compatible command
+  names such as `sync` and flags such as `--dry-run` remain available.
 - FastAPI and uvicorn are now optional dependencies — install with `pip install djsupport[web]`
 - `djsupport web` shows a friendly install hint when web dependencies are missing
 

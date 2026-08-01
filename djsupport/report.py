@@ -1,4 +1,4 @@
-"""Post-sync report generation for terminal and Markdown output."""
+"""Transfer outcome reporting for terminal, Markdown, and Correction CSV."""
 
 from __future__ import annotations
 
@@ -133,15 +133,15 @@ class SyncReport:
 
 
 def print_report(report: SyncReport) -> None:
-    """Print a concise terminal summary of the sync report."""
+    """Print a concise terminal summary of a Transfer outcome."""
     import click
 
     ts = report.timestamp.strftime("%Y-%m-%d %H:%M")
-    mode = "dry-run" if report.dry_run else "live"
+    mode = "Preview" if report.dry_run else "Transfer"
 
     click.echo()
     click.echo("\u2550" * 42)
-    click.echo(f"  Sync Report  {ts}")
+    click.echo(f"  Transfer Report  {ts}")
     click.echo(f"  Mode: {mode}  |  Threshold: {report.threshold}")
     if report.transfer_id:
         click.echo(f"  Transfer: {report.transfer_id}  |  Status: {report.status}")
@@ -192,10 +192,10 @@ def print_report(report: SyncReport) -> None:
 def save_report(report: SyncReport, path: str) -> None:
     """Save a detailed Markdown report to a file."""
     ts = report.timestamp.strftime("%Y-%m-%d %H:%M")
-    mode = "dry-run" if report.dry_run else "live"
+    mode = "Preview" if report.dry_run else "Transfer"
     lines: list[str] = []
 
-    lines.append(f"# Sync Report — {ts}")
+    lines.append(f"# Transfer Report — {ts}")
     lines.append("")
     lines.append(f"**Mode:** {mode}  |  **Threshold:** {report.threshold}")
     if report.transfer_id:

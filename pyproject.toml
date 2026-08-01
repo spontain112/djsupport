@@ -8,7 +8,7 @@ include = ["djsupport*"]
 [project]
 name = "djsupport"
 version = "0.3.0"
-description = "Sync Rekordbox playlists to Spotify"
+description = "Transfer Rekordbox and Beatport selections to Spotify"
 requires-python = ">=3.10"
 dependencies = [
     "spotipy>=2.23",

@@ -1,18 +1,18 @@
 # djsupport
 
-Sync your Rekordbox playlists to Spotify. Parses a Rekordbox XML library export, fuzzy-matches tracks against the Spotify catalog, and creates or updates Spotify playlists automatically.
+Transfer curated Rekordbox and Beatport selections to Spotify through reviewable Mirrors and Snapshots.
 
 ## Features
 
 - **Rekordbox XML parsing** — reads playlists and tracks from your Rekordbox library export
 - **Fuzzy matching** — multi-strategy search using artist, title, remixer, and duration fields with configurable confidence threshold
 - **Duration-based matching** — disambiguates original, radio, and extended versions using track duration
-- **Match caching** — persists matches to disk so subsequent syncs skip already-matched tracks; auto-retries failed matches after 7 days
+- **Matching knowledge** — reuses Approved Matches and retained proposals across Transfers
 - **Incremental updates** — only adds/removes changed tracks instead of replacing entire playlists
-- **Dry-run mode** — preview matches without creating or modifying any Spotify playlists
+- **Preview** — complete matching and reporting without playlist or playlist-state mutation (`--dry-run` remains the compatible flag)
 - **Markdown reports** — save detailed match reports with per-playlist breakdowns
 - **Playlist prefix** — prefix Spotify playlist names (e.g. `djsupport / Deep House`) to keep them organized
-- **Combined playlist** — merge all tracks into a single playlist sorted by date added
+- **Explicit Batches** — select one or more Rekordbox playlists, or opt into the whole library with cost preflight
 - **Graceful rate limiting** — aborts with a clear message, saves cache, and exits non-zero instead of hanging; resume later to continue where you left off
 - **Local-data backup and restore** — creates versioned archives without OAuth credentials and validates, previews, and conflict-checks restores before changing data
 
@@ -103,30 +103,30 @@ Output:
   Festival 2025/Main Stage (35 tracks)
 ```
 
-### Sync playlists to Spotify
+### Transfer Rekordbox playlists to Spotify
 
-Sync all playlists:
+Transfer one playlist as a Mirror:
 
 ```bash
-djsupport sync
+djsupport sync --playlist "Deep House"
 ```
 
-Sync a single playlist:
+Transfer several explicitly selected playlists as a Batch:
 
 ```bash
-djsupport sync -p "Deep House"
+djsupport sync -p "Deep House" -p "Peak Time"
 ```
 
-Preview matches without modifying Spotify:
+Opt into a whole-library Batch:
 
 ```bash
-djsupport sync --dry-run
+djsupport sync --whole-library
 ```
 
-Combine all tracks into a single playlist sorted by date added:
+Preview a selection without modifying Spotify playlists or playlist state:
 
 ```bash
-djsupport sync --all --all-name "My DJ Tracks"
+djsupport sync -p "Deep House" --dry-run
 ```
 
 ### Tuning match quality
@@ -137,9 +137,10 @@ Adjust the minimum match confidence (0–100, default 80):
 djsupport sync -t 70
 ```
 
-### Cache and retry
+### Matching knowledge and retry
 
-Bypass the cache and re-search every track:
+Bypass retained matching knowledge and re-search every track (the flag name is
+preserved for compatibility):
 
 ```bash
 djsupport sync --no-cache
@@ -151,7 +152,8 @@ Force retry all previously failed matches:
 djsupport sync --retry
 ```
 
-Change auto-retry window (default: retry failures older than 7 days):
+`--retry-days` remains accepted for command compatibility, but unmatched tracks
+are retried only when `--retry` is explicit:
 
 ```bash
 djsupport sync --retry-days 3
@@ -197,20 +199,18 @@ You can pass an explicit XML path at any time to override the saved path:
 djsupport sync /path/to/library.xml
 ```
 
-All sync options:
+Rekordbox Transfer options (the `sync` command name and `--dry-run` flag remain compatible):
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-p, --playlist` | | Sync only this playlist by name |
-| `--dry-run` | | Preview without modifying Spotify |
+| `-p, --playlist` | | Select by exact name/path; repeat for a Batch |
+| `--whole-library` | | Explicitly select every playlist |
+| `--dry-run` | | Preview without modifying Spotify or playlist state |
 | `-t, --threshold` | 80 | Minimum match confidence (0–100) |
-| `--all` | | Combine all tracks into one playlist |
-| `--all-name` | Rekordbox All | Name for the combined playlist |
 | `--report` | | Save Markdown report to this path |
-| `--no-cache` | | Bypass match cache |
+| `--no-cache` | | Bypass retained matching knowledge (compatible flag) |
 | `--retry` | | Force retry all failed matches |
-| `--retry-days` | 7 | Auto-retry failures older than N days |
-| `--incremental` | on | Diff-based playlist updates |
+| `--retry-days` | 7 | Compatibility-only; unmatched tracks require `--retry` |
 | `--prefix` | djsupport | Prefix for Spotify playlist names |
 | `--no-prefix` | | Disable playlist name prefix |
 

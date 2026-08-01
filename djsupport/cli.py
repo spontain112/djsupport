@@ -2,41 +2,35 @@
 
 from __future__ import annotations
 
-import sys
-from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import click
 
-if TYPE_CHECKING:
-    import spotipy
-
-    from djsupport.cache import MatchCache
-    from djsupport.state import PlaylistStateManager
 from dotenv import load_dotenv
 
 from djsupport.config import ConfigManager, validate_rekordbox_xml
-from djsupport.rekordbox import Track, parse_xml
+from djsupport.rekordbox import parse_xml
 from djsupport.report import (
-    PlaylistReport,
-    SyncReport,
     print_report,
     save_report,
     save_review_csv,
 )
-from djsupport.service import ProgressEvent, match_and_sync_playlist
-from djsupport.spotify import (
-    RateLimitError,
-    get_client,
-    get_user_playlists,
+from djsupport.spotify import RateLimitError, get_client
+from djsupport.transfer import (
+    AccountPublishingGuards,
+    default_matching_knowledge_path,
+    default_publication_manifest_path,
 )
+
+
+DEFAULT_MATCHING_KNOWLEDGE_PATH = str(default_matching_knowledge_path())
+DEFAULT_PUBLICATION_MANIFEST_PATH = str(default_publication_manifest_path())
 
 
 @click.group()
 def cli():
-    """DJ Support - Sync Rekordbox playlists to Spotify."""
+    """DJ Support - Transfer DJ selections to Spotify."""
     load_dotenv()
 
 
@@ -63,51 +57,6 @@ def _resolve_xml_path(explicit_xml_path: str | None) -> str:
             "Run `djsupport library set /path/to/library.xml` to update it."
         )
     return str(p)
-
-
-def _cli_match_and_sync(
-    tracks: list[Track],
-    playlist_name: str,
-    playlist_path: str,
-    *,
-    sp: spotipy.Spotify,
-    cache: MatchCache | None,
-    state_mgr: PlaylistStateManager | None,
-    existing_playlists: dict[str, str] | None,
-    threshold: int,
-    dry_run: bool,
-    incremental: bool,
-    prefix: str | None,
-    retry_days: int = 7,
-    retry: bool = False,
-    source_type: str = "rekordbox",
-) -> PlaylistReport:
-    """CLI wrapper around service.match_and_sync_playlist with a Click progress bar."""
-    # Set up a Click progress bar driven by service callbacks
-    bar_ctx = click.progressbar(
-        length=len(tracks),
-        label=f"Matching: {playlist_name}",
-        show_eta=True,
-        show_percent=True,
-        show_pos=True,
-        item_show_func=lambda s: s[:50] if s else "",
-    )
-
-    with bar_ctx as bar:
-        def _on_progress(event: ProgressEvent) -> None:
-            if event.phase == "matching":
-                bar.update(1, event.detail)
-
-        return match_and_sync_playlist(
-            tracks, playlist_name, playlist_path,
-            sp=sp, cache=cache, state_mgr=state_mgr,
-            existing_playlists=existing_playlists,
-            threshold=threshold, dry_run=dry_run,
-            incremental=incremental, prefix=prefix,
-            retry_days=retry_days, retry=retry,
-            source_type=source_type,
-            on_progress=_on_progress,
-        )
 
 
 @cli.group()
@@ -215,144 +164,119 @@ def restore_local_data(
 
 @cli.command()
 @click.argument("xml_path", required=False, type=click.Path(exists=True, dir_okay=False))
-@click.option("--playlist", "-p", help="Sync only this playlist (by name).")
+@click.option(
+    "--playlist", "-p", multiple=True,
+    help="Select a playlist by exact name or path; repeat for a Batch.",
+)
+@click.option(
+    "--whole-library", is_flag=True,
+    help="Explicitly select every Rekordbox playlist as one Batch.",
+)
 @click.option("--dry-run", is_flag=True, help="Preview matches without creating playlists.")
 @click.option("--threshold", "-t", default=80, show_default=True, help="Minimum match confidence (0-100).")
-@click.option("--all", "combine_all", is_flag=True, help="Combine all tracks into a single playlist instead of per-folder.")
-@click.option("--all-name", default="Rekordbox All", show_default=True, help="Name for the combined playlist (used with --all).")
 @click.option("--report", "report_path", type=click.Path(), default=None, help="Save detailed Markdown report to this path.")
-@click.option("--no-cache", is_flag=True, help="Bypass cache; search Spotify for every track.")
+@click.option("--no-cache", is_flag=True, help="Bypass retained matching knowledge (compatible flag).")
 @click.option("--retry", is_flag=True, help="Force retry all previously failed matches.")
-@click.option("--retry-days", default=7, show_default=True, help="Auto-retry failures older than N days.")
-@click.option("--cache-path", default=".djsupport_cache.json", show_default=True, help="Path to cache file.")
-@click.option("--incremental/--no-incremental", default=True, show_default=True, help="Use incremental playlist updates.")
+@click.option("--retry-days", default=7, show_default=True, help="Accepted for compatibility; unmatched tracks retry only with --retry.")
+@click.option("--cache-path", default=DEFAULT_MATCHING_KNOWLEDGE_PATH, show_default=True, help="Path to matching knowledge (compatible flag).")
 @click.option("--prefix", default="djsupport", show_default=True, help="Prefix for Spotify playlist names.")
 @click.option("--no-prefix", is_flag=True, help="Disable playlist name prefix.")
-@click.option("--state-path", default=".djsupport_playlists.json", show_default=True, help="Path to playlist state file.")
+@click.option("--state-path", default=DEFAULT_PUBLICATION_MANIFEST_PATH, show_default=True, help="Path to durable publication manifests (compatible flag).")
 def sync(
     xml_path: str | None,
-    playlist: str | None,
+    playlist: tuple[str, ...],
+    whole_library: bool,
     dry_run: bool,
     threshold: int,
-    combine_all: bool,
-    all_name: str,
     report_path: str | None,
     no_cache: bool,
     retry: bool,
     retry_days: int,
     cache_path: str,
-    incremental: bool,
     prefix: str,
     no_prefix: bool,
     state_path: str,
 ):
-    """Sync Rekordbox playlists to Spotify.
+    """Transfer explicitly selected Rekordbox playlists to Spotify.
 
     XML_PATH is the path to your Rekordbox XML library export (optional if configured via `library set`).
     """
     xml_path = _resolve_xml_path(xml_path)
-    click.echo(f"Parsing {xml_path}...")
-    tracks, playlists = parse_xml(xml_path)
-    click.echo(f"Found {len(tracks)} tracks and {len(playlists)} playlists.")
+    if not playlist and not whole_library:
+        raise click.UsageError(
+            "Select at least one playlist with --playlist or opt into "
+            "--whole-library."
+        )
+    if playlist and whole_library:
+        raise click.UsageError(
+            "Use explicit --playlist selections or --whole-library, not both."
+        )
 
-    # Filter to a specific playlist if requested
-    if playlist:
-        playlists = [p for p in playlists if p.name == playlist]
-        if not playlists:
-            click.echo(f"Playlist '{playlist}' not found.", err=True)
-            sys.exit(1)
-
-    # Combine all tracks into a single playlist, sorted by date added
-    if combine_all:
-        seen: set[str] = set()
-        all_track_ids: list[str] = []
-        for pl in playlists:
-            for tid in pl.track_ids:
-                if tid not in seen:
-                    seen.add(tid)
-                    all_track_ids.append(tid)
-        all_track_ids.sort(key=lambda tid: tracks[tid].date_added if tid in tracks else "")
-        from djsupport.rekordbox import Playlist as RBPlaylist
-        playlists = [RBPlaylist(name=all_name, path=all_name, track_ids=all_track_ids)]
-        click.echo(f"Combined {len(all_track_ids)} unique tracks into '{all_name}' (sorted by date added).")
-
-    # Initialize cache
-    cache = None
-    if not no_cache:
-        from djsupport.cache import MatchCache
-        cache = MatchCache(cache_path)
-        cache.load()
-        cached_count = len(cache.entries)
-        if cached_count:
-            click.echo(f"Loaded {cached_count} cached matches from {cache_path}")
-
-    # Resolve prefix
-    actual_prefix = None if no_prefix else prefix
-
-    # Initialize playlist state manager
-    from djsupport.state import PlaylistStateManager
-    state_mgr = PlaylistStateManager(state_path)
-    state_mgr.load()
-
-    if not dry_run:
-        sp = get_client()
-        existing = get_user_playlists(sp)
-    else:
-        sp = get_client()
-        existing = None
-
-    report = SyncReport(
-        timestamp=datetime.now(),
-        threshold=threshold,
-        dry_run=dry_run,
-        cache_enabled=cache is not None,
+    from djsupport.cache import MatchCache
+    from djsupport.transfer import (
+        BatchPlanRequest,
+        EphemeralMatchingKnowledge,
+        FilePublicationStorage,
+        FileTransferStorage,
+        MatchCacheKnowledge,
+        RekordboxPlaylistSource,
+        SpotifyMatcher,
+        Transfer,
     )
 
-    for pl in playlists:
-        # Resolve track IDs to Track objects
-        pl_tracks = [tracks[tid] for tid in pl.track_ids if tid in tracks]
-
-        try:
-            pl_report = _cli_match_and_sync(
-                pl_tracks,
-                pl.name,
-                pl.path,
-                sp=sp,
-                cache=cache,
-                state_mgr=state_mgr,
-                existing_playlists=existing,
-                threshold=threshold,
-                dry_run=dry_run,
-                incremental=incremental,
-                prefix=actual_prefix,
-                retry_days=retry_days,
-                retry=retry,
-            )
-        except RateLimitError as e:
-            click.echo(f"\n{e}", err=True)
-            if cache is not None:
-                cache.save()
-                click.echo(f"Cache saved to {cache_path} ({len(cache.entries)} entries).", err=True)
-            print_report(report)
-            if report_path:
-                save_report(report, report_path)
-            sys.exit(1)
-
-        report.playlists.append(pl_report)
-
-    # Save cache (even in dry-run — API lookups are still worth caching)
+    cache = None if no_cache else MatchCache(cache_path)
     if cache is not None:
-        cache.save()
-
-    # Save playlist state (skip in dry-run)
-    if not dry_run:
-        state_mgr.save()
+        cache.load()
+    transfer = Transfer(
+        source=RekordboxPlaylistSource(xml_path),
+        spotify=SpotifyMatcher(get_client()),
+        publishing_guards=AccountPublishingGuards(),
+        matching_knowledge=(
+            EphemeralMatchingKnowledge() if cache is None
+            else MatchCacheKnowledge(cache)
+        ),
+        publication_storage=(
+            None if dry_run else FilePublicationStorage(state_path)
+        ),
+        transfer_storage=FileTransferStorage(
+            str(Path(state_path).with_suffix(".transfers.json"))
+        ),
+    )
+    request = BatchPlanRequest(
+        playlist_references=playlist,
+        whole_library=whole_library,
+        threshold=threshold,
+        preview=dry_run,
+        retry=retry,
+        retry_days=retry_days,
+        playlist_prefix=None if no_prefix else prefix,
+    )
+    plan = transfer.plan_batch(request)
+    click.echo(
+        f"Transfer plan: {plan.total_tracks} tracks; "
+        f"{plan.approved_match_hits} Approved Match hits; "
+        f"{plan.cache_hits} retained proposal hits; "
+        f"{plan.expected_uncached_lookups} expected Spotify lookups."
+    )
+    if plan.confirmation_required:
+        if not click.confirm("This Batch may be expensive. Continue?"):
+            raise click.Abort()
+        plan = transfer.plan_batch(
+            BatchPlanRequest(**{**request.__dict__, "confirm_expensive": True})
+        )
+    try:
+        report = transfer.execute_batch(plan)
+    except RateLimitError as exc:
+        raise click.ClickException(str(exc)) from exc
 
     print_report(report)
 
     if report_path:
         save_report(report, report_path)
+        review_path = str(Path(report_path).with_suffix(".csv"))
+        save_review_csv(report, review_path)
         click.echo(f"\nDetailed report saved to {report_path}")
+        click.echo(f"Editable review CSV saved to {review_path}")
 
 
 @cli.command("list")
@@ -365,15 +289,8 @@ def list_playlists(xml_path: str | None):
         click.echo(f"  {pl.path} ({len(pl.track_ids)} tracks)")
 
 
-from djsupport.transfer import (
-    AccountPublishingGuards,
-    default_matching_knowledge_path,
-    default_publication_manifest_path,
-)
-
-
-DEFAULT_BEATPORT_CACHE_PATH = str(default_matching_knowledge_path())
-DEFAULT_BEATPORT_STATE_PATH = str(default_publication_manifest_path())
+DEFAULT_BEATPORT_CACHE_PATH = DEFAULT_MATCHING_KNOWLEDGE_PATH
+DEFAULT_BEATPORT_STATE_PATH = DEFAULT_PUBLICATION_MANIFEST_PATH
 
 
 @cli.command()
@@ -438,7 +355,7 @@ def approve(
 @click.option("--threshold", "-t", default=80, show_default=True, help="Minimum match confidence (0-100).")
 @click.option("--no-cache", is_flag=True, help="Bypass match cache.")
 @click.option("--retry", is_flag=True, help="Force retry all previously failed matches.")
-@click.option("--retry-days", default=7, show_default=True, help="Auto-retry failures older than N days.")
+@click.option("--retry-days", default=7, show_default=True, help="Accepted for compatibility; unmatched tracks retry only with --retry.")
 @click.option("--cache-path", default=DEFAULT_BEATPORT_CACHE_PATH, show_default=True, help="Path to Beatport match cache.")
 @click.option(
     "--state-path", default=DEFAULT_BEATPORT_STATE_PATH, show_default=True,
@@ -570,7 +487,7 @@ DEFAULT_LABEL_STATE_PATH = DEFAULT_BEATPORT_STATE_PATH
 @click.option("--threshold", "-t", default=80, show_default=True, help="Minimum match confidence (0-100).")
 @click.option("--no-cache", is_flag=True, help="Bypass match cache.")
 @click.option("--retry", is_flag=True, help="Force retry all previously failed matches.")
-@click.option("--retry-days", default=7, show_default=True, help="Auto-retry failures older than N days.")
+@click.option("--retry-days", default=7, show_default=True, help="Accepted for compatibility; unmatched tracks retry only with --retry.")
 @click.option("--cache-path", default=DEFAULT_LABEL_CACHE_PATH, show_default=True, help="Path to label match cache.")
 @click.option("--state-path", default=DEFAULT_LABEL_STATE_PATH, show_default=True, help="Path to label playlist state.")
 @click.option("--report", "report_path", type=click.Path(), default=None, help="Save Markdown report.")
