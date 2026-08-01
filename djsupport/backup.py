@@ -20,8 +20,9 @@ SUPPORTED_SCHEMAS = {
     "matching-knowledge.json": (1,),
     "transfers.json": (1,),
     "publication-manifests.transfers.json": (1,),
-    "publication-manifests.json": (1, 2, 3),
+    "publication-manifests.json": (1, 2, 3, 4),
     "playlist-state.json": (1, 2),
+    "legacy-migration.json": (1,),
 }
 DATA_FILES = tuple(SUPPORTED_SCHEMAS)
 SECRET_KEYS = {
@@ -312,6 +313,33 @@ class LocalDataBackup:
             for item in incoming.get("approvals", incoming.get("reviews", [])):
                 if item not in combined["approvals"]:
                     combined["approvals"].append(item)
+        elif path == "legacy-migration.json":
+            for field in ("relink_candidates", "historical_snapshots"):
+                combined.setdefault(field, [])
+                for item in incoming.get(field, []):
+                    identity = (
+                        item.get("legacy_key"), item.get("source_label"),
+                        item.get("spotify_playlist_id"),
+                    )
+                    existing = next((
+                        value for value in combined[field]
+                        if (
+                            value.get("legacy_key"), value.get("source_label"),
+                            value.get("spotify_playlist_id"),
+                        ) == identity
+                    ), None)
+                    if existing is None:
+                        combined[field].append(item)
+                        changes.append(f"add legacy migration record: {field}")
+                    elif existing != item:
+                        safe_identity = hashlib.sha256(
+                            repr(identity).encode()
+                        ).hexdigest()[:12]
+                        self._resolve_conflict(
+                            combined[field], combined[field].index(existing), item,
+                            "migration", path, conflicts, resolutions,
+                            label=f"{field}:{safe_identity}",
+                        )
         return combined
 
     @staticmethod

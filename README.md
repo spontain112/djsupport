@@ -87,6 +87,27 @@ If Approval or playlist-state truth conflicts, restore stops without mutation
 and prints the conflict identifier. Resolve it explicitly with
 `--resolve 'CONFLICT_ID=current'` or `--resolve 'CONFLICT_ID=archive'`.
 
+### Upgrade from 0.3.0
+
+Migration is explicit and preview-first. Select the single working directory
+that contains your old 0.3.0 files, review the aggregate-only report, and then
+apply the same migration:
+
+```bash
+djsupport migrate-0-3 /path/to/old-working-directory
+djsupport migrate-0-3 /path/to/old-working-directory --apply
+```
+
+Apply first creates and verifies a current-format backup. Legacy cache entries
+remain non-authoritative retained proposals; current matching knowledge wins
+conflicts. Rekordbox relationships require an explicit future relink because
+0.3.0 did not retain safe Spotify account ownership. Beatport relationships are
+kept only as unmanaged historical Snapshots. No Spotify request is made, and
+the legacy directory is never changed or deleted. Repeating apply is safe.
+
+See [upgrade guidance](docs/upgrading.md) and
+[backup and restore details](docs/backup-and-restore.md).
+
 ### List playlists
 
 Preview what playlists are available in your Rekordbox export:
