@@ -21,6 +21,7 @@ from djsupport.report import PlaylistReport, SyncReport, save_report
 from djsupport.spotify import RateLimitError
 from djsupport.transfer import (
     AccountPublishingGuards,
+    BatchPlan,
     BatchPlanRequest,
     FilePublicationStorage,
     FileTransferStorage,
@@ -1346,6 +1347,34 @@ class TestRekordboxMirror:
 
 
 class TestRekordboxBatchPlanning:
+    def test_preview_plan_executes_without_publication_state(self, tmp_path):
+        spotify = StatefulSpotify({
+            ("Solomun", "Vultora (Original Mix)"): _match(
+                "spotify:track:vultora", "Vultora (Original Mix)", "Solomun",
+            ),
+            ("Eagles & Butterflies", "Sapphire (Joris Voorn Remix)"): _match(
+                "spotify:track:sapphire", "Sapphire (Joris Voorn Remix)",
+                "Eagles & Butterflies",
+            ),
+        })
+        storage = InMemoryStorage()
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=RekordboxPlaylistSource(REKORDBOX_FIXTURE), spotify=spotify,
+            matching_knowledge=storage, publication_storage=storage,
+            transfer_storage=FileTransferStorage(tmp_path / "transfers.json"),
+        )
+
+        plan = transfer.plan_batch(BatchPlanRequest(
+            playlist_references=("My Playlists/Peak Time",), preview=True,
+        ))
+        report = transfer.execute_batch(plan)
+
+        assert report.dry_run is True
+        assert report.playlists[0].action == "preview"
+        assert storage.publications == []
+        assert spotify.playlists == {"existing": ["spotify:track:untouched"]}
+
     def test_explicit_playlists_are_planned_without_spotify_or_state_mutation(self):
         spotify = StatefulSpotify()
         knowledge = InMemoryStorage()
@@ -3040,3 +3069,58 @@ class TestBeatportCliTransfer:
 
         assert result.exit_code == 0, result.output
         approve.assert_called_once_with("snapshot-1", corrections=str(review_csv))
+
+
+class TestRekordboxCliTransfer:
+    @patch("djsupport.transfer.Transfer.execute_batch")
+    @patch("djsupport.transfer.Transfer.plan_batch")
+    @patch("djsupport.cli.get_client", return_value=MagicMock())
+    def test_cli_selected_playlist_enters_transfer_batch(
+        self, mock_client, plan_batch, execute_batch, tmp_path,
+    ):
+        plan_batch.return_value = BatchPlan((), threshold=87)
+        execute_batch.return_value = SyncReport(
+            timestamp=datetime.now(), threshold=87, dry_run=False,
+            playlists=[], source_label="Rekordbox", status="completed",
+        )
+
+        result = CliRunner().invoke(cli, [
+            "sync", str(REKORDBOX_FIXTURE),
+            "--playlist", "My Playlists/Peak Time", "--threshold", "87",
+            "--state-path", str(tmp_path / "publications.json"),
+            "--cache-path", str(tmp_path / "knowledge.json"),
+        ])
+
+        assert result.exit_code == 0, result.output
+        request = plan_batch.call_args.args[0]
+        assert request.playlist_references == ("My Playlists/Peak Time",)
+        assert request.whole_library is False
+        assert request.threshold == 87
+        execute_batch.assert_called_once_with(plan_batch.return_value)
+
+    @patch("djsupport.transfer.Transfer.execute_batch")
+    @patch("djsupport.transfer.Transfer.plan_batch")
+    @patch("djsupport.cli.get_client", return_value=MagicMock())
+    def test_cli_preview_is_owned_by_transfer_batch(
+        self, mock_client, plan_batch, execute_batch, tmp_path,
+    ):
+        plan_batch.return_value = BatchPlan((), preview=True)
+        execute_batch.return_value = SyncReport(
+            timestamp=datetime.now(), threshold=80, dry_run=True,
+            playlists=[], source_label="Rekordbox", status="completed",
+        )
+
+        result = CliRunner().invoke(cli, [
+            "sync", str(REKORDBOX_FIXTURE), "--playlist", "Peak Time",
+            "--dry-run", "--state-path", str(tmp_path / "publications.json"),
+            "--cache-path", str(tmp_path / "knowledge.json"),
+        ])
+
+        assert result.exit_code == 0, result.output
+        assert plan_batch.call_args.args[0].preview is True
+
+    def test_cli_requires_explicit_rekordbox_selection(self):
+        result = CliRunner().invoke(cli, ["sync", str(REKORDBOX_FIXTURE)])
+
+        assert result.exit_code != 0
+        assert "select at least one playlist" in result.output.lower()

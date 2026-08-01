@@ -6,7 +6,7 @@
 
 ## Project overview
 
-djsupport syncs Rekordbox playlists, Beatport DJ charts, and Beatport record labels to Spotify. It parses a Rekordbox XML export, scrapes a Beatport chart or label page, fuzzy-matches tracks against Spotify's catalog, and creates/updates Spotify playlists.
+djsupport Transfers Rekordbox playlists, Beatport DJ charts, and Beatport record labels to Spotify as Mirrors or Snapshots.
 
 ## Tech stack
 
@@ -24,8 +24,7 @@ djsupport syncs Rekordbox playlists, Beatport DJ charts, and Beatport record lab
 ```
 djsupport/
   cli.py        # Click CLI entry point
-  web.py        # FastAPI web backend (OAuth, sync endpoints, SSE progress)
-  service.py    # Framework-agnostic sync orchestration (shared by CLI + web)
+  web.py        # Thin FastAPI adapter (OAuth, durable Transfer endpoints, SSE progress)
   rekordbox.py  # XML parser — Track and Playlist dataclasses
   beatport.py   # Beatport chart scraper — __NEXT_DATA__ extraction, curator name composition
   label.py      # Beatport label scraper — paginated track fetching + label search
@@ -33,8 +32,7 @@ djsupport/
   spotify.py    # Spotify client wrapper (spotipy + OAuth)
   config.py     # Local config (saved Rekordbox XML path)
   cache.py      # Persistent match cache with retry logic
-  state.py      # Playlist ID mapping for incremental sync (source-agnostic)
-  report.py     # Post-sync terminal + Markdown reports
+  report.py     # Transfer outcome terminal, Markdown, and Correction CSV reports
   transfer.py   # Durable Transfer/Batch orchestration, checkpoints, and publication
   backup.py     # Versioned local-data backup, preview, merge, and atomic restore
   static/       # Web frontend (index.html with Tailwind CSS)
@@ -50,23 +48,23 @@ docs/           # Plans, reports, and solution docs
 pip install -e ".[dev]"    # Install in dev mode with test deps
 pip install -e ".[dev,web]" # Install with test deps + web UI (FastAPI/uvicorn)
 djsupport list <xml>       # List playlists from Rekordbox XML
-djsupport sync <xml>       # Sync playlists to Spotify
+djsupport sync <xml> --playlist "My Playlist"  # Transfer one Rekordbox Mirror
+djsupport sync <xml> --whole-library            # Explicit whole-library Batch
 djsupport sync <xml> --dry-run  # Preview without modifying Spotify
 djsupport library set <xml>     # Save default Rekordbox XML path
 djsupport library show          # Show configured XML path
-djsupport beatport <url>        # Import Beatport chart to Spotify
-djsupport label <url-or-name>  # Import Beatport label to Spotify
+djsupport beatport <url>       # Create a Beatport Snapshot
+djsupport label <url-or-name> # Create a Beatport label Snapshot
 djsupport web                   # Start web UI at localhost:8000
 djsupport web --port 3000       # Custom port
 djsupport backup                # Create a timestamped local-data archive
 djsupport restore <archive>     # Validate and preview an archive
 djsupport restore <archive> --apply  # Apply a conflict-free restore
 
-# Sync flags
-djsupport sync --playlist "My Playlist"  # Sync a single playlist
+# Rekordbox Transfer flags
+djsupport sync --playlist "My Playlist"  # Select a playlist (repeat for a Batch)
+djsupport sync --whole-library            # Explicitly select the whole library
 djsupport sync --threshold 90            # Minimum match confidence (0-100, default 80)
-djsupport sync --all                     # Combine all tracks into one playlist
-djsupport sync --all-name "My Tracks"    # Custom name for combined playlist
 djsupport sync --report report.md        # Save Markdown report
 djsupport sync --no-cache                # Bypass match cache
 djsupport sync --retry                   # Retry previously failed matches
@@ -74,7 +72,6 @@ djsupport sync --retry-days 3            # Auto-retry failures older than N days
 djsupport sync --cache-path my.json      # Custom cache file location
 djsupport sync --prefix "dj"             # Prefix for Spotify playlist names
 djsupport sync --no-prefix               # Disable playlist name prefix
-djsupport sync --incremental             # Incremental playlist updates (default)
 djsupport sync --state-path state.json   # Custom playlist state file location
 
 # Beatport flags
@@ -96,7 +93,7 @@ djsupport beatport <url> --resume <transfer-id>      # Resume a paused Transfer
 djsupport beatport <url> --abandon <transfer-id>     # Explicitly abandon a Transfer
 
 # Label flags
-djsupport label <url>                                # Import by Beatport label URL
+djsupport label <url>                                # Snapshot by Beatport label URL
 djsupport label "Drumcode"                           # Search Beatport by label name
 djsupport label <url-or-name> --dry-run              # Preview matches
 djsupport label <url-or-name> --threshold 90         # Minimum match confidence

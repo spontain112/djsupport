@@ -383,7 +383,7 @@
     <!-- ===== INPUT STATE ===== -->
     <div id="input-section" class="container container--center">
         <div class="logo"><img src="/static/logo.png" alt="djsupport logo">DJSUPPORT</div>
-        <div class="subtitle">SYNC BEATPORT PLAYLISTS TO SPOTIFY</div>
+        <div class="subtitle">TRANSFER BEATPORT SELECTIONS TO SPOTIFY</div>
         <div id="auth-status" class="status-row"></div>
 
         <div class="field" style="text-align:left;">
@@ -398,7 +398,7 @@
         </div>
         <div class="btn-wrap">
             <button id="sync-btn" onclick="startSync()" disabled class="btn btn--disabled">
-                SYNC TO SPOTIFY
+                CREATE SNAPSHOT
             </button>
         </div>
     </div>
@@ -406,7 +406,7 @@
     <!-- ===== PROGRESS STATE ===== -->
     <div id="progress-section" class="container container--center hidden fade-in">
         <div class="logo logo--accent"><img src="/static/logo.png" alt="djsupport logo">DJSUPPORT</div>
-        <div class="subtitle subtitle--center">SYNC BEATPORT PLAYLISTS TO SPOTIFY</div>
+        <div class="subtitle subtitle--center">TRANSFER BEATPORT SELECTIONS TO SPOTIFY</div>
         <div class="status-row status-row--center">
             <span class="status-dot"></span>
             <span class="status-text" id="progress-auth-status">CONNECTED TO SPOTIFY</span>
@@ -431,7 +431,7 @@
     <!-- ===== RESULTS STATE ===== -->
     <div id="results-section" class="container container--center hidden fade-in">
         <div class="logo logo--accent"><img src="/static/logo.png" alt="djsupport logo">DJSUPPORT</div>
-        <div class="subtitle subtitle--center">SYNC BEATPORT PLAYLISTS TO SPOTIFY</div>
+        <div class="subtitle subtitle--center">TRANSFER BEATPORT SELECTIONS TO SPOTIFY</div>
         <div class="status-row status-row--center">
             <span class="status-dot"></span>
             <span class="status-text">CONNECTED TO SPOTIFY</span>
@@ -462,7 +462,7 @@
             </div>
 
             <div style="text-align:center;">
-                <button onclick="resetUI()" class="btn btn--ghost">SYNC ANOTHER</button>
+                <button onclick="resetUI()" class="btn btn--ghost">TRANSFER ANOTHER</button>
             </div>
         </div>
     </div>
@@ -470,19 +470,19 @@
     <!-- ===== ERROR STATE ===== -->
     <div id="error-section" class="container container--left hidden fade-in">
         <div class="logo"><img src="/static/logo.png" alt="djsupport logo">DJSUPPORT</div>
-        <div class="subtitle">SYNC BEATPORT PLAYLISTS TO SPOTIFY</div>
+        <div class="subtitle">TRANSFER BEATPORT SELECTIONS TO SPOTIFY</div>
         <div class="status-row">
             <span class="status-dot"></span>
             <span class="status-text">SPOTIFY CONNECTED</span>
         </div>
 
         <div class="error-block">
-            <div class="error-title">SYNC FAILED</div>
+            <div class="error-title">TRANSFER PAUSED</div>
             <p id="error-message" class="error-desc"></p>
             <p id="error-url" class="error-url"></p>
         </div>
         <div class="btn-wrap" style="margin-top:24px;">
-            <button onclick="resetUI()" class="btn btn--accent">RETRY SYNC</button>
+            <button onclick="resetUI()" class="btn btn--accent">RETRY TRANSFER</button>
         </div>
     </div>
 
@@ -591,7 +591,7 @@
 
                 if (!res.ok) {
                     const err = await res.json();
-                    throw new Error(err.detail || 'Failed to start sync');
+                    throw new Error(err.detail || 'Failed to start Transfer');
                 }
 
                 const data = await res.json();
@@ -602,15 +602,15 @@
             }
         }
 
-        function listenProgress(jobId) {
-            const evtSource = new EventSource(`/sync/${jobId}/progress`);
+        function listenProgress(transferId) {
+            const evtSource = new EventSource(`/sync/${transferId}/progress`);
 
             evtSource.onmessage = (event) => {
                 const data = JSON.parse(event.data);
 
                 if (data.phase === 'complete') {
                     evtSource.close();
-                    fetchResult(jobId);
+                    fetchResult(transferId);
                     return;
                 }
 
@@ -624,7 +624,7 @@
                 const phaseLabel =
                     data.phase === 'fetching' ? 'FETCHING TRACKS' :
                     data.phase === 'matching' ? 'MATCHING TRACKS' :
-                    data.phase === 'syncing' ? 'UPDATING PLAYLIST' : data.phase.toUpperCase();
+                    data.phase === 'syncing' ? 'PUBLISHING PLAYLIST' : data.phase.toUpperCase();
                 document.getElementById('progress-phase').textContent = phaseLabel;
 
                 if (data.total > 0) {
@@ -657,9 +657,9 @@
                 recentMatches.map(t => `<p class="recent-track">\u2713 ${esc(t)}</p>`).join('');
         }
 
-        async function fetchResult(jobId) {
+        async function fetchResult(transferId) {
             try {
-                const res = await fetch(`/sync/${jobId}/result`);
+                const res = await fetch(`/sync/${transferId}/result`);
                 const data = await res.json();
 
                 if (data.error) {

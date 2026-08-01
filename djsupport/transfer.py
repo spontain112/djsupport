@@ -112,6 +112,10 @@ class BatchPlanRequest:
     whole_library: bool = False
     threshold: int = 80
     confirm_expensive: bool = False
+    preview: bool = False
+    retry: bool = False
+    retry_days: int = 7
+    playlist_prefix: str | None = "djsupport"
 
 
 @dataclass(frozen=True)
@@ -129,6 +133,10 @@ class BatchPlan:
     playlists: tuple[PlaylistPreflight, ...]
     confirmation_required: bool = False
     threshold: int = 80
+    preview: bool = False
+    retry: bool = False
+    retry_days: int = 7
+    playlist_prefix: str | None = "djsupport"
 
     @property
     def ready(self) -> bool:
@@ -222,6 +230,10 @@ class BatchState:
     threshold: int
     status: BatchStatus
     playlists: list[BatchPlaylistState]
+    preview: bool = False
+    retry: bool = False
+    retry_days: int = 7
+    playlist_prefix: str | None = "djsupport"
 
     @classmethod
     def from_dict(cls, value: dict) -> BatchState:
@@ -1247,13 +1259,17 @@ class Transfer:
                 and not request.confirm_expensive
             ),
             threshold=request.threshold,
+            preview=request.preview,
+            retry=request.retry,
+            retry_days=request.retry_days,
+            playlist_prefix=request.playlist_prefix,
         )
 
     def execute_batch(
         self, plan: BatchPlan, *, transfer_id: str | None = None,
     ) -> SyncReport:
         """Execute and durably checkpoint each planned Rekordbox playlist."""
-        if self._publication_storage is None:
+        if not plan.preview and self._publication_storage is None:
             raise ValueError("Publishing Transfers require publication storage")
         if not plan.ready:
             raise ValueError("An expensive Batch must be confirmed before execution")
@@ -1312,6 +1328,10 @@ class Transfer:
                 created_at=datetime.now().isoformat(),
                 threshold=plan.threshold,
                 status=BatchStatus.MATCHING,
+                preview=plan.preview,
+                retry=plan.retry,
+                retry_days=plan.retry_days,
+                playlist_prefix=plan.playlist_prefix,
                 playlists=[
                     BatchPlaylistState(
                         planned.name, planned.reference, f"{batch_id}:{index}",
@@ -1334,7 +1354,11 @@ class Transfer:
                 report = self._execute(TransferRequest(
                     source=item.reference,
                     mode=TransferMode.MIRROR,
+                    preview=batch.preview,
                     threshold=batch.threshold,
+                    retry=batch.retry,
+                    retry_days=batch.retry_days,
+                    playlist_prefix=batch.playlist_prefix,
                     transfer_id=item.transfer_id,
                 ))
             except Exception as exc:
@@ -1414,7 +1438,7 @@ class Transfer:
     ) -> SyncReport:
         return SyncReport(
             timestamp=datetime.fromisoformat(batch.created_at),
-            threshold=batch.threshold, dry_run=False,
+            threshold=batch.threshold, dry_run=batch.preview,
             playlists=playlists,
             cache_enabled=getattr(self._knowledge, "persistent", True),
             source_label=self._source.source_label,

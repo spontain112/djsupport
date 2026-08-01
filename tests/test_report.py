@@ -187,13 +187,13 @@ class TestSaveReport:
         path = str(tmp_path / "report.md")
         save_report(_report(dry_run=True), path)
         content = (tmp_path / "report.md").read_text()
-        assert "dry-run" in content
+        assert "Preview" in content
 
     def test_live_mode_label(self, tmp_path):
         path = str(tmp_path / "report.md")
         save_report(_report(dry_run=False), path)
         content = (tmp_path / "report.md").read_text()
-        assert "live" in content
+        assert "Transfer" in content
 
     def test_low_confidence_section_appears(self, tmp_path):
         path = str(tmp_path / "report.md")
