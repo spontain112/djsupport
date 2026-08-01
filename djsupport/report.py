@@ -23,6 +23,39 @@ class MatchedTrack:
     spotify_uri: str = ""
 
 
+@dataclass(frozen=True)
+class AlternativeCandidate:
+    rank: int
+    spotify_uri: str
+    spotify_name: str
+    spotify_artist: str
+    version: str
+    duration_ms: int
+    score: float
+    score_reasons: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class UnmatchedAlternatives:
+    source_track_id: str
+    source_name: str
+    candidates: tuple[AlternativeCandidate, ...]
+
+
+@dataclass(frozen=True)
+class UnavailableApprovedMatch:
+    source_track_id: str
+    source_name: str
+    spotify_uri: str
+
+
+@dataclass(frozen=True)
+class MatchCollision:
+    source_track_id: str
+    source_name: str
+    spotify_uri: str
+
+
 def _spotify_url(uri: str) -> str:
     if uri.startswith("spotify:track:"):
         return f"https://open.spotify.com/track/{uri.removeprefix('spotify:track:')}"
@@ -35,6 +68,9 @@ class PlaylistReport:
     path: str
     matched: list[MatchedTrack] = field(default_factory=list)
     unmatched: list[str] = field(default_factory=list)
+    alternatives: list[UnmatchedAlternatives] = field(default_factory=list)
+    unavailable_approved: list[UnavailableApprovedMatch] = field(default_factory=list)
+    match_collisions: list[MatchCollision] = field(default_factory=list)
     action: str = "dry-run"  # "created", "updated", "unchanged", or "dry-run"
     spotify_playlist_id: str | None = None
     publication_manifest: PublicationManifest | None = None
@@ -178,6 +214,39 @@ def save_report(report: SyncReport, path: str) -> None:
                 lines.append(
                     f"| {m.source_track_id} | {m.source_name} | {proposal}"
                     f" | {m.score:.1f} | {m.match_type} | {reasons} |"
+                )
+            lines.append("")
+
+        for uncertain in pl.alternatives:
+            lines.append(f"### Alternatives for {uncertain.source_name}")
+            lines.append("")
+            for candidate in uncertain.candidates:
+                reasons = "; ".join(candidate.score_reasons)
+                lines.append(
+                    f"{candidate.rank}. [{candidate.spotify_artist} - "
+                    f"{candidate.spotify_name}]({_spotify_url(candidate.spotify_uri)}) "
+                    f"— {candidate.version}, {candidate.duration_ms / 1000:.0f}s, "
+                    f"score {candidate.score:.1f} ({reasons})"
+                )
+            lines.append("")
+
+        if pl.unavailable_approved:
+            lines.append("### Unavailable Approved Matches")
+            lines.append("")
+            for unavailable in pl.unavailable_approved:
+                lines.append(
+                    f"- {unavailable.source_name}: retained authoritative mapping "
+                    f"to `{unavailable.spotify_uri}`; no replacement attempted"
+                )
+            lines.append("")
+
+        if pl.match_collisions:
+            lines.append("### Match Collisions (review required)")
+            lines.append("")
+            for collision in pl.match_collisions:
+                lines.append(
+                    f"- {collision.source_track_id}: {collision.source_name} → "
+                    f"`{collision.spotify_uri}`"
                 )
             lines.append("")
 

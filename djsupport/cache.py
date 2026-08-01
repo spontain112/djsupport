@@ -24,6 +24,7 @@ class CacheEntry:
     threshold: int
     match_type: str | None = None
     approval_status: str | None = None
+    source_duration: int = 0
 
 
 class MatchCache:
@@ -31,6 +32,7 @@ class MatchCache:
         self.path = Path(path)
         self.entries: dict[str, CacheEntry] = {}
         self.local_regressions: list[dict] = []
+        self.approval_conflicts: list[dict] = []
         self._dirty_count: int = 0
 
     def load(self) -> None:
@@ -46,6 +48,7 @@ class MatchCache:
         for key, entry in data.get("entries", {}).items():
             self.entries[key] = CacheEntry(**entry)
         self.local_regressions = data.get("local_regressions", [])
+        self.approval_conflicts = data.get("approval_conflicts", [])
 
     def save(self) -> None:
         """Write cache to disk."""
@@ -54,22 +57,44 @@ class MatchCache:
             "version": CACHE_VERSION,
             "entries": {k: asdict(v) for k, v in self.entries.items()},
             "local_regressions": self.local_regressions,
+            "approval_conflicts": self.approval_conflicts,
         }
         self.path.write_text(json.dumps(data, indent=2))
         self._dirty_count = 0
 
-    def cache_key(self, artist: str, title: str) -> str:
-        return f"{_normalize(artist)}||{_normalize(title)}"
+    def cache_key(self, artist: str, title: str, source_duration: int = 0) -> str:
+        identity = f"{_normalize(artist)}||{_normalize(title)}"
+        return f"{identity}||{source_duration}s" if source_duration > 0 else identity
 
-    def lookup(self, artist: str, title: str, threshold: int) -> CacheEntry | None:
+    def lookup(
+        self, artist: str, title: str, threshold: int, source_duration: int = 0,
+    ) -> CacheEntry | None:
         """Return cached entry if valid for this threshold, else None."""
-        key = self.cache_key(artist, title)
+        key = self.cache_key(artist, title, source_duration)
         entry = self.entries.get(key)
+        if entry is None and source_duration > 0:
+            entry = self.entries.get(self.cache_key(artist, title))
+        if source_duration == 0:
+            identity_prefix = f"{self.cache_key(artist, title)}||"
+            approved = [
+                candidate for candidate_key, candidate in self.entries.items()
+                if candidate_key.startswith(identity_prefix)
+                and candidate.approval_status == "approved"
+            ]
+            approved_uris = {candidate.spotify_uri for candidate in approved}
+            if len(approved_uris) == 1:
+                entry = approved[0]
         if entry is None:
             return None
         if entry.approval_status == "rejected":
             return None
         if entry.approval_status == "approved":
+            if (
+                entry.source_duration > 0
+                and source_duration > 0
+                and abs(entry.source_duration - source_duration) > 30
+            ):
+                return None
             return entry
         if entry.matched and entry.score is not None and entry.score >= threshold:
             return entry
@@ -109,10 +134,30 @@ class MatchCache:
 
     def record_approval(
         self, artist: str, title: str, status: str, result: dict,
-    ) -> None:
+        source_duration: int = 0,
+    ) -> dict | None:
         """Mark retained matching knowledge as explicitly approved or rejected."""
-        key = self.cache_key(artist, title)
+        key = self.cache_key(artist, title, source_duration)
+        if source_duration > 0:
+            self.entries.pop(self.cache_key(artist, title), None)
         entry = self.entries.get(key)
+        if (
+            status == "approved"
+            and entry is not None
+            and entry.approval_status == "approved"
+            and entry.spotify_uri != result["uri"]
+        ):
+            conflict = {
+                "source_artist": artist,
+                "source_title": title,
+                "source_duration": source_duration,
+                "approved_spotify_uri": entry.spotify_uri,
+                "proposed_spotify_uri": result["uri"],
+            }
+            if conflict not in self.approval_conflicts:
+                self.approval_conflicts.append(conflict)
+                self._dirty_count += 1
+            return conflict
         if entry is None or status == "approved":
             entry = CacheEntry(
                 spotify_uri=result["uri"],
@@ -123,10 +168,12 @@ class MatchCache:
                 timestamp=datetime.now().isoformat(),
                 threshold=0,
                 match_type=result.get("match_type"),
+                source_duration=source_duration,
             )
             self.entries[key] = entry
         entry.approval_status = status
         self._dirty_count += 1
+        return None
 
     def record_correction(self, correction: dict) -> None:
         """Retain user-derived matcher truth only in local application data."""

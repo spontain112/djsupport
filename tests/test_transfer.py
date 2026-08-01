@@ -235,6 +235,101 @@ def test_preview_with_zero_acceptable_matches_succeeds_with_zero_percent():
 
 class TestProtectedTransferBehavior:
 
+    def test_below_threshold_candidates_are_reported_but_not_published(self):
+        spotify = StatefulSpotify({
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+            ("New Artist", "New Track"): {
+                "alternatives": [
+                    {
+                        "uri": f"spotify:track:alternative-{rank}",
+                        "name": f"New Track Candidate {rank}",
+                        "artist": "New Artist",
+                        "version": "Extended Mix" if rank == 1 else "Radio Edit",
+                        "duration_ms": 360000 - rank * 1000,
+                        "score": 79.0 - rank,
+                        "score_reasons": [
+                            "title similarity 92",
+                            "artist similarity 88",
+                        ],
+                    }
+                    for rank in range(1, 5)
+                ],
+            },
+        })
+        storage = InMemoryStorage()
+
+        report = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=storage, publication_storage=storage,
+        ).execute(TransferRequest(source="fixture", threshold=80))
+
+        playlist = report.playlists[0]
+        assert playlist.action == "provisional snapshot created"
+        assert spotify.playlists[playlist.spotify_playlist_id]["tracks"] == [
+            "spotify:track:known",
+        ]
+        assert len(playlist.unmatched) == 1
+        assert [candidate.rank for candidate in playlist.alternatives[0].candidates] == [
+            1, 2, 3,
+        ]
+        assert playlist.alternatives[0].candidates[0].score_reasons == (
+            "title similarity 92", "artist similarity 88",
+        )
+
+    def test_match_collision_is_reported_and_not_counted_as_representation(self):
+        shared = _match("spotify:track:shared", "Shared", "Artist")
+        spotify = StatefulSpotify({
+            ("Known Artist", "Known Track"): shared,
+            ("New Artist", "New Track"): shared,
+        })
+        storage = InMemoryStorage()
+
+        report = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=storage, publication_storage=storage,
+        ).execute(TransferRequest(source="fixture"))
+
+        playlist = report.playlists[0]
+        assert report.total_matched == 0
+        assert report.total_unmatched == 2
+        assert [item.source_track_id for item in playlist.match_collisions] == [
+            "bp-1", "bp-2",
+        ]
+        assert spotify.playlists[playlist.spotify_playlist_id]["tracks"] == []
+
+    def test_repeated_occurrence_of_same_source_track_is_not_a_collision(self):
+        class RepeatedSource:
+            source_label = "Rekordbox"
+
+            def consume(self, reference):
+                track = Track(
+                    track_id="rb-1", artist="Artist", name="Track", album="",
+                    remixer="", label="", genre="", date_added="",
+                )
+                return SourceSelection("Repeated", reference, [track, track])
+
+        spotify = StatefulSpotify({
+            ("Artist", "Track"): _match(
+                "spotify:track:shared", "Track", "Artist",
+            ),
+        })
+        storage = InMemoryStorage()
+
+        report = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=RepeatedSource(), spotify=spotify,
+            matching_knowledge=storage, publication_storage=storage,
+        ).execute(TransferRequest(source="playlist"))
+
+        assert report.playlists[0].match_collisions == []
+        assert spotify.playlists[report.playlists[0].spotify_playlist_id]["tracks"] == [
+            "spotify:track:shared",
+        ]
+
     def test_previously_unmatched_tracks_retry_only_when_explicitly_requested(
         self, tmp_path,
     ):
@@ -281,7 +376,9 @@ class TestProtectedTransferBehavior:
                 self.attempts += 1
                 if self.attempts < 3:
                     raise requests.Timeout("Spotify timed out")
-                return _match("spotify:track:known", track.name, track.artist)
+                return _match(
+                    f"spotify:track:{track.track_id}", track.name, track.artist,
+                )
 
         spotify = TimeoutThenMatch()
         sleeps = []
@@ -330,7 +427,9 @@ class TestProtectedTransferBehavior:
                 if not self.rate_limited:
                     self.rate_limited = True
                     raise _spotify_error(429, retry_after=4)
-                return _match("spotify:track:match", track.name, track.artist)
+                return _match(
+                    f"spotify:track:{track.track_id}", track.name, track.artist,
+                )
 
         sleeps = []
         report = Transfer(
@@ -751,7 +850,7 @@ class TestSnapshotPublication:
         assert storage.checkpoints >= 1
 
 
-    def test_incomplete_matching_does_not_publish_snapshot(self):
+    def test_unmatched_tracks_are_omitted_from_provisional_snapshot(self):
         spotify = StatefulSpotify({
             ("Known Artist", "Known Track"): _match(
                 "spotify:track:known", "Known Track", "Known Artist",
@@ -765,9 +864,12 @@ class TestSnapshotPublication:
             matching_knowledge=storage, publication_storage=storage,
         ).execute(TransferRequest(source="fixture"))
 
-        assert report.playlists[0].action == "not published: incomplete matching"
-        assert spotify.playlists == {"existing": ["spotify:track:untouched"]}
-        assert storage.publications == []
+        playlist = report.playlists[0]
+        assert playlist.action == "provisional snapshot created"
+        assert spotify.playlists[playlist.spotify_playlist_id]["tracks"] == [
+            "spotify:track:known",
+        ]
+        assert len(storage.publications) == 1
 
     def test_empty_chart_does_not_publish_snapshot(self):
         class EmptySource:
@@ -1044,6 +1146,142 @@ class TestProvisionalPlaylistApproval:
             "spotify_name": "Corrected abcdefghijklmnopqrstuv",
             "spotify_artist": "Correction Artist",
         }]
+
+    def test_approved_match_is_reused_across_sources_with_specific_identity(
+        self, tmp_path,
+    ):
+        cache = MatchCache(str(tmp_path / "matching-knowledge.json"))
+        beatport_spotify = StatefulSpotify({
+            ("Shared Artist", "Shared Track (Extended Mix)"): _match(
+                "spotify:track:approved", "Shared Track (Extended Mix)",
+                "Shared Artist",
+            ),
+        })
+
+        class Source:
+            def __init__(self, label, track_id, duration=420):
+                self.source_label = label
+                self.track_id = track_id
+                self.duration = duration
+
+            def consume(self, reference):
+                return SourceSelection(reference, reference, [Track(
+                    track_id=self.track_id,
+                    artist="Shared Artist",
+                    name="Shared Track (Extended Mix)",
+                    album="", remixer="", label="", genre="", date_added="",
+                    duration=self.duration,
+                )])
+
+        publications = InMemoryStorage()
+        beatport = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=Source("Beatport", "bp-42"), spotify=beatport_spotify,
+            matching_knowledge=MatchCacheKnowledge(cache),
+            publication_storage=publications,
+        )
+        published = beatport.execute(TransferRequest(source="chart"))
+        beatport.approve(published.playlists[0].spotify_playlist_id)
+
+        rekordbox_spotify = StatefulSpotify()
+        reused = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=Source("Rekordbox", "rb-99"), spotify=rekordbox_spotify,
+            matching_knowledge=MatchCacheKnowledge(cache),
+        ).execute(TransferRequest(source="playlist", preview=True))
+
+        assert reused.total_matched == 1
+        assert reused.playlists[0].matched[0].spotify_uri == (
+            "spotify:track:approved"
+        )
+        assert rekordbox_spotify.searches == []
+
+        different_version_spotify = StatefulSpotify()
+        different_version = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=Source("Rekordbox", "rb-100", duration=210),
+            spotify=different_version_spotify,
+            matching_knowledge=MatchCacheKnowledge(cache),
+        ).execute(TransferRequest(source="playlist", preview=True))
+
+        assert different_version.total_matched == 0
+        assert different_version_spotify.searches == [
+            ("Shared Artist", "Shared Track (Extended Mix)", 80),
+        ]
+
+        duration_missing_spotify = StatefulSpotify()
+        duration_missing = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=Source("Beatport", "bp-101", duration=0),
+            spotify=duration_missing_spotify,
+            matching_knowledge=MatchCacheKnowledge(cache),
+        ).execute(TransferRequest(source="chart", preview=True))
+
+        assert duration_missing.total_matched == 1
+        assert duration_missing_spotify.searches == []
+
+    def test_conflicting_correction_does_not_overwrite_approved_truth(self, tmp_path):
+        transfer, spotify, publications, playlist_id = self.publish()
+        cache = MatchCache(str(tmp_path / "matching-knowledge.json"))
+        durable = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=MatchCacheKnowledge(cache),
+            publication_storage=publications,
+        )
+        durable.approve(playlist_id)
+        review_csv = tmp_path / "review.csv"
+        review_csv.write_text(
+            "source_track_id,spotify_url\n"
+            "bp-1,spotify:track:abcdefghijklmnopqrstuv\n"
+        )
+
+        conflict = durable.approve(playlist_id, corrections=review_csv)
+
+        assert conflict.status == ApprovalStatus.NEEDS_REVIEW
+        assert len(conflict.conflicts) == 1
+        assert conflict.conflicts[0].approved_spotify_uri == "spotify:track:known"
+        assert conflict.conflicts[0].proposed_spotify_uri == (
+            "spotify:track:abcdefghijklmnopqrstuv"
+        )
+        reloaded = MatchCache(str(tmp_path / "matching-knowledge.json"))
+        reloaded.load()
+        assert reloaded.lookup("Known Artist", "Known Track", 100).spotify_uri == (
+            "spotify:track:known"
+        )
+
+    def test_unavailable_approved_match_is_reported_without_replacement(self, tmp_path):
+        class UnavailableApprovedSpotify(StatefulSpotify):
+            def spotify_track(self, uri):
+                if uri == "spotify:track:approved":
+                    raise _spotify_error(404)
+                return super().spotify_track(uri)
+
+        cache = MatchCache(str(tmp_path / "matching-knowledge.json"))
+        cache.record_approval(
+            "Known Artist", "Known Track", "approved",
+            _match("spotify:track:approved", "Known Track", "Known Artist"),
+        )
+        cache.save()
+        spotify = UnavailableApprovedSpotify({
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:replacement", "Known Track", "Known Artist",
+            ),
+        })
+
+        report = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=MatchCacheKnowledge(cache),
+        ).execute(TransferRequest(source="fixture", preview=True))
+
+        assert [item.spotify_uri for item in report.playlists[0].unavailable_approved] == [
+            "spotify:track:approved",
+        ]
+        assert ("Known Artist", "Known Track", 80) not in spotify.searches
+        assert cache.lookup("Known Artist", "Known Track", 100).spotify_uri == (
+            "spotify:track:approved"
+        )
 
     def test_missing_correction_is_added_once_across_repeated_approval(self, tmp_path):
         transfer, spotify, _, playlist_id = self.publish()
