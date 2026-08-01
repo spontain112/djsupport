@@ -769,6 +769,7 @@ class Transfer:
         )
         manifest_items = {item.source_track_id: item for item in manifest.items}
         corrected: dict[str, PublicationItem] = {}
+        seen_source_references: set[str] = set()
         with Path(corrections).open(newline="") as csv_file:
             reader = csv.DictReader(csv_file)
             required = {"source_track_id", "spotify_url"}
@@ -790,20 +791,18 @@ class Transfer:
                         f"Correction row {row_number} source_track_id "
                         f"{source_track_id} is not a unique stable source reference"
                     )
-                if source_track_id in corrected:
+                if source_track_id in seen_source_references:
                     raise ValueError(
                         f"Correction row {row_number} repeats source_track_id "
                         f"{source_track_id}"
                     )
+                seen_source_references.add(source_track_id)
                 original = manifest_items[source_track_id]
-                if spotify_reference == original.spotify_uri or (
-                    original.spotify_uri.startswith("spotify:track:")
-                    and spotify_reference.split("?", 1)[0].endswith(
-                        f"/track/{original.spotify_uri.removeprefix('spotify:track:')}"
-                    )
-                ):
+                if spotify_reference == original.spotify_uri:
                     continue
                 spotify_uri = self._spotify_uri(spotify_reference, row_number)
+                if spotify_uri == original.spotify_uri:
+                    continue
                 spotify_track = self._retry_policy.run(
                     lambda uri=spotify_uri: self._spotify.spotify_track(uri)
                 )

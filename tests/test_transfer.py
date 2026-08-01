@@ -974,9 +974,14 @@ class TestProvisionalPlaylistApproval:
         [
             ([{"source_track_id": "missing", "spotify_url": "spotify:track:abcdefghijklmnopqrstuv"}], "unknown source_track_id"),
             ([{"source_track_id": "bp-1", "spotify_url": "https://example.com/track/abcdefghijklmnopqrstuv"}], "invalid Spotify track"),
+            ([{"source_track_id": "bp-1", "spotify_url": "https://example.com/track/known"}], "invalid Spotify track"),
             ([
                 {"source_track_id": "bp-1", "spotify_url": "spotify:track:abcdefghijklmnopqrstuv"},
                 {"source_track_id": "bp-1", "spotify_url": "spotify:track:zyxwvutsrqponmlkjihgfe"},
+            ], "repeats source_track_id"),
+            ([
+                {"source_track_id": "bp-1", "spotify_url": "spotify:track:known"},
+                {"source_track_id": "bp-1", "spotify_url": "spotify:track:abcdefghijklmnopqrstuv"},
             ], "repeats source_track_id"),
         ],
     )
