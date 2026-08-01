@@ -401,6 +401,19 @@ class TestProtectedTransferBehavior:
         review_csv.write_text(
             "source_track_id,spotify_url\n"
             "bp-1,spotify:track:abcdefghijklmnopqrstuv\n"
+        )
+        partial = transfer.approve(
+            playlist.spotify_playlist_id, corrections=review_csv,
+        )
+
+        assert partial.status == ApprovalStatus.NEEDS_REVIEW
+        assert [item.source_track_id for item in partial.approved] == ["bp-1"]
+        assert [item.source_track_id for item in partial.collisions] == ["bp-2"]
+        assert partial.rejected == ()
+
+        review_csv.write_text(
+            "source_track_id,spotify_url\n"
+            "bp-1,spotify:track:abcdefghijklmnopqrstuv\n"
             "bp-2,spotify:track:zyxwvutsrqponmlkjihgfe\n"
         )
         outcome = transfer.approve(

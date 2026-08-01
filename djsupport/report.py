@@ -389,25 +389,15 @@ def save_review_csv(report: SyncReport, path: str) -> None:
             "source_duration",
         ])
         for playlist in report.playlists:
-            if playlist.review_items:
-                for item in playlist.review_items:
-                    writer.writerow([
-                        item.source_track_id,
-                        item.source_name,
-                        _spotify_url(item.spotify_uri) if item.spotify_uri else "",
-                        (
-                            f"{item.spotify_artist} - {item.spotify_name}"
-                            if item.spotify_uri else ""
-                        ),
-                        f"{item.score:.1f}" if item.spotify_uri else "",
-                        item.match_type,
-                        item.source_artist,
-                        item.source_title,
-                        item.source_duration,
-                    ])
-                continue
-            if playlist.publication_manifest is not None:
-                for item in playlist.publication_manifest.items:
+            review_items = (
+                playlist.review_items
+                or (
+                    list(playlist.publication_manifest.items)
+                    if playlist.publication_manifest is not None else []
+                )
+            )
+            if review_items:
+                for item in review_items:
                     writer.writerow([
                         item.source_track_id,
                         item.source_name,

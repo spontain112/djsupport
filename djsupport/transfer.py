@@ -1548,6 +1548,15 @@ class Transfer:
                     corrected_items.get(item.source_track_id, item)
                     for item in manifest.items
                 )
+                original_proposal_counts = Counter(
+                    item.spotify_uri for item in manifest.items
+                    if item.spotify_uri
+                )
+                unresolved_collision_ids = {
+                    item.source_track_id for item in manifest.items
+                    if original_proposal_counts[item.spotify_uri] > 1
+                    and item.source_track_id not in corrected_items
+                }
                 proposed_counts = Counter(item.spotify_uri for item in reviewed_items)
                 collision_uris = {
                     uri for uri, count in proposed_counts.items() if count > 1
@@ -1556,7 +1565,10 @@ class Transfer:
                 for item in reviewed_items:
                     if not item.spotify_uri:
                         continue
-                    if item.spotify_uri in collision_uris:
+                    if (
+                        item.source_track_id in unresolved_collision_ids
+                        or item.spotify_uri in collision_uris
+                    ):
                         collisions.append(item)
                         continue
                     if remaining[item.spotify_uri] > 0:
