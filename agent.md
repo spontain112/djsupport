@@ -32,6 +32,7 @@ djsupport/
   spotify.py    # Spotify client wrapper (spotipy + OAuth)
   config.py     # Local config (saved Rekordbox XML path)
   cache.py      # Persistent match cache with retry logic
+  regression.py # Local regression loader for live accuracy checks
   report.py     # Transfer outcome terminal, Markdown, and Correction CSV reports
   transfer.py   # Durable Transfer/Batch orchestration, checkpoints, and publication
   backup.py     # Versioned local-data backup, preview, merge, and atomic restore

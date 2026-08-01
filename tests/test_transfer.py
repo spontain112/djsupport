@@ -17,6 +17,7 @@ from click.testing import CliRunner
 from djsupport.cli import cli
 from djsupport.cache import MatchCache
 from djsupport.rekordbox import Track
+from djsupport.regression import load_local_regressions
 from djsupport.report import PlaylistReport, SyncReport, save_report
 from djsupport.spotify import RateLimitError
 from djsupport.transfer import (
@@ -56,6 +57,7 @@ class FixtureBeatportSource:
             Track(
                 track_id=item["track_id"], artist=item["artist"], name=item["name"],
                 album="", remixer="", label="", genre="", date_added="",
+                duration=item.get("duration", 0),
             )
             for item in data["tracks"]
         ]
@@ -2576,10 +2578,12 @@ class TestProvisionalPlaylistApproval:
             "source_track_id": "bp-2",
             "source_artist": "New Artist",
             "source_title": "New Track",
+            "source_duration": 420,
             "spotify_uri": "spotify:track:abcdefghijklmnopqrstuv",
             "spotify_name": "Corrected abcdefghijklmnopqrstuv",
             "spotify_artist": "Correction Artist",
         }]
+        assert load_local_regressions(cache_path)[0]["duration"] == 420
 
     def test_approved_match_is_reused_across_sources_with_specific_identity(
         self, tmp_path,

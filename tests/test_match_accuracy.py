@@ -9,10 +9,7 @@ application storage and is never loaded from a repository fixture.
 """
 
 import argparse
-import json
 from pathlib import Path
-
-import pytest
 
 from dotenv import load_dotenv
 
@@ -21,86 +18,19 @@ load_dotenv()
 from djsupport.matcher import match_track
 from djsupport.rekordbox import Track
 from djsupport.spotify import get_client
-from djsupport.cache import MatchCache
+from djsupport.regression import load_local_regressions
 from djsupport.transfer import default_matching_knowledge_path
-
-
-def load_test_data(path: Path) -> list[dict]:
-    """Load user-approved regression cases from local matching knowledge."""
-    cache = MatchCache(str(path))
-    cache.load()
-    rows = []
-    required = ("source_artist", "source_title", "spotify_uri")
-    for row_number, regression in enumerate(cache.local_regressions, start=1):
-        if not all(regression.get(field) for field in required):
-            raise ValueError(
-                f"Invalid local regression row {row_number}: "
-                "source artist, source title, and Spotify URI are required"
-            )
-        rows.append({
-            "artist": regression["source_artist"],
-            "song": regression["source_title"],
-            "expected_uri": regression["spotify_uri"],
-            "duration": int(regression.get("source_duration", 0) or 0),
-        })
-    return rows
-
-
-def test_load_test_data_reads_only_local_regression_knowledge(tmp_path):
-    path = tmp_path / "matching-knowledge.json"
-    path.write_text(json.dumps({
-        "version": 1,
-        "entries": {
-            "synthetic artist||cached proposal": {
-                "spotify_uri": "spotify:track:0000000000000000000000",
-                "spotify_name": "Cached Proposal",
-                "spotify_artist": "Synthetic Artist",
-                "score": 90,
-                "matched": True,
-                "timestamp": "2026-01-01T00:00:00",
-                "threshold": 80,
-            },
-        },
-        "local_regressions": [{
-            "source_track_id": "synthetic-1",
-            "source_artist": "Synthetic Artist",
-            "source_title": "Synthetic Track",
-            "spotify_uri": "spotify:track:1111111111111111111111",
-        }],
-    }))
-
-    assert load_test_data(path) == [{
-        "artist": "Synthetic Artist",
-        "song": "Synthetic Track",
-        "expected_uri": "spotify:track:1111111111111111111111",
-        "duration": 0,
-    }]
-
-
-def test_load_test_data_rejects_non_local_or_invalid_regression_rows(tmp_path):
-    path = tmp_path / "matching-knowledge.json"
-    path.write_text(json.dumps({
-        "version": 1,
-        "entries": {},
-        "local_regressions": [{
-            "source_artist": "Incomplete",
-            "source_title": "Missing URI",
-        }],
-    }))
-
-    with pytest.raises(ValueError, match="local regression row 1"):
-        load_test_data(path)
 
 
 def run_accuracy_test(knowledge_path: Path | None = None):
     knowledge_path = knowledge_path or default_matching_knowledge_path()
-    test_data = load_test_data(knowledge_path)
-    if not test_data:
+    regression_cases = load_local_regressions(knowledge_path)
+    if not regression_cases:
         raise ValueError(
             f"No local regression knowledge found at {knowledge_path}. "
             "Approve a Correction before running live accuracy."
         )
-    print(f"Loaded {len(test_data)} test tracks\n")
+    print(f"Loaded {len(regression_cases)} regression tracks\n")
 
     sp = get_client()
 
@@ -109,7 +39,7 @@ def run_accuracy_test(knowledge_path: Path | None = None):
     missed = 0
     results = []
 
-    for row in test_data:
+    for row in regression_cases:
         duration = int(row.get("duration", 0) or 0)
         track = Track(
             track_id="test",
@@ -192,7 +122,7 @@ def run_accuracy_test(knowledge_path: Path | None = None):
             print(f"        Expected: {r['expected_uri']}")
 
     # Summary
-    total = len(test_data)
+    total = len(regression_cases)
     print()
     print("=" * 80)
     print(f"TOTAL: {total}  |  OK: {correct} ({correct/total*100:.0f}%)  |  WRONG: {wrong}  |  MISS: {missed}")
@@ -201,7 +131,7 @@ def run_accuracy_test(knowledge_path: Path | None = None):
     # Research: check duration_ms from Spotify for all expected tracks
     print("\n\nDURATION RESEARCH — Spotify duration_ms for expected tracks:")
     print("-" * 80)
-    track_ids = [row["expected_uri"].split(":")[-1] for row in test_data]
+    track_ids = [row["expected_uri"].split(":")[-1] for row in regression_cases]
     # Spotify API allows up to 50 tracks per call
     tracks_info = sp.tracks(track_ids)
     for i, item in enumerate(tracks_info["tracks"]):
@@ -209,9 +139,9 @@ def run_accuracy_test(knowledge_path: Path | None = None):
             duration_s = item["duration_ms"] / 1000
             minutes = int(duration_s // 60)
             seconds = int(duration_s % 60)
-            print(f"  {test_data[i]['artist']:<45} {minutes}:{seconds:02d}  ({item['duration_ms']}ms)")
+            print(f"  {regression_cases[i]['artist']:<45} {minutes}:{seconds:02d}  ({item['duration_ms']}ms)")
         else:
-            print(f"  {test_data[i]['artist']:<45} NOT FOUND")
+            print(f"  {regression_cases[i]['artist']:<45} NOT FOUND")
 
     return correct, wrong, missed
 
