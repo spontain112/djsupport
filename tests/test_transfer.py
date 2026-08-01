@@ -29,9 +29,11 @@ from djsupport.transfer import (
     SpotifyMatcher,
     SourceSelection,
     Transfer,
+    TransferMode,
     TransferRequest,
     ApprovalStatus,
     ApprovalOutcome,
+    BeatportLabelSource,
 )
 
 
@@ -166,6 +168,24 @@ class InMemoryStorage:
 
 FIXTURE = Path(__file__).parent / "fixtures" / "beatport_chart.json"
 TEST_PUBLISHING_GUARDS = AccountPublishingGuards()
+
+
+def test_beatport_label_source_preserves_fixture_order_and_deduplicates():
+    tracks = [
+        Track("label-1", "Artist", "Track", "", "", "Label", "", ""),
+        Track("label-2", "Artist", "Track", "Compilation", "", "Label", "", ""),
+        Track("label-3", "Other", "Newest", "", "", "Label", "", ""),
+    ]
+    source = BeatportLabelSource(
+        fetcher=lambda url: ("Fixture Label", tracks),
+        validator=lambda url: "https://www.beatport.com/label/fixture/21",
+    )
+
+    selection = source.consume("fixture")
+
+    assert selection.name == "Fixture Label"
+    assert selection.reference == "https://www.beatport.com/label/fixture/21"
+    assert [track.track_id for track in selection.tracks] == ["label-1", "label-3"]
 
 
 def _match(uri, name, artist):
@@ -513,6 +533,62 @@ class TestProtectedTransferBehavior:
 
 
 class TestSnapshotPublication:
+    def test_beatport_label_defaults_to_distinct_snapshots_after_approval(self):
+        class FixtureLabelSource(FixtureBeatportSource):
+            source_label = "Beatport label"
+
+        spotify = StatefulSpotify({
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+            ("New Artist", "New Track"): _match(
+                "spotify:track:new", "New Track", "New Artist",
+            ),
+        })
+        storage = InMemoryStorage()
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=FixtureLabelSource(FIXTURE), spotify=spotify,
+            matching_knowledge=storage, publication_storage=storage,
+        )
+
+        first = transfer.execute(TransferRequest(source="fixture-label"))
+        transfer.approve(first.playlists[0].spotify_playlist_id)
+        second = transfer.execute(TransferRequest(source="fixture-label"))
+
+        assert first.playlists[0].spotify_playlist_id != second.playlists[0].spotify_playlist_id
+        assert first.playlists[0].action == "provisional snapshot created"
+        assert second.playlists[0].action == "provisional snapshot created"
+        assert first.playlists[0].publication_manifest.mode == TransferMode.SNAPSHOT
+
+    def test_beatport_source_can_explicitly_recur_as_one_mirror(self):
+        spotify = StatefulSpotify({
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+            ("New Artist", "New Track"): _match(
+                "spotify:track:new", "New Track", "New Artist",
+            ),
+        })
+        storage = InMemoryStorage()
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=storage, publication_storage=storage,
+        )
+
+        first = transfer.execute(TransferRequest(
+            source="fixture", mode=TransferMode.MIRROR,
+        ))
+        transfer.approve(first.playlists[0].spotify_playlist_id)
+        second = transfer.execute(TransferRequest(
+            source="fixture", mode=TransferMode.MIRROR,
+        ))
+
+        assert second.playlists[0].spotify_playlist_id == first.playlists[0].spotify_playlist_id
+        assert second.playlists[0].action == "provisional mirror updated"
+        assert second.playlists[0].publication_manifest.mode == TransferMode.MIRROR
+
 
     def test_paused_transfer_reloads_and_resumes_without_repeating_work(self, tmp_path):
         matches = {
@@ -1485,6 +1561,47 @@ class TestBeatportCliTransfer:
         request = execute.call_args.args[0]
         assert request.preview is False
         assert request.source == "https://www.beatport.com/chart/fixture/14"
+        assert request.mode == TransferMode.SNAPSHOT
+
+    @patch("djsupport.transfer.Transfer.execute")
+    @patch("djsupport.cli.get_client", return_value=MagicMock())
+    def test_cli_beatport_can_explicitly_choose_mirror(
+        self, mock_client, execute, tmp_path,
+    ):
+        execute.return_value = SyncReport(
+            timestamp=datetime.now(), threshold=80, dry_run=False,
+            playlists=[PlaylistReport(name="Fixture", path="fixture")],
+            source_label="Beatport",
+        )
+
+        result = CliRunner().invoke(cli, [
+            "beatport", "https://www.beatport.com/chart/fixture/14", "--mirror",
+            "--state-path", str(tmp_path / "publications.json"),
+        ])
+
+        assert result.exit_code == 0, result.output
+        assert execute.call_args.args[0].mode == TransferMode.MIRROR
+
+    @patch("djsupport.transfer.Transfer.execute")
+    @patch("djsupport.cli.get_client", return_value=MagicMock())
+    def test_cli_label_defaults_to_snapshot_through_transfer(
+        self, mock_client, execute, tmp_path,
+    ):
+        execute.return_value = SyncReport(
+            timestamp=datetime.now(), threshold=80, dry_run=False,
+            playlists=[PlaylistReport(name="Fixture Label", path="fixture")],
+            source_label="Beatport label",
+        )
+
+        result = CliRunner().invoke(cli, [
+            "label", "https://www.beatport.com/label/fixture/21",
+            "--state-path", str(tmp_path / "publications.json"),
+        ])
+
+        assert result.exit_code == 0, result.output
+        request = execute.call_args.args[0]
+        assert request.source == "https://www.beatport.com/label/fixture/21"
+        assert request.mode == TransferMode.SNAPSHOT
 
     @patch("djsupport.transfer.FileTransferStorage.load_transfer")
     @patch("djsupport.transfer.Transfer.execute")

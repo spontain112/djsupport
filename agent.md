@@ -87,6 +87,7 @@ djsupport beatport <url> --report report.md          # Save Markdown report
 djsupport approve <spotify-playlist-id>              # Approve one reviewed Provisional Playlist
 djsupport approve <spotify-playlist-id> --review-csv review.csv  # Apply Corrections while approving
 djsupport beatport <url> --incremental               # Incremental updates (default)
+djsupport beatport <url> --mirror                    # Explicit recurring Mirror (Snapshot is default)
 djsupport beatport <url> --resume <transfer-id>      # Resume a paused Transfer
 djsupport beatport <url> --abandon <transfer-id>     # Explicitly abandon a Transfer
 
@@ -104,6 +105,9 @@ djsupport label <url-or-name> --prefix "dj"          # Prefix for playlist name
 djsupport label <url-or-name> --no-prefix            # No prefix
 djsupport label <url-or-name> --report report.md     # Save Markdown report
 djsupport label <url-or-name> --incremental          # Incremental updates (default)
+djsupport label <url-or-name> --mirror               # Explicit recurring Mirror (Snapshot is default)
+djsupport label <url-or-name> --resume <transfer-id> # Resume a paused Transfer
+djsupport label <url-or-name> --abandon <transfer-id> # Explicitly abandon a Transfer
 
 # Testing
 pytest                     # Run all tests
