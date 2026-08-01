@@ -137,9 +137,10 @@ Adjust the minimum match confidence (0–100, default 80):
 djsupport sync -t 70
 ```
 
-### Cache and retry
+### Matching knowledge and retry
 
-Bypass the cache and re-search every track:
+Bypass retained matching knowledge and re-search every track (the flag name is
+preserved for compatibility):
 
 ```bash
 djsupport sync --no-cache
@@ -151,7 +152,8 @@ Force retry all previously failed matches:
 djsupport sync --retry
 ```
 
-Change auto-retry window (default: retry failures older than 7 days):
+`--retry-days` remains accepted for command compatibility, but unmatched tracks
+are retried only when `--retry` is explicit:
 
 ```bash
 djsupport sync --retry-days 3
@@ -206,9 +208,9 @@ Rekordbox Transfer options (the `sync` command name and `--dry-run` flag remain 
 | `--dry-run` | | Preview without modifying Spotify or playlist state |
 | `-t, --threshold` | 80 | Minimum match confidence (0–100) |
 | `--report` | | Save Markdown report to this path |
-| `--no-cache` | | Bypass match cache |
+| `--no-cache` | | Bypass retained matching knowledge (compatible flag) |
 | `--retry` | | Force retry all failed matches |
-| `--retry-days` | 7 | Auto-retry failures older than N days |
+| `--retry-days` | 7 | Compatibility-only; unmatched tracks require `--retry` |
 | `--prefix` | djsupport | Prefix for Spotify playlist names |
 | `--no-prefix` | | Disable playlist name prefix |
 

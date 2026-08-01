@@ -3074,6 +3074,42 @@ class TestBeatportCliTransfer:
 class TestRekordboxCliTransfer:
     @patch("djsupport.transfer.Transfer.execute_batch")
     @patch("djsupport.transfer.Transfer.plan_batch")
+    @patch("djsupport.transfer.FileTransferStorage")
+    @patch("djsupport.transfer.FilePublicationStorage")
+    @patch("djsupport.cache.MatchCache")
+    @patch("djsupport.cli.get_client", return_value=MagicMock())
+    def test_cli_defaults_to_shared_application_data_storage(
+        self, mock_client, match_cache, publication_storage, transfer_storage,
+        plan_batch, execute_batch,
+    ):
+        from djsupport.cli import (
+            DEFAULT_MATCHING_KNOWLEDGE_PATH,
+            DEFAULT_PUBLICATION_MANIFEST_PATH,
+        )
+
+        plan_batch.return_value = BatchPlan(())
+        execute_batch.return_value = SyncReport(
+            timestamp=datetime.now(), threshold=80, dry_run=False,
+            playlists=[], source_label="Rekordbox", status="completed",
+        )
+
+        result = CliRunner().invoke(cli, [
+            "sync", str(REKORDBOX_FIXTURE), "--playlist", "Peak Time",
+        ])
+
+        assert result.exit_code == 0, result.output
+        match_cache.assert_called_once_with(DEFAULT_MATCHING_KNOWLEDGE_PATH)
+        publication_storage.assert_called_once_with(
+            DEFAULT_PUBLICATION_MANIFEST_PATH
+        )
+        transfer_storage.assert_called_once_with(
+            str(Path(DEFAULT_PUBLICATION_MANIFEST_PATH).with_suffix(
+                ".transfers.json"
+            ))
+        )
+
+    @patch("djsupport.transfer.Transfer.execute_batch")
+    @patch("djsupport.transfer.Transfer.plan_batch")
     @patch("djsupport.cli.get_client", return_value=MagicMock())
     def test_cli_selected_playlist_enters_transfer_batch(
         self, mock_client, plan_batch, execute_batch, tmp_path,

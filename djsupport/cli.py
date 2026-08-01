@@ -17,6 +17,15 @@ from djsupport.report import (
     save_review_csv,
 )
 from djsupport.spotify import RateLimitError, get_client
+from djsupport.transfer import (
+    AccountPublishingGuards,
+    default_matching_knowledge_path,
+    default_publication_manifest_path,
+)
+
+
+DEFAULT_MATCHING_KNOWLEDGE_PATH = str(default_matching_knowledge_path())
+DEFAULT_PUBLICATION_MANIFEST_PATH = str(default_publication_manifest_path())
 
 
 @click.group()
@@ -166,13 +175,13 @@ def restore_local_data(
 @click.option("--dry-run", is_flag=True, help="Preview matches without creating playlists.")
 @click.option("--threshold", "-t", default=80, show_default=True, help="Minimum match confidence (0-100).")
 @click.option("--report", "report_path", type=click.Path(), default=None, help="Save detailed Markdown report to this path.")
-@click.option("--no-cache", is_flag=True, help="Bypass cache; search Spotify for every track.")
+@click.option("--no-cache", is_flag=True, help="Bypass retained matching knowledge (compatible flag).")
 @click.option("--retry", is_flag=True, help="Force retry all previously failed matches.")
-@click.option("--retry-days", default=7, show_default=True, help="Auto-retry failures older than N days.")
-@click.option("--cache-path", default=".djsupport_cache.json", show_default=True, help="Path to cache file.")
+@click.option("--retry-days", default=7, show_default=True, help="Accepted for compatibility; unmatched tracks retry only with --retry.")
+@click.option("--cache-path", default=DEFAULT_MATCHING_KNOWLEDGE_PATH, show_default=True, help="Path to matching knowledge (compatible flag).")
 @click.option("--prefix", default="djsupport", show_default=True, help="Prefix for Spotify playlist names.")
 @click.option("--no-prefix", is_flag=True, help="Disable playlist name prefix.")
-@click.option("--state-path", default=".djsupport_playlists.json", show_default=True, help="Path to playlist state file.")
+@click.option("--state-path", default=DEFAULT_PUBLICATION_MANIFEST_PATH, show_default=True, help="Path to durable publication manifests (compatible flag).")
 def sync(
     xml_path: str | None,
     playlist: tuple[str, ...],
@@ -246,7 +255,7 @@ def sync(
     click.echo(
         f"Transfer plan: {plan.total_tracks} tracks; "
         f"{plan.approved_match_hits} Approved Match hits; "
-        f"{plan.cache_hits} cache hits; "
+        f"{plan.cache_hits} retained proposal hits; "
         f"{plan.expected_uncached_lookups} expected Spotify lookups."
     )
     if plan.confirmation_required:
@@ -280,15 +289,8 @@ def list_playlists(xml_path: str | None):
         click.echo(f"  {pl.path} ({len(pl.track_ids)} tracks)")
 
 
-from djsupport.transfer import (
-    AccountPublishingGuards,
-    default_matching_knowledge_path,
-    default_publication_manifest_path,
-)
-
-
-DEFAULT_BEATPORT_CACHE_PATH = str(default_matching_knowledge_path())
-DEFAULT_BEATPORT_STATE_PATH = str(default_publication_manifest_path())
+DEFAULT_BEATPORT_CACHE_PATH = DEFAULT_MATCHING_KNOWLEDGE_PATH
+DEFAULT_BEATPORT_STATE_PATH = DEFAULT_PUBLICATION_MANIFEST_PATH
 
 
 @cli.command()
@@ -353,7 +355,7 @@ def approve(
 @click.option("--threshold", "-t", default=80, show_default=True, help="Minimum match confidence (0-100).")
 @click.option("--no-cache", is_flag=True, help="Bypass match cache.")
 @click.option("--retry", is_flag=True, help="Force retry all previously failed matches.")
-@click.option("--retry-days", default=7, show_default=True, help="Auto-retry failures older than N days.")
+@click.option("--retry-days", default=7, show_default=True, help="Accepted for compatibility; unmatched tracks retry only with --retry.")
 @click.option("--cache-path", default=DEFAULT_BEATPORT_CACHE_PATH, show_default=True, help="Path to Beatport match cache.")
 @click.option(
     "--state-path", default=DEFAULT_BEATPORT_STATE_PATH, show_default=True,
@@ -485,7 +487,7 @@ DEFAULT_LABEL_STATE_PATH = DEFAULT_BEATPORT_STATE_PATH
 @click.option("--threshold", "-t", default=80, show_default=True, help="Minimum match confidence (0-100).")
 @click.option("--no-cache", is_flag=True, help="Bypass match cache.")
 @click.option("--retry", is_flag=True, help="Force retry all previously failed matches.")
-@click.option("--retry-days", default=7, show_default=True, help="Auto-retry failures older than N days.")
+@click.option("--retry-days", default=7, show_default=True, help="Accepted for compatibility; unmatched tracks retry only with --retry.")
 @click.option("--cache-path", default=DEFAULT_LABEL_CACHE_PATH, show_default=True, help="Path to label match cache.")
 @click.option("--state-path", default=DEFAULT_LABEL_STATE_PATH, show_default=True, help="Path to label playlist state.")
 @click.option("--report", "report_path", type=click.Path(), default=None, help="Save Markdown report.")

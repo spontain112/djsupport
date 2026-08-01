@@ -66,10 +66,10 @@ djsupport sync --playlist "My Playlist"  # Select a playlist (repeat for a Batch
 djsupport sync --whole-library            # Explicitly select the whole library
 djsupport sync --threshold 90            # Minimum match confidence (0-100, default 80)
 djsupport sync --report report.md        # Save Markdown report
-djsupport sync --no-cache                # Bypass match cache
+djsupport sync --no-cache                # Bypass matching knowledge (compatible flag)
 djsupport sync --retry                   # Retry previously failed matches
-djsupport sync --retry-days 3            # Auto-retry failures older than N days (default 7)
-djsupport sync --cache-path my.json      # Custom cache file location
+djsupport sync --retry-days 3            # Compatibility-only; use --retry explicitly
+djsupport sync --cache-path my.json      # Matching-knowledge path (compatible flag)
 djsupport sync --prefix "dj"             # Prefix for Spotify playlist names
 djsupport sync --no-prefix               # Disable playlist name prefix
 djsupport sync --state-path state.json   # Custom playlist state file location
@@ -79,7 +79,7 @@ djsupport beatport <url> --dry-run                  # Preview matches
 djsupport beatport <url> --threshold 90              # Minimum match confidence
 djsupport beatport <url> --no-cache                  # Bypass Beatport match cache
 djsupport beatport <url> --retry                     # Retry previously failed matches
-djsupport beatport <url> --retry-days 3              # Auto-retry failures older than N days (default 7)
+djsupport beatport <url> --retry-days 3              # Compatibility-only; use --retry explicitly
 djsupport beatport <url> --cache-path my.json        # Custom Beatport cache file
 djsupport beatport <url> --state-path my.json        # Custom publication manifest file
 djsupport beatport <url> --prefix "dj"               # Prefix for playlist name
@@ -99,7 +99,7 @@ djsupport label <url-or-name> --dry-run              # Preview matches
 djsupport label <url-or-name> --threshold 90         # Minimum match confidence
 djsupport label <url-or-name> --no-cache             # Bypass label match cache
 djsupport label <url-or-name> --retry                # Retry previously failed matches
-djsupport label <url-or-name> --retry-days 3         # Auto-retry failures older than N days (default 7)
+djsupport label <url-or-name> --retry-days 3         # Compatibility-only; use --retry explicitly
 djsupport label <url-or-name> --cache-path my.json   # Custom label cache file
 djsupport label <url-or-name> --state-path my.json   # Custom label state file
 djsupport label <url-or-name> --prefix "dj"          # Prefix for playlist name
