@@ -144,5 +144,5 @@ Used `from __future__ import annotations` with `TYPE_CHECKING` to avoid circular
 ## Related Documentation
 
 - [Rate limit handling](../integration-issues/spotify-rate-limit-handling.md) — related error handling patterns
-- [Architectural patterns](../../.claude/docs/architectural_patterns.md) — error handling conventions
-- [Web frontend plan](../plans/2026-03-14-feat-web-frontend-beatport-sync-plan.md) — feature context
+- [Architectural patterns](../../../.claude/docs/architectural_patterns.md) — error handling conventions
+- [Web frontend plan](../../plans/2026-03-14-feat-web-frontend-beatport-sync-plan.md) — feature context
