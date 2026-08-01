@@ -35,7 +35,7 @@ djsupport/
   cache.py      # Persistent match cache with retry logic
   state.py      # Playlist ID mapping for incremental sync (source-agnostic)
   report.py     # Post-sync terminal + Markdown reports
-  transfer.py   # Durable Transfer orchestration, checkpoints, and publication
+  transfer.py   # Durable Transfer orchestration, read-only Batch planning, checkpoints, and publication
   static/       # Web frontend (index.html with Tailwind CSS)
 tests/          # pytest suite
 docs/           # Plans, reports, and solution docs
