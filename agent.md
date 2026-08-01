@@ -36,6 +36,7 @@ djsupport/
   report.py     # Transfer outcome terminal, Markdown, and Correction CSV reports
   transfer.py   # Durable Transfer/Batch orchestration, checkpoints, and publication
   backup.py     # Versioned local-data backup, preview, merge, and atomic restore
+  migration.py  # Explicit preview/apply migration of known 0.3.0 local data
   static/       # Web frontend (index.html with Tailwind CSS)
 tests/          # pytest suite
 docs/           # Plans, reports, and solution docs
@@ -61,6 +62,8 @@ djsupport web --port 3000       # Custom port
 djsupport backup                # Create a timestamped local-data archive
 djsupport restore <archive>     # Validate and preview an archive
 djsupport restore <archive> --apply  # Apply a conflict-free restore
+djsupport migrate-0-3 <directory>    # Preview 0.3.0 local-data migration
+djsupport migrate-0-3 <directory> --apply  # Back up, verify, and apply migration
 
 # Rekordbox Transfer flags
 djsupport sync --playlist "My Playlist"  # Select a playlist (repeat for a Batch)

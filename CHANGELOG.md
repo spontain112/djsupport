@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Explicit, preview-first migration of known 0.3.0 working-directory cache and
+  playlist-state files into versioned application data, with verified backup,
+  atomic rollback, privacy-safe aggregate reporting, and idempotent apply
 - Versioned, timestamped local-data backup archives and integrity-checked,
   preview-first, conflict-aware atomic restore; OAuth credentials and unrelated
   files are excluded

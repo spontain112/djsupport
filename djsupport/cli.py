@@ -162,6 +162,35 @@ def restore_local_data(
     click.echo("Restore completed.")
 
 
+@cli.command("migrate-0-3")
+@click.argument(
+    "legacy_directory", type=click.Path(),
+)
+@click.option("--apply", is_flag=True, help="Apply the validated migration preview.")
+def migrate_0_3(legacy_directory: str, apply: bool) -> None:
+    """Preview migration of one explicitly selected 0.3.0 data directory."""
+    from djsupport.backup import default_app_data_path
+    from djsupport.migration import LegacyMigration
+
+    report = LegacyMigration(default_app_data_path()).preview(legacy_directory)
+    if not report.valid:
+        raise click.ClickException("; ".join(report.errors))
+    click.echo(f"Detected files: {report.detected_files}")
+    click.echo(f"Cache records: {report.cache_records}")
+    click.echo(f"Proposed cache imports: {report.proposed_cache_imports}")
+    click.echo(f"Conflicts: {report.conflicts}")
+    click.echo(f"Skipped: {report.skipped}")
+    click.echo(f"Relink required: {report.relink_required}")
+    click.echo(f"Historical Snapshots: {report.historical_snapshots}")
+    if not apply:
+        click.echo("Preview only; current and legacy data were not changed.")
+        return
+    result = LegacyMigration(default_app_data_path()).apply(legacy_directory)
+    if not result.applied:
+        raise click.ClickException("; ".join(result.errors))
+    click.echo("Migration completed; legacy files were left unchanged.")
+
+
 @cli.command()
 @click.argument("xml_path", required=False, type=click.Path(exists=True, dir_okay=False))
 @click.option(
