@@ -63,6 +63,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Provisional publication manifests and review CSVs now retain unmatched source
+  tracks with blank Spotify targets, allowing playlist-scoped Approval to apply
+  Corrections without losing source order or rejecting rows left unresolved
 - Label search now handles new Beatport search API response format (`label_id`/`label_name` under `data` key) alongside old format
 - Label scraper no longer imports `click` — pagination errors communicated via `on_page_error` callback, keeping library decoupled from CLI
 - Search result URLs are re-validated before fetching, closing a trust boundary gap

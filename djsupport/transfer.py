@@ -41,6 +41,7 @@ from djsupport.report import (
     MatchedTrack,
     PlaylistDrift,
     PlaylistReport,
+    ReviewTrack,
     SyncReport,
     SourceRemoval,
     UnmatchedAlternatives,
@@ -49,7 +50,7 @@ from djsupport.report import (
 from djsupport.spotify import MAX_RATE_LIMIT_WAIT, RateLimitError, _parse_retry_after
 
 
-PUBLICATION_MANIFEST_VERSION = 3
+PUBLICATION_MANIFEST_VERSION = 4
 TRANSFER_STATE_VERSION = 1
 EXPENSIVE_BATCH_LOOKUP_THRESHOLD = 100
 SPOTIFY_TRACK_URI = re.compile(r"^spotify:track:([A-Za-z0-9]{22})$")
@@ -387,11 +388,11 @@ class PublicationItem:
     source_name: str
     source_artist: str
     source_title: str
-    spotify_uri: str
-    spotify_name: str
-    spotify_artist: str
-    score: float
-    match_type: str
+    spotify_uri: str = ""
+    spotify_name: str = ""
+    spotify_artist: str = ""
+    score: float = 0.0
+    match_type: str = "unmatched"
     source_duration: int = 0
     authoritative: bool = False
 
@@ -523,7 +524,7 @@ class FilePublicationStorage:
             data = json.loads(self.path.read_text())
         except (json.JSONDecodeError, OSError):
             return
-        if data.get("version") not in (1, 2, PUBLICATION_MANIFEST_VERSION):
+        if data.get("version") not in (1, 2, 3, PUBLICATION_MANIFEST_VERSION):
             return
         self.manifests = data.get("manifests", [])
         self.approvals = data.get("approvals", data.get("reviews", []))
@@ -1547,13 +1548,27 @@ class Transfer:
                     corrected_items.get(item.source_track_id, item)
                     for item in manifest.items
                 )
+                original_proposal_counts = Counter(
+                    item.spotify_uri for item in manifest.items
+                    if item.spotify_uri
+                )
+                unresolved_collision_ids = {
+                    item.source_track_id for item in manifest.items
+                    if original_proposal_counts[item.spotify_uri] > 1
+                    and item.source_track_id not in corrected_items
+                }
                 proposed_counts = Counter(item.spotify_uri for item in reviewed_items)
                 collision_uris = {
                     uri for uri, count in proposed_counts.items() if count > 1
                 }
                 collisions: list[PublicationItem] = []
                 for item in reviewed_items:
-                    if item.spotify_uri in collision_uris:
+                    if not item.spotify_uri:
+                        continue
+                    if (
+                        item.source_track_id in unresolved_collision_ids
+                        or item.spotify_uri in collision_uris
+                    ):
                         collisions.append(item)
                         continue
                     if remaining[item.spotify_uri] > 0:
@@ -1642,8 +1657,6 @@ class Transfer:
             for row_number, row in enumerate(reader, start=2):
                 source_track_id = (row.get("source_track_id") or "").strip()
                 spotify_reference = (row.get("spotify_url") or "").strip()
-                if not spotify_reference:
-                    continue
                 if not source_track_id or source_track_id not in manifest_items:
                     raise ValueError(
                         f"Correction row {row_number} has an unknown source_track_id"
@@ -1659,6 +1672,8 @@ class Transfer:
                         f"{source_track_id}"
                     )
                 seen_source_references.add(source_track_id)
+                if not spotify_reference:
+                    continue
                 original = manifest_items[source_track_id]
                 if spotify_reference == original.spotify_uri:
                     continue
@@ -1714,15 +1729,19 @@ class Transfer:
             elif present[item.spotify_uri] and item.spotify_uri not in desired:
                 desired.append(item.spotify_uri)
 
-        first_managed = next(
-            (index for index, uri in enumerate(current_uris) if uri in managed_uris),
-            0,
-        )
-        manual = [uri for uri in current_uris if uri not in managed_uris]
-        insertion = sum(
-            1 for uri in current_uris[:first_managed] if uri not in managed_uris
-        )
-        repaired = [*manual[:insertion], *desired, *manual[insertion:]]
+        manual_by_managed_boundary: dict[int, list[str]] = {}
+        managed_seen = 0
+        for uri in current_uris:
+            if uri in managed_uris:
+                managed_seen += 1
+                continue
+            boundary = min(managed_seen, len(desired))
+            manual_by_managed_boundary.setdefault(boundary, []).append(uri)
+        repaired: list[str] = []
+        for boundary in range(len(desired) + 1):
+            repaired.extend(manual_by_managed_boundary.get(boundary, ()))
+            if boundary < len(desired):
+                repaired.append(desired[boundary])
         if repaired != current_uris:
             self._retry_policy.run(
                 lambda: self._spotify.replace_provisional_playlist_tracks(
@@ -1960,6 +1979,7 @@ class Transfer:
         publication_items = [
             PublicationItem(**item) for item in state.publication_items
         ]
+        playlist.review_items = self._review_tracks(publication_items)
         if state.status == TransferStatus.COMPLETED:
             report.status = "completed"
             if state.spotify_playlist_id:
@@ -2052,6 +2072,14 @@ class Transfer:
 
                 if result is None or "alternatives" in result:
                     playlist.unmatched.append(track.display)
+                    if self._is_new_reviewable_source(track, publication_items):
+                        publication_items.append(PublicationItem(
+                            source_track_id=track.track_id,
+                            source_name=track.display,
+                            source_artist=track.artist,
+                            source_title=track.name,
+                            source_duration=track.duration,
+                        ))
                     candidates = tuple(
                         AlternativeCandidate(
                             rank=rank,
@@ -2084,19 +2112,20 @@ class Transfer:
                         spotify_uri=result["uri"],
                     )
                     playlist.matched.append(matched_track)
-                    publication_items.append(PublicationItem(
-                        source_track_id=track.track_id,
-                        source_name=track.display,
-                        source_artist=track.artist,
-                        source_title=track.name,
-                        spotify_uri=result["uri"],
-                        spotify_name=matched_track.spotify_name,
-                        spotify_artist=matched_track.spotify_artist,
-                        score=matched_track.score,
-                        match_type=matched_track.match_type,
-                        source_duration=track.duration,
-                        authoritative=bool(result.get("authoritative")),
-                    ))
+                    if self._is_new_reviewable_source(track, publication_items):
+                        publication_items.append(PublicationItem(
+                            source_track_id=track.track_id,
+                            source_name=track.display,
+                            source_artist=track.artist,
+                            source_title=track.name,
+                            spotify_uri=result["uri"],
+                            spotify_name=matched_track.spotify_name,
+                            spotify_artist=matched_track.spotify_artist,
+                            score=matched_track.score,
+                            match_type=matched_track.match_type,
+                            source_duration=track.duration,
+                            authoritative=bool(result.get("authoritative")),
+                        ))
 
                 state.next_track_index = index + 1
                 state.matched = [asdict(item) for item in playlist.matched]
@@ -2105,6 +2134,7 @@ class Transfer:
                 state.publication_items = [
                     asdict(item) for item in publication_items
                 ]
+                playlist.review_items = self._review_tracks(publication_items)
                 self._knowledge.checkpoint()
                 if self._pause_requested:
                     state.status = TransferStatus.PAUSED
@@ -2117,6 +2147,8 @@ class Transfer:
 
             source_ids_by_uri: dict[str, set[tuple[str, str, int]]] = {}
             for item in publication_items:
+                if not item.spotify_uri:
+                    continue
                 source_ids_by_uri.setdefault(item.spotify_uri, set()).add(
                     (
                         item.source_artist.casefold(),
@@ -2284,7 +2316,8 @@ class Transfer:
                             snapshot_name,
                             list(dict.fromkeys(
                                 item.spotify_uri for item in publication_items
-                                if item.spotify_uri not in collision_uris
+                                if item.spotify_uri
+                                and item.spotify_uri not in collision_uris
                             )),
                             description,
                             publication_key,
@@ -2309,14 +2342,15 @@ class Transfer:
                             playlist_id,
                             list(dict.fromkeys(
                                 item.spotify_uri for item in publication_items
-                                if item.spotify_uri not in collision_uris
+                                if item.spotify_uri
+                                and item.spotify_uri not in collision_uris
                             )),
                         )
                     )
                 assert snapshot_name is not None
                 managed_items_by_uri: dict[str, PublicationItem] = {}
                 for item in publication_items:
-                    if item.spotify_uri not in collision_uris:
+                    if item.spotify_uri and item.spotify_uri not in collision_uris:
                         managed_items_by_uri.setdefault(item.spotify_uri, item)
                 manifest = PublicationManifest(
                     account_id=state.account_id,
@@ -2328,7 +2362,6 @@ class Transfer:
                     items=tuple(
                         item for item in publication_items
                         if not item.authoritative
-                        and item.spotify_uri not in collision_uris
                     ),
                     mode=request.mode,
                     managed_items=tuple(managed_items_by_uri.values()),
@@ -2421,6 +2454,38 @@ class Transfer:
     def _save_transfer(self, transfer_id: str, state: TransferState) -> None:
         if self._transfer_storage is not None:
             self._transfer_storage.save_transfer(transfer_id, state)
+
+    @staticmethod
+    def _review_tracks(items: list[PublicationItem]) -> list[ReviewTrack]:
+        return [
+            ReviewTrack(
+                source_track_id=item.source_track_id,
+                source_name=item.source_name,
+                source_artist=item.source_artist,
+                source_title=item.source_title,
+                source_duration=item.source_duration,
+                spotify_uri=item.spotify_uri,
+                spotify_name=item.spotify_name,
+                spotify_artist=item.spotify_artist,
+                score=item.score,
+                match_type=item.match_type,
+            )
+            for item in items
+        ]
+
+    @staticmethod
+    def _is_new_reviewable_source(
+        track: Track, items: list[PublicationItem],
+    ) -> bool:
+        if not track.track_id:
+            return False
+        return not any(
+            item.source_track_id == track.track_id
+            and item.source_artist == track.artist
+            and item.source_title == track.name
+            and item.source_duration == track.duration
+            for item in items
+        )
 
     def _approved_available(self, spotify_uri: str) -> bool:
         try:

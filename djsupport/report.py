@@ -24,6 +24,20 @@ class MatchedTrack:
 
 
 @dataclass(frozen=True)
+class ReviewTrack:
+    source_track_id: str
+    source_name: str
+    source_artist: str = ""
+    source_title: str = ""
+    source_duration: int = 0
+    spotify_uri: str = ""
+    spotify_name: str = ""
+    spotify_artist: str = ""
+    score: float = 0.0
+    match_type: str = "unmatched"
+
+
+@dataclass(frozen=True)
 class AlternativeCandidate:
     rank: int
     spotify_uri: str
@@ -81,6 +95,7 @@ class PlaylistReport:
     name: str
     path: str
     matched: list[MatchedTrack] = field(default_factory=list)
+    review_items: list[ReviewTrack] = field(default_factory=list)
     unmatched: list[str] = field(default_factory=list)
     alternatives: list[UnmatchedAlternatives] = field(default_factory=list)
     unavailable_approved: list[UnavailableApprovedMatch] = field(default_factory=list)
@@ -370,9 +385,34 @@ def save_review_csv(report: SyncReport, path: str) -> None:
         writer = csv.writer(csv_file)
         writer.writerow([
             "source_track_id", "source_track", "spotify_url", "spotify_track",
-            "score", "match_type",
+            "score", "match_type", "source_artist", "source_title",
+            "source_duration",
         ])
         for playlist in report.playlists:
+            review_items = (
+                playlist.review_items
+                or (
+                    list(playlist.publication_manifest.items)
+                    if playlist.publication_manifest is not None else []
+                )
+            )
+            if review_items:
+                for item in review_items:
+                    writer.writerow([
+                        item.source_track_id,
+                        item.source_name,
+                        _spotify_url(item.spotify_uri) if item.spotify_uri else "",
+                        (
+                            f"{item.spotify_artist} - {item.spotify_name}"
+                            if item.spotify_uri else ""
+                        ),
+                        f"{item.score:.1f}" if item.spotify_uri else "",
+                        item.match_type,
+                        item.source_artist,
+                        item.source_title,
+                        item.source_duration,
+                    ])
+                continue
             for match in playlist.matched:
                 writer.writerow([
                     match.source_track_id,
@@ -381,4 +421,7 @@ def save_review_csv(report: SyncReport, path: str) -> None:
                     f"{match.spotify_artist} - {match.spotify_name}",
                     f"{match.score:.1f}",
                     match.match_type,
+                    "",
+                    "",
+                    "",
                 ])
