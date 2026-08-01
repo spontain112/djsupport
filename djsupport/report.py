@@ -49,6 +49,8 @@ class SyncReport:
     playlists: list[PlaylistReport] = field(default_factory=list)
     cache_enabled: bool = False
     source_label: str = "Rekordbox"
+    transfer_id: str | None = None
+    status: str = "completed"
 
     @property
     def total_matched(self) -> int:

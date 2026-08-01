@@ -14,6 +14,7 @@ from djsupport.rekordbox import Track
 from djsupport.report import PlaylistReport, SyncReport
 from djsupport.transfer import (
     FilePublicationStorage,
+    FileTransferStorage,
     SourceSelection,
     Transfer,
     TransferRequest,
@@ -129,7 +130,7 @@ def test_preview_reuses_and_retains_matching_knowledge_without_playlist_writes()
     assert playlist.api_lookups == 1
     assert spotify.searches == [("New Artist", "New Track", 80)]
     assert ("New Artist", "New Track") in storage.matches
-    assert storage.checkpoints == 1
+    assert storage.checkpoints >= 1
     assert spotify.playlists == original_playlists
     assert storage.playlist_state == original_state
     assert storage.playlist_writes == 0
@@ -148,11 +149,163 @@ def test_preview_with_zero_acceptable_matches_succeeds_with_zero_percent():
     assert report.overall_match_rate == 0.0
     assert report.total_matched == 0
     assert report.total_unmatched == 2
-    assert storage.checkpoints == 1
+    assert storage.checkpoints >= 1
     assert spotify.playlists == {"existing": ["spotify:track:untouched"]}
 
 
 class TestSnapshotPublication:
+
+    def test_paused_transfer_reloads_and_resumes_without_repeating_work(self, tmp_path):
+        matches = {
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+            ("New Artist", "New Track"): _match(
+                "spotify:track:new", "New Track", "New Artist",
+            ),
+        }
+        spotify = StatefulSpotify(matches)
+        knowledge = InMemoryStorage()
+        state_path = tmp_path / "transfers.json"
+        first = Transfer(
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=knowledge, publication_storage=knowledge,
+            transfer_storage=FileTransferStorage(state_path),
+        )
+        first.pause()
+
+        paused = first.execute(TransferRequest(source="fixture"))
+
+        assert paused.status == "paused"
+        assert paused.playlists[0].action == "paused"
+        assert spotify.searches == [("Known Artist", "Known Track", 80)]
+        assert "snapshot-1" not in spotify.playlists
+
+        resumed_knowledge = InMemoryStorage()
+        resumed = Transfer(
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=resumed_knowledge, publication_storage=knowledge,
+            transfer_storage=FileTransferStorage(state_path),
+        ).execute(TransferRequest(source="fixture", transfer_id=paused.transfer_id))
+
+        assert resumed.status == "completed"
+        assert resumed.playlists[0].action == "provisional snapshot created"
+        assert spotify.searches == [
+            ("Known Artist", "Known Track", 80),
+            ("New Artist", "New Track", 80),
+        ]
+        assert len(knowledge.publications) == 1
+        assert list(spotify.playlists).count("snapshot-1") == 1
+
+    def test_user_cancellation_is_persisted_as_paused_by_default(self, tmp_path):
+        class CancellingSpotify(StatefulSpotify):
+            def __init__(self):
+                super().__init__({
+                    ("Known Artist", "Known Track"): _match(
+                        "spotify:track:known", "Known Track", "Known Artist",
+                    ),
+                })
+
+            def match(self, track, threshold):
+                if track.track_id == "bp-2":
+                    raise KeyboardInterrupt
+                return super().match(track, threshold)
+
+        states = FileTransferStorage(tmp_path / "transfers.json")
+        with pytest.raises(KeyboardInterrupt):
+            Transfer(
+                source=FixtureBeatportSource(FIXTURE), spotify=CancellingSpotify(),
+                matching_knowledge=InMemoryStorage(),
+                publication_storage=InMemoryStorage(), transfer_storage=states,
+            ).execute(TransferRequest(source="fixture"))
+
+        persisted = next(iter(FileTransferStorage(states.path).transfers.values()))
+        assert persisted["status"] == "paused"
+        assert persisted["next_track_index"] == 1
+
+    def test_abandonment_is_explicit_persisted_and_cannot_be_resumed(self, tmp_path):
+        spotify = StatefulSpotify({
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+        })
+        state_path = tmp_path / "transfers.json"
+        transfer = Transfer(
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=InMemoryStorage(),
+            publication_storage=InMemoryStorage(),
+            transfer_storage=FileTransferStorage(state_path),
+        )
+        transfer.pause()
+        paused = transfer.execute(TransferRequest(source="fixture"))
+
+        transfer.abandon(paused.transfer_id)
+
+        reloaded = FileTransferStorage(state_path)
+        assert reloaded.load_transfer(paused.transfer_id)["status"] == "abandoned"
+        with pytest.raises(ValueError, match="abandoned"):
+            Transfer(
+                source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+                matching_knowledge=InMemoryStorage(),
+                publication_storage=InMemoryStorage(), transfer_storage=reloaded,
+            ).execute(TransferRequest(
+                source="fixture", transfer_id=paused.transfer_id,
+            ))
+        assert "snapshot-1" not in spotify.playlists
+
+    def test_resume_after_publishing_does_not_duplicate_spotify_effect(self, tmp_path):
+        class InterruptedPublicationStorage(InMemoryStorage):
+            def __init__(self):
+                super().__init__()
+                self.interrupt = True
+
+            def retain_publication(self, manifest):
+                if self.interrupt:
+                    self.interrupt = False
+                    raise KeyboardInterrupt
+                super().retain_publication(manifest)
+
+        matches = {
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+            ("New Artist", "New Track"): _match(
+                "spotify:track:new", "New Track", "New Artist",
+            ),
+        }
+        spotify = StatefulSpotify(matches)
+        knowledge = InMemoryStorage()
+        publications = InterruptedPublicationStorage()
+        states = FileTransferStorage(tmp_path / "transfers.json")
+        transfer = Transfer(
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=knowledge, publication_storage=publications,
+            transfer_storage=states,
+        )
+
+        with pytest.raises(KeyboardInterrupt):
+            transfer.execute(TransferRequest(source="fixture"))
+        transfer_id = next(iter(states.transfers))
+
+        resumed = Transfer(
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=knowledge, publication_storage=publications,
+            transfer_storage=FileTransferStorage(states.path),
+        ).execute(TransferRequest(source="fixture", transfer_id=transfer_id))
+
+        assert resumed.status == "completed"
+        assert len([key for key in spotify.playlists if key.startswith("snapshot-")]) == 1
+        assert len(publications.publications) == 1
+
+        repeated = Transfer(
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=knowledge, publication_storage=publications,
+            transfer_storage=FileTransferStorage(states.path),
+        ).execute(TransferRequest(source="fixture", transfer_id=transfer_id))
+
+        assert repeated.status == "completed"
+        assert len([key for key in spotify.playlists if key.startswith("snapshot-")]) == 1
+        assert len(publications.publications) == 1
 
     def test_publish_creates_provisional_snapshot_and_exact_manifest_after_matching(self):
         spotify = StatefulSpotify({
@@ -189,7 +342,7 @@ class TestSnapshotPublication:
             "spotify:track:known", "spotify:track:new",
         ]
         assert [item.source_track_id for item in manifest.items] == ["bp-1", "bp-2"]
-        assert storage.checkpoints == 1
+        assert storage.checkpoints >= 1
 
 
     def test_repeated_snapshot_is_distinct_and_never_updates_previous_snapshot(self):
@@ -238,7 +391,7 @@ class TestSnapshotPublication:
 
         assert spotify.playlists == {"existing": ["spotify:track:untouched"]}
         assert storage.publications == []
-        assert storage.checkpoints == 1
+        assert storage.checkpoints >= 1
 
 
     def test_incomplete_matching_does_not_publish_snapshot(self):

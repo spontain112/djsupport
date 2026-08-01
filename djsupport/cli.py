@@ -357,6 +357,7 @@ def beatport(
         BeatportChartSource,
         EphemeralMatchingKnowledge,
         FilePublicationStorage,
+        FileTransferStorage,
         MatchCacheKnowledge,
         SpotifyMatcher,
         Transfer,
@@ -375,6 +376,9 @@ def beatport(
         ),
         publication_storage=(
             None if dry_run else FilePublicationStorage(state_path)
+        ),
+        transfer_storage=FileTransferStorage(
+            str(Path(state_path).with_suffix(".transfers.json"))
         ),
     )
     try:

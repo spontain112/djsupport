@@ -23,6 +23,7 @@ from djsupport.report import MatchedTrack, PlaylistReport, SyncReport
 
 
 PUBLICATION_MANIFEST_VERSION = 1
+TRANSFER_STATE_VERSION = 1
 
 
 def default_matching_knowledge_path() -> Path:
@@ -46,6 +47,7 @@ class TransferRequest:
     retry: bool = False
     retry_days: int = 7
     playlist_prefix: str | None = "djsupport"
+    transfer_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -135,6 +137,46 @@ class FilePublicationStorage:
         }, indent=2))
         os.replace(temporary, self.path)
         self.manifests = next_manifests
+
+
+class TransferStorage(Protocol):
+    def load_transfer(self, transfer_id: str) -> dict | None: ...
+
+    def save_transfer(self, transfer_id: str, state: dict) -> None: ...
+
+
+class FileTransferStorage:
+    """Atomically persisted, versioned state for resumable Transfers."""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+        self.transfers: dict[str, dict] = {}
+        self._load()
+
+    def _load(self) -> None:
+        if not self.path.exists():
+            return
+        try:
+            data = json.loads(self.path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return
+        if data.get("version") == TRANSFER_STATE_VERSION:
+            self.transfers = data.get("transfers", {})
+
+    def load_transfer(self, transfer_id: str) -> dict | None:
+        state = self.transfers.get(transfer_id)
+        return None if state is None else dict(state)
+
+    def save_transfer(self, transfer_id: str, state: dict) -> None:
+        next_transfers = {**self.transfers, transfer_id: state}
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self.path.with_suffix(f"{self.path.suffix}.tmp")
+        temporary.write_text(json.dumps({
+            "version": TRANSFER_STATE_VERSION,
+            "transfers": next_transfers,
+        }, indent=2))
+        os.replace(temporary, self.path)
+        self.transfers = next_transfers
 
 
 def default_publication_manifest_path() -> Path:
@@ -278,11 +320,30 @@ class Transfer:
         spotify: SpotifyAdapter,
         matching_knowledge: MatchingKnowledge,
         publication_storage: PublicationStorage | None = None,
+        transfer_storage: TransferStorage | None = None,
     ) -> None:
         self._source = source
         self._spotify = spotify
         self._knowledge = matching_knowledge
         self._publication_storage = publication_storage
+        self._transfer_storage = transfer_storage
+        self._pause_requested = False
+
+    def pause(self) -> None:
+        """Request a pause after the current track reaches a safe checkpoint."""
+        self._pause_requested = True
+
+    def abandon(self, transfer_id: str) -> None:
+        """Explicitly make a persisted, non-completed Transfer terminal."""
+        if self._transfer_storage is None:
+            raise ValueError("Abandonment requires durable Transfer storage")
+        state = self._transfer_storage.load_transfer(transfer_id)
+        if state is None:
+            raise ValueError(f"Unknown Transfer: {transfer_id}")
+        if state["status"] == "completed":
+            raise ValueError("A completed Transfer cannot be abandoned")
+        state["status"] = "abandoned"
+        self._transfer_storage.save_transfer(transfer_id, state)
 
     def execute(self, request: TransferRequest) -> SyncReport:
         """Execute one Transfer and return its structured outcome.
@@ -293,8 +354,55 @@ class Transfer:
         if not request.preview and self._publication_storage is None:
             raise ValueError("Publishing Transfers require publication storage")
 
-        selection = self._source.consume(request.source)
-        created_at = datetime.now()
+        transfer_id = request.transfer_id or uuid4().hex
+        state = (
+            self._transfer_storage.load_transfer(transfer_id)
+            if self._transfer_storage is not None else None
+        )
+        if request.transfer_id and state is None:
+            raise ValueError(f"Unknown Transfer: {transfer_id}")
+
+        if state is None:
+            selection = self._source.consume(request.source)
+            created_at = datetime.now()
+            state = {
+                "status": "matching",
+                "source": request.source,
+                "request": {
+                    "source": request.source,
+                    "preview": request.preview,
+                    "threshold": request.threshold,
+                    "retry": request.retry,
+                    "retry_days": request.retry_days,
+                    "playlist_prefix": request.playlist_prefix,
+                },
+                "selection": {
+                    "name": selection.name,
+                    "reference": selection.reference,
+                    "tracks": [asdict(track) for track in selection.tracks],
+                },
+                "created_at": created_at.isoformat(),
+                "next_track_index": 0,
+                "matched": [],
+                "unmatched": [],
+                "publication_items": [],
+            }
+            self._save_transfer(transfer_id, state)
+        else:
+            if state["status"] == "abandoned":
+                raise ValueError(f"Transfer {transfer_id} was abandoned")
+            if state["source"] != request.source:
+                raise ValueError("A resumed Transfer must use its original source")
+            request = TransferRequest(
+                **state["request"], transfer_id=transfer_id,
+            )
+            stored_selection = state["selection"]
+            selection = SourceSelection(
+                stored_selection["name"], stored_selection["reference"],
+                [Track(**track) for track in stored_selection["tracks"]],
+            )
+            created_at = datetime.fromisoformat(state["created_at"])
+
         playlist = PlaylistReport(
             name=selection.name,
             path=selection.reference,
@@ -307,11 +415,29 @@ class Transfer:
             playlists=[playlist],
             cache_enabled=getattr(self._knowledge, "persistent", True),
             source_label=self._source.source_label,
+            transfer_id=transfer_id,
+            status=state["status"],
         )
-        publication_items: list[PublicationItem] = []
+        playlist.matched = [MatchedTrack(**item) for item in state["matched"]]
+        playlist.unmatched = list(state["unmatched"])
+        publication_items = [
+            PublicationItem(**item) for item in state["publication_items"]
+        ]
+        if state["status"] == "completed":
+            report.status = "completed"
+            if state.get("spotify_playlist_id"):
+                playlist.name = state["spotify_playlist_name"]
+                playlist.spotify_playlist_id = state["spotify_playlist_id"]
+                playlist.action = "provisional snapshot created"
+            elif not request.preview and not selection.tracks:
+                playlist.action = "not published: empty source"
+            elif not request.preview and playlist.unmatched:
+                playlist.action = "not published: incomplete matching"
+            return report
 
         try:
-            for track in selection.tracks:
+            for index in range(state["next_track_index"], len(selection.tracks)):
+                track = selection.tracks[index]
                 result = self._knowledge.lookup(track, request.threshold)
                 if result is not None:
                     playlist.cache_hits += 1
@@ -348,26 +474,50 @@ class Transfer:
                         match_type=matched_track.match_type,
                     ))
 
+                state["next_track_index"] = index + 1
+                state["matched"] = [asdict(item) for item in playlist.matched]
+                state["unmatched"] = list(playlist.unmatched)
+                state["publication_items"] = [
+                    asdict(item) for item in publication_items
+                ]
+                self._knowledge.checkpoint()
+                if self._pause_requested:
+                    state["status"] = "paused"
+                    self._save_transfer(transfer_id, state)
+                    self._pause_requested = False
+                    playlist.action = "paused"
+                    report.status = "paused"
+                    return report
+                self._save_transfer(transfer_id, state)
+
             if not request.preview and not selection.tracks:
                 playlist.action = "not published: empty source"
             elif not request.preview and playlist.unmatched:
                 playlist.action = "not published: incomplete matching"
             elif not request.preview:
-                discriminator = (
-                    f"{created_at:%Y-%m-%d %H%M%S} {uuid4().hex[:8]}"
-                )
-                snapshot_name = f"{selection.name} — {discriminator}"
-                if request.playlist_prefix:
-                    snapshot_name = f"{request.playlist_prefix} / {snapshot_name}"
-                description = (
-                    f"Provisional Snapshot from {self._source.source_label}: "
-                    f"{selection.reference}. Created {created_at.isoformat()}."
-                )
-                playlist_id = self._spotify.publish_provisional_snapshot(
-                    snapshot_name,
-                    [item.spotify_uri for item in publication_items],
-                    description,
-                )
+                playlist_id = state.get("spotify_playlist_id")
+                snapshot_name = state.get("spotify_playlist_name")
+                if playlist_id is None:
+                    discriminator = (
+                        f"{created_at:%Y-%m-%d %H%M%S} {uuid4().hex[:8]}"
+                    )
+                    snapshot_name = f"{selection.name} — {discriminator}"
+                    if request.playlist_prefix:
+                        snapshot_name = f"{request.playlist_prefix} / {snapshot_name}"
+                    description = (
+                        f"Provisional Snapshot from {self._source.source_label}: "
+                        f"{selection.reference}. Created {created_at.isoformat()}."
+                    )
+                    playlist_id = self._spotify.publish_provisional_snapshot(
+                        snapshot_name,
+                        [item.spotify_uri for item in publication_items],
+                        description,
+                    )
+                    state["spotify_playlist_id"] = playlist_id
+                    state["spotify_playlist_name"] = snapshot_name
+                    state["status"] = "retaining publication"
+                    self._save_transfer(transfer_id, state)
+                assert snapshot_name is not None
                 manifest = PublicationManifest(
                     spotify_playlist_id=playlist_id,
                     spotify_playlist_name=snapshot_name,
@@ -381,13 +531,28 @@ class Transfer:
                     self._publication_storage.retain_publication(manifest)
                 except Exception:
                     self._spotify.delete_provisional_snapshot(playlist_id)
+                    state.pop("spotify_playlist_id", None)
+                    state.pop("spotify_playlist_name", None)
+                    state["status"] = "matching"
+                    self._save_transfer(transfer_id, state)
                     raise
                 playlist.name = snapshot_name
                 playlist.spotify_playlist_id = playlist_id
                 playlist.publication_manifest = manifest
                 playlist.action = "provisional snapshot created"
+            state["status"] = "completed"
+            self._save_transfer(transfer_id, state)
+            report.status = "completed"
+        except KeyboardInterrupt:
+            state["status"] = "paused"
+            self._save_transfer(transfer_id, state)
+            raise
         finally:
             # Matching discoveries survive interrupted matching or publication.
             self._knowledge.checkpoint()
 
         return report
+
+    def _save_transfer(self, transfer_id: str, state: dict) -> None:
+        if self._transfer_storage is not None:
+            self._transfer_storage.save_transfer(transfer_id, state)
