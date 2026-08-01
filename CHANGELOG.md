@@ -5,78 +5,71 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.4.0] - 2026-08-01
 
 ### Added
 
 - Explicit, preview-first migration of known 0.3.0 working-directory cache and
   playlist-state files into versioned application data, with verified backup,
-  atomic rollback, privacy-safe aggregate reporting, and idempotent apply
-- Versioned, timestamped local-data backup archives and integrity-checked,
-  preview-first, conflict-aware atomic restore; OAuth credentials and unrelated
-  files are excluded
-- Durable Rekordbox Batch execution with independent playlist outcomes,
-  partial-success reporting, safe shared-failure stops, and resumable checkpoints
-- Explicit Corrections from edited review CSV files, with validated stable source
-  references and Spotify track URLs/URIs, idempotent playlist repair, Approved
-  Match promotion, and local-only matcher regression knowledge
-- Playlist-scoped Provisional Playlist approval with durable approved, rejected,
-  and abandoned review outcomes
-- Clickable Spotify proposals and stable source references in Markdown reports,
-  plus editable CSV review files for Beatport Transfers
-- Account-scoped Provisional Playlist state, per-account publishing serialization,
-  and bounded Spotify retries with safe Transfer checkpointing
-- Beatport chart playlists now include the curator/DJ name — e.g. `"Adam Beyer - Tech House Vibes"` instead of just `"Tech House Vibes"`
-- `compose_chart_playlist_name()` helper in `beatport.py` for chart name composition (curator omitted when `"Unknown"`, empty, or `None`)
+  atomic rollback, privacy-safe aggregate reporting, and idempotent apply.
+- Durable Transfer orchestration for Rekordbox Batches and Beatport chart or
+  label Snapshots, with resumable checkpoints, partial outcomes, safe failure
+  handling, and optional recurring Beatport Mirrors.
+- Provisional Playlist review, Approval, Rejection, Abandonment, and explicit
+  Corrections supplied through editable review CSV files.
+- Versioned, timestamped local-data backups with integrity validation,
+  preview-first conflict handling, and atomic restore.
+- Beatport label discovery and paginated ingestion, including interactive name
+  search, URL validation, deduplication, and bounded pagination.
+- Optional FastAPI web UI (`pip install djsupport[web]`) with Spotify OAuth,
+  background Transfers, and progress events.
+- Account-scoped publication state, reusable Approved Matches, and private
+  Correction-derived matcher regression knowledge.
+- Clickable Spotify proposals, stable source references, and editable review
+  CSV files in Transfer reports.
 
 ### Changed
 
-- Live matcher accuracy checks now read Correction-derived regression knowledge
-  from private, versioned application storage. The tracked personal report and
-  curated mapping fixture were removed, with stronger ignore and contribution
-  guardrails for user-derived artifacts.
-- All production flows now enter the public Transfer interface; the replaced
-  shallow `service.py` orchestration and its implementation-coupled tests were
-  removed. Rekordbox work now requires explicit playlist selection or an
-  opt-in whole-library Batch, with Preview and lookup preflight owned by Transfer.
-- User and contributor documentation now uses the canonical Transfer, Preview,
-  Mirror, Snapshot, Approval, and Correction vocabulary. Compatible command
-  names such as `sync` and flags such as `--dry-run` remain available.
-- FastAPI and uvicorn are now optional dependencies — install with `pip install djsupport[web]`
-- `djsupport web` shows a friendly install hint when web dependencies are missing
-
-### Added
-
-- Logo and favicon images for web UI — neon green vinyl/sync icon and headphones icon
-- `djsupport web` command — starts a web UI at localhost:8000 for syncing Beatport playlists to Spotify
-- Web frontend with responsive single-page UI (Tailwind CSS) — paste URL, see real-time progress via SSE, view results with Spotify link
-- FastAPI backend with Spotify OAuth browser flow, background sync, and single-job enforcement
-- `djsupport/service.py` module — framework-agnostic sync orchestration shared by CLI and web
-- `spotify_playlist_id` field on `PlaylistReport` for constructing Spotify URLs
-- 28 new tests (10 service layer + 18 web endpoints)
-- `djsupport label <url-or-name>` command — import tracks from a Beatport record label into a Spotify playlist
-- Label name search with interactive selection — `djsupport label "Drumcode"` searches Beatport and presents matching labels with latest release info
-- Paginated label fetching with `per_page=150` for efficient large label imports
-- Track deduplication across compilations — same track on multiple releases is imported only once (newest first)
-- Warning prompt when a label has >1000 tracks before proceeding
-- `djsupport/label.py` module — Beatport label page scraper with URL validation, pagination, deduplication, and search
-- Label-specific cache (`.djsupport_label_cache.json`) and state (`.djsupport_label_playlists.json`), isolated from chart and Rekordbox data
-- 53 new tests for label module (URL validation, track parsing, pagination, deduplication, search, error handling)
-- Playlist descriptions on sync — Rekordbox playlists show "Synced from Rekordbox by djsupport", Beatport playlists show "Imported from Beatport by djsupport"
+- Rekordbox Transfers require explicit playlist selection or an opt-in
+  whole-library Batch and now provide lookup-cost preflight.
+- Beatport charts and labels publish one-time Snapshots by default; `--mirror`
+  opts into a recurring Mirror.
+- Compatible CLI names and flags such as `sync`, `--dry-run`, `--no-cache`, and
+  `--retry-days` remain available while documentation uses Transfer, Preview,
+  Mirror, Snapshot, Approval, Correction, and Batch terminology.
+- FastAPI and uvicorn moved to the optional `web` dependency group.
+- Local user-derived reports and matcher evidence were removed from Git and are
+  read from versioned private application storage instead.
+- The obsolete `djsupport.service` orchestration layer was removed; CLI and web
+  flows use the public Transfer interface.
 
 ### Fixed
 
-- Provisional publication manifests and review CSVs now retain unmatched source
-  tracks with blank Spotify targets, allowing playlist-scoped Approval to apply
-  Corrections without losing source order or rejecting rows left unresolved
-- Label search now handles new Beatport search API response format (`label_id`/`label_name` under `data` key) alongside old format
-- Label scraper no longer imports `click` — pagination errors communicated via `on_page_error` callback, keeping library decoupled from CLI
-- Search result URLs are re-validated before fetching, closing a trust boundary gap
-- Pagination capped at 100 pages (15,000 tracks) to prevent runaway requests from corrupted server responses
-- URL validation now strips `#` fragments (browser-pasted URLs with anchors no longer rejected)
-- Invalid JSON in `__NEXT_DATA__` now raises `LabelParseError` instead of raw `JSONDecodeError`
-- Matcher now recognizes "Original" as a standalone version descriptor — Spotify uses " - Original" suffix on many tracks, previously causing match failures
-- Matcher now recognizes "Interpretation" as a version descriptor — handles tracks like "Selderv Interpretation" common in electronic music
+- Current schema-v4 publication manifests can be validated and restored from a
+  local-data backup, alongside supported 0.3.0-era schemas.
+- Approval preserves unmatched source tracks so explicit Corrections can add
+  missing Spotify targets without losing source order.
+- Partial Match Collisions remain unresolved until every source mapping is
+  explicitly corrected or rejected.
+- Beatport chart curator metadata is retained for supported page-data shapes and
+  used in playlist names when available.
+- Label parsing handles the current and legacy search response shapes, validates
+  returned URLs, caps pagination, and reports malformed page data safely.
+- Matcher version recognition includes standalone Original and Interpretation
+  descriptors.
+
+### Known limitations
+
+- Some Beatport chart payload shapes do not expose curator metadata through the
+  supported parser, so the playlist can fall back to the chart name alone (#60).
+- Provisional Playlist descriptions retain an opaque Transfer marker and
+  machine timestamp because crash recovery and duplicate-publication prevention
+  currently depend on that marker (#61).
+- Material duration differences can still be classified as exact, and repeated
+  parenthetical subtitles can reduce a valid candidate below threshold (#56,
+  #57). Review proposals before Approval and use a Correction when needed.
+- Broader Spotify candidate recall, noisy-source cleanup, and ISRC-first lookup
+  remain research work rather than release behavior (#31, #32, #39, #42).
 
 ## [0.3.0] - 2026-02-26
 

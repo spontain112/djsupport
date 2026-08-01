@@ -1,0 +1,6 @@
+include CHANGELOG.md
+include CONTRIBUTING.md
+include docs/backup-and-restore.md
+include docs/release-notes-0.4.0.md
+include docs/upgrading.md
+recursive-include djsupport/static *.html *.png

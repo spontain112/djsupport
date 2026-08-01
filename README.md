@@ -9,7 +9,9 @@ Transfer curated Rekordbox and Beatport selections to Spotify through reviewable
 - **Duration-based matching** — disambiguates original, radio, and extended versions using track duration
 - **Matching knowledge** — reuses Approved Matches and retained proposals across Transfers
 - **Incremental updates** — only adds/removes changed tracks instead of replacing entire playlists
-- **Preview** — complete matching and reporting without playlist or playlist-state mutation (`--dry-run` remains the compatible flag)
+- **Preview** — complete matching and reporting without Spotify playlist or
+  publication-manifest mutation; local matching knowledge and durable Transfer
+  checkpoints may be retained (`--dry-run` remains the compatible flag)
 - **Markdown reports** — save detailed match reports with per-playlist breakdowns
 - **Playlist prefix** — prefix Spotify playlist names (e.g. `djsupport / Deep House`) to keep them organized
 - **Explicit Batches** — select one or more Rekordbox playlists, or opt into the whole library with cost preflight
@@ -24,10 +26,24 @@ Transfer curated Rekordbox and Beatport selections to Spotify through reviewable
 
 ## Installation
 
+Install the command-line application from a release artifact:
+
+```bash
+python -m pip install djsupport
+```
+
+Install the optional local web UI as well:
+
+```bash
+python -m pip install "djsupport[web]"
+```
+
+For a source checkout used for development:
+
 ```bash
 git clone <repo-url>
 cd djsupport          # project root (contains pyproject.toml)
-pip install -e .
+python -m pip install -e ".[dev,web]"
 ```
 
 > **Troubleshooting:** Make sure you run `pip install` from the project root
@@ -35,6 +51,12 @@ pip install -e .
 > inside it. If you downloaded a zip from GitHub, the root folder is typically
 > named `djsupport-main`. Also note that `pipx` does not support editable
 > installs (`-e`); use `pip` instead.
+
+### Upgrading from 0.3.0
+
+Install 0.4.0, keep the old working directory intact, and use the explicit
+preview-first migration described under [Upgrade from 0.3.0](#upgrade-from-030).
+Version 0.4.0 does not discover or rewrite legacy files automatically.
 
 ## Setup
 
@@ -108,6 +130,12 @@ the legacy directory is never changed or deleted. Repeating apply is safe.
 See [upgrade guidance](docs/upgrading.md) and
 [backup and restore details](docs/backup-and-restore.md).
 
+Backups include only recognized versioned djsupport data and local Markdown/CSV
+reports that do not contain common credential fields. OAuth tokens, `.env`
+files, unrelated files, and report symlinks are excluded. Restore rejects
+unexpected paths, unsupported schemas, integrity failures, and unresolved
+Approval or playlist-state conflicts before replacing current data.
+
 ### List playlists
 
 Preview what playlists are available in your Rekordbox export:
@@ -144,7 +172,8 @@ Opt into a whole-library Batch:
 djsupport sync --whole-library
 ```
 
-Preview a selection without modifying Spotify playlists or playlist state:
+Preview a selection without modifying Spotify playlists or publication
+manifests:
 
 ```bash
 djsupport sync -p "Deep House" --dry-run
@@ -208,6 +237,58 @@ local Corrections directly; no personal mapping fixture is kept in Git. See
 [CONTRIBUTING.md](CONTRIBUTING.md) for the privacy-safe workflow and synthetic
 fixture requirements.
 
+### Beatport Snapshots and Mirrors
+
+Create a one-time chart or label Snapshot (the default):
+
+```bash
+djsupport beatport <chart-url> --dry-run
+djsupport beatport <chart-url>
+djsupport label <label-url-or-name> --dry-run
+djsupport label <label-url-or-name>
+```
+
+Use `--mirror` only when you want later Transfers to maintain one recurring
+playlist. Interrupted Beatport Transfers print an ID that can be supplied to
+`--resume`; use `--abandon` to end a retained Transfer explicitly.
+
+```bash
+djsupport beatport <chart-url> --mirror
+djsupport beatport <chart-url> --resume <transfer-id>
+djsupport beatport <chart-url> --abandon <transfer-id>
+```
+
+Chart playlist names include `Curator - Chart Name` when the supported Beatport
+payload provides a curator; otherwise they use the chart name. Label Snapshots
+use the label name.
+
+### Review lifecycle
+
+Preview performs source intake, matching, and reporting without modifying
+Spotify playlists or publication manifests. It may retain local matching
+knowledge and durable Transfer checkpoints so work can be inspected or resumed.
+A non-Preview Beatport Transfer publishes a Provisional Playlist. Review it in
+Spotify, remove wrong proposals, optionally edit the generated CSV with
+Corrections, and then run `approve`. Approved Matches become reusable local
+matching knowledge. A deleted Provisional Playlist is recorded as Abandoned,
+and Match Collisions remain review-required until each mapping is corrected or
+rejected.
+
+### Privacy and local state
+
+Credentials, source-library paths, matching knowledge, Corrections, Transfer
+checkpoints, publication manifests, playlist identifiers, and reports are local
+user data. They are not package assets and must not be committed or attached to
+issues without explicit export, consent, and privacy review. On macOS and Linux,
+default durable Transfer data is stored under the platform data directory
+(`~/Library/Application Support/djsupport` on macOS and
+`$XDG_DATA_HOME/djsupport` or `~/.local/share/djsupport` on Linux). The saved
+Rekordbox XML path remains in the local configuration file created by
+`djsupport library set`.
+
+See [the 0.4.0 release notes](docs/release-notes-0.4.0.md) for the complete
+upgrade summary and known limitations.
+
 ### Playlist naming
 
 Spotify playlists are prefixed with `djsupport /` by default. Change or disable the prefix:
@@ -231,7 +312,7 @@ Rekordbox Transfer options (the `sync` command name and `--dry-run` flag remain 
 |------|---------|-------------|
 | `-p, --playlist` | | Select by exact name/path; repeat for a Batch |
 | `--whole-library` | | Explicitly select every playlist |
-| `--dry-run` | | Preview without modifying Spotify or playlist state |
+| `--dry-run` | | Preview without modifying Spotify or publication manifests; local knowledge/checkpoints may be retained |
 | `-t, --threshold` | 80 | Minimum match confidence (0–100) |
 | `--report` | | Save Markdown report to this path |
 | `--no-cache` | | Bypass retained matching knowledge (compatible flag) |

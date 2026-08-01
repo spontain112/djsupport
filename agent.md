@@ -128,7 +128,7 @@ pytest --cov=djsupport     # Run with coverage
   credentials, local paths, and playlist state stay in private application
   storage. Repository matcher tests are synthetic unless a user explicitly
   exports and consents to a privacy-reviewed contribution.
-- Version tracked in `pyproject.toml` (`version = "0.3.0"`)
+- Version tracked in `pyproject.toml` (`version = "0.4.0"`)
 - Changelog follows Keep a Changelog format in `CHANGELOG.md`
 - `docs/` contains plans, test plans, and reports
 - `docs/solutions/` holds documented problem solutions with YAML frontmatter (created via `/compound` workflow)
