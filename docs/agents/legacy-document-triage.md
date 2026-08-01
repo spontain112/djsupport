@@ -26,8 +26,9 @@ Audit performed on 2026-07-31 after GitHub Issues became the configured work tra
   repository's scope. It was not relocated into another unit.
 - The unreferenced data-model and matcher-playground HTML visualizers were
   removed. The shipped web UI remains `djsupport/static/index.html` with its
-  runtime image assets. Its deliberately authored `NewUI.pen` design source was
-  retained under `docs/design/` rather than mixed into the runtime package.
+  runtime image assets. Owner review identified the former `NewUI.pen` as
+  Chrome-extension-oriented prior art, so it was removed from the core unit;
+  Git history remains the archive.
 
 The evidence and complete classification are recorded in
 [repository-artifact-audit.md](repository-artifact-audit.md).
