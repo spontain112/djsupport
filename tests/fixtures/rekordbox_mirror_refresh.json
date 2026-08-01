@@ -1,0 +1,16 @@
+{
+  "name": "Peak Time",
+  "reference": "My Playlists/Peak Time",
+  "initial": [
+    {"track_id": "rb-1", "artist": "Artist One", "name": "First Track", "duration": 301},
+    {"track_id": "rb-2", "artist": "Artist Two", "name": "Second Track", "duration": 302}
+  ],
+  "refreshed": [
+    {"track_id": "rb-2", "artist": "Artist Two", "name": "Second Track", "duration": 302},
+    {"track_id": "rb-3", "artist": "Artist Three", "name": "Third Track", "duration": 303},
+    {"track_id": "rb-2-copy", "artist": "Artist Two", "name": "Second Track", "duration": 302}
+  ],
+  "final": [
+    {"track_id": "rb-3", "artist": "Artist Three", "name": "Third Track", "duration": 303}
+  ]
+}
