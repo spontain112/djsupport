@@ -127,6 +127,7 @@ class PlaylistPreflight:
 class BatchPlan:
     playlists: tuple[PlaylistPreflight, ...]
     confirmation_required: bool = False
+    threshold: int = 80
 
     @property
     def ready(self) -> bool:
@@ -156,6 +157,68 @@ class TransferStatus(str, Enum):
     RETAINING_PUBLICATION = "retaining publication"
     COMPLETED = "completed"
     ABANDONED = "abandoned"
+
+
+class BatchPhase(str, Enum):
+    PENDING = "pending"
+    PAUSED = "paused"
+    FAILED = "failed"
+    COMPLETED = "completed"
+
+
+class PlaylistOutcome(str, Enum):
+    PENDING = "pending"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    SKIPPED = "skipped"
+
+
+class BatchStatus(str, Enum):
+    MATCHING = "matching"
+    PAUSED = "paused"
+    COMPLETED = "completed"
+    PARTIAL_SUCCESS = "partial success"
+    FAILED = "failed"
+
+
+@dataclass
+class BatchPlaylistState:
+    name: str
+    reference: str
+    transfer_id: str
+    phase: BatchPhase = BatchPhase.PENDING
+    outcome: PlaylistOutcome = PlaylistOutcome.PENDING
+    error: str | None = None
+
+    @classmethod
+    def from_dict(cls, value: dict) -> BatchPlaylistState:
+        return cls(**{
+            **value,
+            "phase": BatchPhase(value.get("phase", BatchPhase.PENDING.value)),
+            "outcome": PlaylistOutcome(
+                value.get("outcome", PlaylistOutcome.PENDING.value)
+            ),
+        })
+
+
+@dataclass
+class BatchState:
+    account_id: str | None
+    created_at: str
+    threshold: int
+    status: BatchStatus
+    playlists: list[BatchPlaylistState]
+
+    @classmethod
+    def from_dict(cls, value: dict) -> BatchState:
+        return cls(**{
+            **value,
+            "status": BatchStatus(value["status"]),
+            "playlists": [
+                BatchPlaylistState.from_dict(playlist)
+                for playlist in value["playlists"]
+            ],
+        })
 
 
 class ApprovalStatus(str, Enum):
@@ -601,6 +664,10 @@ class TransferStorage(Protocol):
 
     def save_transfer(self, transfer_id: str, state: TransferState) -> None: ...
 
+    def load_batch(self, transfer_id: str) -> BatchState | None: ...
+
+    def save_batch(self, transfer_id: str, state: BatchState) -> None: ...
+
 
 class FileTransferStorage:
     """Atomically persisted, versioned state for resumable Transfers."""
@@ -608,6 +675,7 @@ class FileTransferStorage:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.transfers: dict[str, TransferState] = {}
+        self.batches: dict[str, BatchState] = {}
         self._load()
 
     def _load(self) -> None:
@@ -623,22 +691,39 @@ class FileTransferStorage:
                     self.transfers[transfer_id] = TransferState.from_dict(state)
                 except (KeyError, TypeError, ValueError):
                     continue
+            for transfer_id, state in data.get("batches", {}).items():
+                try:
+                    self.batches[transfer_id] = BatchState.from_dict(state)
+                except (KeyError, TypeError, ValueError):
+                    continue
 
     def load_transfer(self, transfer_id: str) -> TransferState | None:
         return self.transfers.get(transfer_id)
 
     def save_transfer(self, transfer_id: str, state: TransferState) -> None:
-        next_transfers = {**self.transfers, transfer_id: state}
+        self.transfers = {**self.transfers, transfer_id: state}
+        self._save()
+
+    def load_batch(self, transfer_id: str) -> BatchState | None:
+        return self.batches.get(transfer_id)
+
+    def save_batch(self, transfer_id: str, state: BatchState) -> None:
+        self.batches = {**self.batches, transfer_id: state}
+        self._save()
+
+    def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(f"{self.path.suffix}.tmp")
         temporary.write_text(json.dumps({
             "version": TRANSFER_STATE_VERSION,
             "transfers": {
-                key: asdict(transfer) for key, transfer in next_transfers.items()
+                key: asdict(transfer) for key, transfer in self.transfers.items()
+            },
+            "batches": {
+                key: asdict(batch) for key, batch in self.batches.items()
             },
         }, indent=2))
         os.replace(temporary, self.path)
-        self.transfers = next_transfers
 
 
 def default_publication_manifest_path() -> Path:
@@ -1070,6 +1155,228 @@ class Transfer:
                 )
                 and not request.confirm_expensive
             ),
+            threshold=request.threshold,
+        )
+
+    def execute_batch(
+        self, plan: BatchPlan, *, transfer_id: str | None = None,
+    ) -> SyncReport:
+        """Execute and durably checkpoint each planned Rekordbox playlist."""
+        if self._publication_storage is None:
+            raise ValueError("Publishing Transfers require publication storage")
+        if not plan.ready:
+            raise ValueError("An expensive Batch must be confirmed before execution")
+        if self._transfer_storage is None:
+            raise ValueError("Batch execution requires durable Transfer storage")
+        batch_id = transfer_id or uuid4().hex
+        batch = self._load_or_create_batch(batch_id, plan)
+        try:
+            account_id = self._spotify.account_id()
+        except Exception as exc:
+            if not self._is_shared_failure(exc):
+                raise
+            batch.status = BatchStatus.PAUSED
+            self._transfer_storage.save_batch(batch_id, batch)
+            authentication_actions = {
+                PlaylistOutcome.COMPLETED: (
+                    "completed before shared authentication failure"
+                ),
+                PlaylistOutcome.FAILED: "failed before shared authentication failure",
+                PlaylistOutcome.SKIPPED: "skipped after shared failure",
+                PlaylistOutcome.PENDING: "pending: shared authentication failure",
+            }
+            playlists = [
+                self._batch_playlist_report(
+                    item, authentication_actions[item.outcome], item.outcome,
+                )
+                for item in batch.playlists
+            ]
+            report_status = (
+                BatchStatus.PARTIAL_SUCCESS
+                if any(
+                    item.outcome == PlaylistOutcome.COMPLETED
+                    for item in batch.playlists
+                )
+                else BatchStatus.PAUSED
+            )
+            return self._batch_report(
+                batch_id, batch, playlists, report_status,
+            )
+        if batch.account_id is None:
+            batch.account_id = account_id
+            self._transfer_storage.save_batch(batch_id, batch)
+        elif batch.account_id != account_id:
+            raise ValueError("A Batch cannot resume under another Spotify account")
+        with self._publishing_guards.acquire(account_id):
+            return self._execute_batch(batch_id, batch)
+
+    def _load_or_create_batch(
+        self, batch_id: str, plan: BatchPlan,
+    ) -> BatchState:
+        assert self._transfer_storage is not None
+        batch = self._transfer_storage.load_batch(batch_id)
+        if batch is None:
+            batch = BatchState(
+                account_id=None,
+                created_at=datetime.now().isoformat(),
+                threshold=plan.threshold,
+                status=BatchStatus.MATCHING,
+                playlists=[
+                    BatchPlaylistState(
+                        planned.name, planned.reference, f"{batch_id}:{index}",
+                    )
+                    for index, planned in enumerate(plan.playlists)
+                ],
+            )
+            self._transfer_storage.save_batch(batch_id, batch)
+        elif [item.reference for item in batch.playlists] != [
+            item.reference for item in plan.playlists
+        ]:
+            raise ValueError("A resumed Batch must use its original plan")
+        return batch
+
+    def _execute_batch(self, batch_id: str, batch: BatchState) -> SyncReport:
+        assert self._transfer_storage is not None
+        playlists: list[PlaylistReport] = []
+        for index, item in enumerate(batch.playlists):
+            try:
+                report = self._execute(TransferRequest(
+                    source=item.reference,
+                    mode=TransferMode.MIRROR,
+                    threshold=batch.threshold,
+                    transfer_id=item.transfer_id,
+                ))
+            except Exception as exc:
+                if not self._is_shared_failure(exc) and not self._is_playlist_failure(exc):
+                    raise
+                shared_failure = self._is_shared_failure(exc)
+                item.phase = BatchPhase.PAUSED if shared_failure else BatchPhase.FAILED
+                item.outcome = (
+                    PlaylistOutcome.PENDING
+                    if shared_failure else PlaylistOutcome.FAILED
+                )
+                item.error = str(exc)
+                playlists.append(self._batch_playlist_report(
+                    item, str(exc), item.outcome,
+                ))
+                if shared_failure:
+                    for pending in batch.playlists[index + 1:]:
+                        pending.phase = BatchPhase.PENDING
+                        pending.outcome = PlaylistOutcome.SKIPPED
+                        playlists.append(self._batch_playlist_report(
+                            pending, "skipped after shared failure",
+                            PlaylistOutcome.SKIPPED,
+                        ))
+                    batch.status = BatchStatus.PAUSED
+                    self._transfer_storage.save_batch(batch_id, batch)
+                    break
+            else:
+                if report.status == "paused":
+                    item.phase = BatchPhase.PAUSED
+                    item.outcome = PlaylistOutcome.PENDING
+                    report.playlists[0].outcome = PlaylistOutcome.PENDING.value
+                    playlists.extend(report.playlists)
+                    for pending in batch.playlists[index + 1:]:
+                        pending.phase = BatchPhase.PENDING
+                        pending.outcome = PlaylistOutcome.PENDING
+                        playlists.append(self._batch_playlist_report(
+                            pending, "pending", PlaylistOutcome.PENDING,
+                        ))
+                    batch.status = BatchStatus.PAUSED
+                    self._transfer_storage.save_batch(batch_id, batch)
+                    break
+                item.phase = BatchPhase.COMPLETED
+                item.outcome = PlaylistOutcome.COMPLETED
+                item.error = None
+                report.playlists[0].outcome = item.outcome.value
+                playlists.extend(report.playlists)
+                self._transfer_storage.save_batch(batch_id, batch)
+        completed = sum(
+            playlist.outcome == PlaylistOutcome.COMPLETED for playlist in playlists
+        )
+        failed = sum(
+            playlist.outcome == PlaylistOutcome.FAILED for playlist in playlists
+        )
+        pending = sum(
+            playlist.outcome == PlaylistOutcome.PENDING for playlist in playlists
+        )
+        skipped = sum(
+            playlist.outcome == PlaylistOutcome.SKIPPED for playlist in playlists
+        )
+        status = (
+            BatchStatus.PAUSED if pending and not completed
+            else BatchStatus.PARTIAL_SUCCESS if completed and (failed or pending or skipped)
+            else BatchStatus.FAILED if failed or skipped
+            else BatchStatus.COMPLETED
+        )
+        batch.status = (
+            BatchStatus.PAUSED
+            if any(item.phase == BatchPhase.PAUSED for item in batch.playlists)
+            else status
+        )
+        self._transfer_storage.save_batch(batch_id, batch)
+        return self._batch_report(batch_id, batch, playlists, status)
+
+    def _batch_report(
+        self, batch_id: str, batch: BatchState,
+        playlists: list[PlaylistReport], status: BatchStatus,
+    ) -> SyncReport:
+        return SyncReport(
+            timestamp=datetime.fromisoformat(batch.created_at),
+            threshold=batch.threshold, dry_run=False,
+            playlists=playlists,
+            cache_enabled=getattr(self._knowledge, "persistent", True),
+            source_label=self._source.source_label,
+            transfer_id=batch_id,
+            status=status.value,
+        )
+
+    def _batch_playlist_report(
+        self, item: BatchPlaylistState, action: str,
+        outcome: PlaylistOutcome,
+    ) -> PlaylistReport:
+        report = PlaylistReport(
+            name=item.name, path=item.reference, action=action,
+            outcome=outcome.value,
+        )
+        state = (
+            self._transfer_storage.load_transfer(item.transfer_id)
+            if self._transfer_storage is not None else None
+        )
+        if state is None:
+            return report
+        report.matched = [MatchedTrack(**matched) for matched in state.matched]
+        report.unmatched = list(state.unmatched)
+        report.alternatives = [
+            UnmatchedAlternatives(
+                source_track_id=alternative["source_track_id"],
+                source_name=alternative["source_name"],
+                candidates=tuple(
+                    AlternativeCandidate(**candidate)
+                    for candidate in alternative["candidates"]
+                ),
+            )
+            for alternative in state.alternatives
+        ]
+        report.spotify_playlist_id = state.spotify_playlist_id
+        return report
+
+    @staticmethod
+    def _is_shared_failure(exc: Exception) -> bool:
+        if isinstance(exc, (RateLimitError, requests.Timeout, requests.ConnectionError)):
+            return True
+        return isinstance(exc, spotipy.SpotifyException) and (
+            exc.http_status in (401, 403, 429)
+            or exc.http_status is None
+            or exc.http_status >= 500
+        )
+
+    @staticmethod
+    def _is_playlist_failure(exc: Exception) -> bool:
+        return isinstance(exc, (ValueError, SourceNotFound)) or (
+            isinstance(exc, spotipy.SpotifyException)
+            and exc.http_status is not None
+            and 400 <= exc.http_status < 500
         )
 
     def abandon(self, transfer_id: str) -> None:

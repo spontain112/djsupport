@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Durable Rekordbox Batch execution with independent playlist outcomes,
+  partial-success reporting, safe shared-failure stops, and resumable checkpoints
 - Explicit Corrections from edited review CSV files, with validated stable source
   references and Spotify track URLs/URIs, idempotent playlist repair, Approved
   Match promotion, and local-only matcher regression knowledge
