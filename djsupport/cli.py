@@ -302,6 +302,7 @@ def list_playlists(xml_path: str | None):
 
 
 from djsupport.transfer import (
+    AccountPublishingGuards,
     default_matching_knowledge_path,
     default_publication_manifest_path,
 )
@@ -380,6 +381,7 @@ def beatport(
     transfer = Transfer(
         source=BeatportChartSource(),
         spotify=SpotifyMatcher(get_client()),
+        publishing_guards=AccountPublishingGuards(),
         matching_knowledge=(
             EphemeralMatchingKnowledge()
             if cache is None else MatchCacheKnowledge(cache)

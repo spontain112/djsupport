@@ -8,23 +8,37 @@ persistence ordering, Preview policy, and Provisional Snapshot publication.
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import sys
+import tempfile
+import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol, TypeVar
 from uuid import uuid4
+
+import requests
+import spotipy
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
 
 from djsupport.cache import MatchCache
 from djsupport.matcher import match_track
 from djsupport.rekordbox import Track
 from djsupport.report import MatchedTrack, PlaylistReport, SyncReport
+from djsupport.spotify import MAX_RATE_LIMIT_WAIT, RateLimitError, _parse_retry_after
 
 
 PUBLICATION_MANIFEST_VERSION = 1
 TRANSFER_STATE_VERSION = 1
+ResultT = TypeVar("ResultT")
 
 
 def default_matching_knowledge_path() -> Path:
@@ -57,6 +71,91 @@ class TransferStatus(str, Enum):
     RETAINING_PUBLICATION = "retaining publication"
     COMPLETED = "completed"
     ABANDONED = "abandoned"
+
+
+@dataclass(frozen=True)
+class RetryPolicy:
+    """Bound retries for transient Spotify failures and short rate limits."""
+
+    max_attempts: int = 3
+    backoff_seconds: float = 1.0
+    max_rate_limit_wait: int = MAX_RATE_LIMIT_WAIT
+    sleep: Callable[[float], None] = time.sleep
+
+    def run(self, operation: Callable[[], ResultT]) -> ResultT:
+        for attempt in range(1, self.max_attempts + 1):
+            try:
+                return operation()
+            except spotipy.SpotifyException as exc:
+                retryable_error: Exception = exc
+                status = exc.http_status
+                if status == 429:
+                    delay = _parse_retry_after(exc)
+                    if delay > self.max_rate_limit_wait:
+                        raise RateLimitError(delay) from exc
+                elif status is not None and status >= 500:
+                    delay = self.backoff_seconds * (2 ** (attempt - 1))
+                else:
+                    raise
+            except (requests.Timeout, requests.ConnectionError) as exc:
+                retryable_error = exc
+                delay = self.backoff_seconds * (2 ** (attempt - 1))
+            if attempt == self.max_attempts:
+                raise retryable_error
+            self.sleep(delay)
+        raise AssertionError("unreachable")
+
+
+class PublishingTransferConflict(RuntimeError):
+    """Raised when another publishing Transfer owns an account guard."""
+
+
+class AccountPublishingGuards:
+    """Serialize publishing Transfers across processes by Spotify account."""
+
+    def __init__(self, lock_directory: str | Path | None = None) -> None:
+        self.lock_directory = Path(
+            lock_directory
+            or Path(tempfile.gettempdir()) / "djsupport-publishing-locks"
+        )
+
+    @contextmanager
+    def acquire(self, account_id: str):
+        account_key = hashlib.sha256(account_id.encode()).hexdigest()
+        self.lock_directory.mkdir(parents=True, exist_ok=True)
+        lock_file = (self.lock_directory / f"{account_key}.lock").open("a+b")
+        try:
+            self._lock(lock_file)
+        except OSError:
+            lock_file.close()
+            raise PublishingTransferConflict(
+                f"A publishing Transfer is already active for {account_id}"
+            ) from None
+        try:
+            yield
+        finally:
+            self._unlock(lock_file)
+            lock_file.close()
+
+    @staticmethod
+    def _lock(lock_file) -> None:
+        if os.name == "nt":
+            lock_file.seek(0)
+            if not lock_file.read(1):
+                lock_file.write(b"0")
+                lock_file.flush()
+            lock_file.seek(0)
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+    @staticmethod
+    def _unlock(lock_file) -> None:
+        if os.name == "nt":
+            lock_file.seek(0)
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 @dataclass
@@ -111,6 +210,7 @@ class PublicationItem:
 class PublicationManifest:
     """The durable facts needed to review one Provisional Playlist."""
 
+    account_id: str
     spotify_playlist_id: str
     spotify_playlist_name: str
     source_label: str
@@ -166,7 +266,10 @@ class FilePublicationStorage:
         stored["created_at"] = manifest.created_at.isoformat()
         next_manifests = [
             item for item in self.manifests
-            if item.get("spotify_playlist_id") != manifest.spotify_playlist_id
+            if not (
+                item.get("account_id") == manifest.account_id
+                and item.get("spotify_playlist_id") == manifest.spotify_playlist_id
+            )
         ]
         next_manifests.append(stored)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -177,6 +280,13 @@ class FilePublicationStorage:
         }, indent=2))
         os.replace(temporary, self.path)
         self.manifests = next_manifests
+
+    def manifests_for_account(self, account_id: str) -> list[dict]:
+        """Return only playlist-management state owned by one account."""
+        return [
+            manifest for manifest in self.manifests
+            if manifest.get("account_id") == account_id
+        ]
 
 
 class TransferStorage(Protocol):
@@ -342,9 +452,7 @@ class MatchCacheKnowledge:
             return True
         if entry.matched:
             return False
-        return self._cache.is_retry_eligible(
-            track.artist, track.name, retry_days=retry_days, force=force,
-        )
+        return force
 
     def retain(self, track: Track, threshold: int, result: dict | None) -> None:
         self._cache.store(track.artist, track.name, threshold, result)
@@ -382,14 +490,18 @@ class Transfer:
         source: SourceAdapter,
         spotify: SpotifyAdapter,
         matching_knowledge: MatchingKnowledge,
+        publishing_guards: AccountPublishingGuards,
         publication_storage: PublicationStorage | None = None,
         transfer_storage: TransferStorage | None = None,
+        retry_policy: RetryPolicy | None = None,
     ) -> None:
         self._source = source
         self._spotify = spotify
         self._knowledge = matching_knowledge
+        self._publishing_guards = publishing_guards
         self._publication_storage = publication_storage
         self._transfer_storage = transfer_storage
+        self._retry_policy = retry_policy or RetryPolicy()
         self._pause_requested = False
 
     def pause(self) -> None:
@@ -405,10 +517,22 @@ class Transfer:
             raise ValueError(f"Unknown Transfer: {transfer_id}")
         if state.status == TransferStatus.COMPLETED:
             raise ValueError("A completed Transfer cannot be abandoned")
+        if state.account_id != self._spotify.account_id():
+            raise ValueError("A Transfer cannot be abandoned under another Spotify account")
         state.status = TransferStatus.ABANDONED
         self._transfer_storage.save_transfer(transfer_id, state)
 
     def execute(self, request: TransferRequest) -> SyncReport:
+        """Execute at most one publishing Transfer per Spotify account."""
+        if request.preview:
+            return self._execute(request)
+        if self._publication_storage is None:
+            raise ValueError("Publishing Transfers require publication storage")
+        account_id = self._spotify.account_id()
+        with self._publishing_guards.acquire(account_id):
+            return self._execute(request)
+
+    def _execute(self, request: TransferRequest) -> SyncReport:
         """Execute one Transfer and return its structured outcome.
 
         Beatport publication creates a distinct Provisional Snapshot after the
@@ -497,6 +621,9 @@ class Transfer:
                     playlist.publication_manifest = PublicationManifest(
                         **{
                             **stored_manifest,
+                            "account_id": stored_manifest.get(
+                                "account_id", state.account_id,
+                            ),
                             "created_at": datetime.fromisoformat(
                                 stored_manifest["created_at"]
                             ),
@@ -521,7 +648,9 @@ class Transfer:
                 elif self._knowledge.should_retry(
                     track, request.threshold, request.retry_days, request.retry,
                 ):
-                    result = self._spotify.match(track, request.threshold)
+                    result = self._retry_policy.run(
+                        lambda: self._spotify.match(track, request.threshold)
+                    )
                     playlist.api_lookups += 1
                     self._knowledge.retain(track, request.threshold, result)
                 else:
@@ -585,11 +714,13 @@ class Transfer:
                         f"Provisional Snapshot from {self._source.source_label}: "
                         f"{selection.reference}. Created {created_at.isoformat()}."
                     )
-                    playlist_id = self._spotify.publish_provisional_snapshot(
-                        snapshot_name,
-                        [item.spotify_uri for item in publication_items],
-                        description,
-                        transfer_id,
+                    playlist_id = self._retry_policy.run(
+                        lambda: self._spotify.publish_provisional_snapshot(
+                            snapshot_name,
+                            [item.spotify_uri for item in publication_items],
+                            description,
+                            transfer_id,
+                        )
                     )
                     state.spotify_playlist_id = playlist_id
                     state.spotify_playlist_name = snapshot_name
@@ -606,6 +737,7 @@ class Transfer:
                         return report
                 assert snapshot_name is not None
                 manifest = PublicationManifest(
+                    account_id=state.account_id,
                     spotify_playlist_id=playlist_id,
                     spotify_playlist_name=snapshot_name,
                     source_label=self._source.source_label,
@@ -635,6 +767,18 @@ class Transfer:
             state.status = TransferStatus.COMPLETED
             self._save_transfer(transfer_id, state)
             report.status = "completed"
+        except (RateLimitError, requests.Timeout, requests.ConnectionError) as exc:
+            state.status = TransferStatus.PAUSED
+            self._save_transfer(transfer_id, state)
+            raise exc
+        except spotipy.SpotifyException as exc:
+            if exc.http_status not in (401, 403, 429) and (
+                exc.http_status is None or exc.http_status < 500
+            ):
+                raise
+            state.status = TransferStatus.PAUSED
+            self._save_transfer(transfer_id, state)
+            raise
         except KeyboardInterrupt:
             state.status = TransferStatus.PAUSED
             self._save_transfer(transfer_id, state)
