@@ -17,6 +17,7 @@ class MatchedTrack:
     spotify_artist: str
     score: float
     match_type: str = "exact"
+    score_reasons: tuple[str, ...] = ()
 
 
 @dataclass
@@ -153,12 +154,13 @@ def save_report(report: SyncReport, path: str) -> None:
         lines.append("")
 
         if pl.matched:
-            lines.append(f"| {report.source_label} | Spotify Match | Score | Match Type |")
-            lines.append("|-----------|---------------|-------|------------|")
+            lines.append(f"| {report.source_label} | Spotify Match | Score | Match Type | Score Reasons |")
+            lines.append("|-----------|---------------|-------|------------|---------------|")
             for m in pl.matched:
+                reasons = "; ".join(m.score_reasons)
                 lines.append(
                     f"| {m.source_name} | {m.spotify_artist} - {m.spotify_name}"
-                    f" | {m.score:.1f} | {m.match_type} |"
+                    f" | {m.score:.1f} | {m.match_type} | {reasons} |"
                 )
             lines.append("")
 

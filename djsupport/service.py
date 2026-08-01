@@ -102,6 +102,7 @@ def match_and_sync_playlist(
                 spotify_artist=result["artist"],
                 score=result["score"],
                 match_type=result.get("match_type", "exact"),
+                score_reasons=tuple(result.get("score_reasons", ())),
             ))
         else:
             pl_report.unmatched.append(track.display)

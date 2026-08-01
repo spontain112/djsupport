@@ -83,11 +83,53 @@ def _is_named_variant(mix_descriptor: str | None) -> bool:
     return "original" not in mix_descriptor
 
 
+def _extract_remixer_identity(track: Track) -> str | None:
+    """Return a remixer named by source metadata or the title descriptor."""
+    if track.remixer:
+        return _normalize(track.remixer)
+
+    descriptor = _extract_mix_descriptor(track.name)
+    if not descriptor:
+        return None
+
+    remixer = re.sub(r"\s+(remix|edit)\b.*$", "", descriptor).strip()
+    generic_descriptors = {
+        "club", "extended", "instrumental", "original", "radio", "short",
+    }
+    if remixer in generic_descriptors:
+        return None
+    return remixer or None
+
+
+def _contains_artist_identity(artist_credits: str, identity: str) -> bool:
+    """Return whether normalized credits contain a complete artist identity."""
+    return bool(re.search(rf"(?<!\w){re.escape(identity)}(?!\w)", artist_credits))
+
+
+def _artist_score(track: Track, result: dict) -> tuple[float, str]:
+    """Score artist identity, recognizing an explicitly named co-credited remixer."""
+    source_artist = _normalize(track.artist)
+    result_artist = _normalize(result["artist"])
+    score = fuzz.token_sort_ratio(source_artist, result_artist)
+    remixer = _extract_remixer_identity(track)
+
+    if (
+        source_artist
+        and remixer
+        and _contains_artist_identity(result_artist, source_artist)
+        and _contains_artist_identity(result_artist, remixer)
+    ):
+        credited_artists = _normalize(f"{track.artist}, {remixer}")
+        boosted_score = fuzz.token_sort_ratio(credited_artists, result_artist)
+        if boosted_score > score:
+            return boosted_score, "original artist and named remixer co-credited"
+
+    return score, "source artist similarity"
+
+
 def _score_components(track: Track, result: dict) -> dict[str, float]:
     """Return matching score components for a Rekordbox/Spotify pair."""
-    artist_score = fuzz.token_sort_ratio(
-        _normalize(track.artist), _normalize(result["artist"])
-    )
+    artist_score, _artist_score_reason = _artist_score(track, result)
     norm_title = _normalize(track.name)
     norm_result = _normalize(result["name"])
     raw_title_score = fuzz.token_sort_ratio(norm_title, norm_result)
@@ -210,9 +252,15 @@ def _select_best(track: Track, results: list[dict], threshold: int) -> dict | No
     exact_candidates = [s for s in scored if s[4] == "exact"]
     exact_candidates.sort(key=lambda x: x[1], reverse=True)
     if exact_candidates:
-        best, best_score, _base_score, _components, _match_type = exact_candidates[0]
+        best, best_score, _base_score, components, _match_type = exact_candidates[0]
         if best_score >= threshold:
-            return {**best, "score": best_score, "match_type": "exact"}
+            _artist_score_value, artist_score_reason = _artist_score(track, best)
+            return {
+                **best,
+                "score": best_score,
+                "match_type": "exact",
+                "score_reasons": [artist_score_reason],
+            }
 
     # Second pass: fallback to a different version if the base track is strong.
     # This preserves the user's track intent in reporting while avoiding silent
@@ -226,7 +274,16 @@ def _select_best(track: Track, results: list[dict], threshold: int) -> dict | No
             and components["stripped_title_score"] >= 90
             and components["artist_score"] >= 70
         ):
-            return {**best, "score": base_score, "match_type": "fallback_version"}
+            _artist_score_value, artist_score_reason = _artist_score(track, best)
+            return {
+                **best,
+                "score": base_score,
+                "match_type": "fallback_version",
+                "score_reasons": [
+                    artist_score_reason,
+                    "fallback version",
+                ],
+            }
 
     return None
 

@@ -239,6 +239,95 @@ class TestMatchTrack:
         assert result["score"] >= 80
         assert result["match_type"] == "exact"
 
+    def test_matches_remix_when_spotify_co_credits_named_remixer(self):
+        sp = self._mock_sp([
+            make_spotify_item(
+                "The Hours - Allies for Everyone Remix",
+                "Balad, Allies for Everyone",
+                "spotify:track:remix",
+            )
+        ])
+        track = make_track("The Hours (Allies for Everyone Remix)", "Balad")
+
+        result = match_track(sp, track, threshold=80)
+
+        assert result is not None
+        assert result["uri"] == "spotify:track:remix"
+        assert result["score"] >= 80
+        assert result["match_type"] == "exact"
+        assert "original artist and named remixer co-credited" in result["score_reasons"]
+
+    def test_does_not_boost_unrelated_spotify_co_artists(self):
+        sp = self._mock_sp([
+            make_spotify_item(
+                "The Hours - Allies for Everyone Remix",
+                "Balad, Unrelated Singer, Random Ensemble",
+                "spotify:track:unrelated",
+            )
+        ])
+        track = make_track("The Hours (Allies for Everyone Remix)", "Balad")
+
+        assert match_track(sp, track, threshold=80) is None
+
+    def test_matches_co_credit_from_explicit_remixer_metadata(self):
+        sp = self._mock_sp([
+            make_spotify_item(
+                "Track - Club Remix",
+                "Original Artist, Known Remixer",
+                "spotify:track:metadata-remixer",
+            )
+        ])
+        track = make_track(
+            "Track (Club Remix)", "Original Artist", remixer="Known Remixer",
+        )
+
+        result = match_track(sp, track, threshold=80)
+
+        assert result is not None
+        assert result["uri"] == "spotify:track:metadata-remixer"
+        assert "original artist and named remixer co-credited" in result["score_reasons"]
+
+    def test_matches_co_credit_from_named_edit_descriptor(self):
+        sp = self._mock_sp([
+            make_spotify_item(
+                "Track - Known Artist Edit",
+                "Original Artist, Known Artist",
+                "spotify:track:named-edit",
+            )
+        ])
+        track = make_track("Track (Known Artist Edit)", "Original Artist")
+
+        result = match_track(sp, track, threshold=80)
+
+        assert result is not None
+        assert result["uri"] == "spotify:track:named-edit"
+        assert "original artist and named remixer co-credited" in result["score_reasons"]
+
+    @pytest.mark.parametrize("descriptor", ["Club Remix", "Extended Remix", "Radio Remix"])
+    def test_does_not_treat_generic_version_descriptor_as_remixer(self, descriptor):
+        sp = self._mock_sp([
+            make_spotify_item(
+                f"Track - {descriptor}",
+                f"Original Artist, {descriptor.removesuffix(' Remix')}",
+                "spotify:track:generic",
+            )
+        ])
+        track = make_track(f"Track ({descriptor})", "Original Artist")
+
+        assert match_track(sp, track, threshold=95) is None
+
+    def test_does_not_match_partial_artist_or_remixer_names(self):
+        sp = self._mock_sp([
+            make_spotify_item(
+                "Track - DJ Annex Remix",
+                "Joanne, DJ Annexed",
+                "spotify:track:partial-names",
+            )
+        ])
+        track = make_track("Track (DJ Annex Remix)", "Ann")
+
+        assert match_track(sp, track, threshold=80) is None
+
     def test_returns_none_when_no_results(self):
         sp = self._mock_sp([])
         track = make_track("Vultora", "Solomun")

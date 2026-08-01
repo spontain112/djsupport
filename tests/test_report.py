@@ -9,13 +9,17 @@ import pytest
 from djsupport.report import MatchedTrack, PlaylistReport, SyncReport, save_report
 
 
-def _matched(name="Track A", spotify_name="Track A", artist="Artist", score=95.0, match_type="exact"):
+def _matched(
+    name="Track A", spotify_name="Track A", artist="Artist", score=95.0,
+    match_type="exact", score_reasons=(),
+):
     return MatchedTrack(
         source_name=name,
         spotify_name=spotify_name,
         spotify_artist=artist,
         score=score,
         match_type=match_type,
+        score_reasons=score_reasons,
     )
 
 
@@ -147,6 +151,20 @@ class TestSaveReport:
         save_report(r, path)
         content = (tmp_path / "report.md").read_text()
         assert "Obscure Track" in content
+
+    def test_file_explains_named_remixer_co_credit(self, tmp_path):
+        path = str(tmp_path / "report.md")
+        match = _matched(
+            name="Balad - The Hours (Allies for Everyone Remix)",
+            artist="Balad, Allies for Everyone",
+            score_reasons=("original artist and named remixer co-credited",),
+        )
+
+        save_report(_report(playlists=[_playlist(matched=[match])]), path)
+
+        assert "original artist and named remixer co-credited" in (
+            tmp_path / "report.md"
+        ).read_text()
 
     def test_dry_run_mode_label(self, tmp_path):
         path = str(tmp_path / "report.md")
