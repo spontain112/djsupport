@@ -605,3 +605,39 @@ class TestBeatportCliTransfer:
         request = execute.call_args.args[0]
         assert request.preview is False
         assert request.source == "https://www.beatport.com/chart/fixture/14"
+
+    @patch("djsupport.transfer.FileTransferStorage.load_transfer")
+    @patch("djsupport.transfer.Transfer.execute")
+    @patch("djsupport.cli.get_client", return_value=MagicMock())
+    def test_cli_can_resume_a_visible_transfer_id(
+        self, mock_client, execute, load_transfer, tmp_path,
+    ):
+        load_transfer.return_value = MagicMock()
+        execute.return_value = SyncReport(
+            timestamp=datetime.now(), threshold=80, dry_run=False,
+            playlists=[PlaylistReport(name="Fixture", path="fixture")],
+            transfer_id="resume-me", status="completed",
+        )
+
+        result = CliRunner().invoke(cli, [
+            "beatport", "https://www.beatport.com/chart/fixture/14",
+            "--resume", "resume-me", "--state-path", str(tmp_path / "state.json"),
+        ])
+
+        assert result.exit_code == 0, result.output
+        assert "Transfer ID: resume-me" in result.output
+        assert execute.call_args.args[0].transfer_id == "resume-me"
+
+    @patch("djsupport.transfer.Transfer.abandon")
+    @patch("djsupport.cli.get_client", return_value=MagicMock())
+    def test_cli_can_explicitly_abandon_a_transfer(
+        self, mock_client, abandon, tmp_path,
+    ):
+        result = CliRunner().invoke(cli, [
+            "beatport", "https://www.beatport.com/chart/fixture/14",
+            "--abandon", "stop-me", "--state-path", str(tmp_path / "state.json"),
+        ])
+
+        assert result.exit_code == 0, result.output
+        abandon.assert_called_once_with("stop-me")
+        assert "Transfer stop-me abandoned" in result.output
