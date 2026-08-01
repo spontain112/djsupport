@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Versioned, timestamped local-data backup archives and integrity-checked,
+  preview-first, conflict-aware atomic restore; OAuth credentials and unrelated
+  files are excluded
 - Durable Rekordbox Batch execution with independent playlist outcomes,
   partial-success reporting, safe shared-failure stops, and resumable checkpoints
 - Explicit Corrections from edited review CSV files, with validated stable source

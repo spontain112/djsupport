@@ -14,6 +14,7 @@ Sync your Rekordbox playlists to Spotify. Parses a Rekordbox XML library export,
 - **Playlist prefix** — prefix Spotify playlist names (e.g. `djsupport / Deep House`) to keep them organized
 - **Combined playlist** — merge all tracks into a single playlist sorted by date added
 - **Graceful rate limiting** — aborts with a clear message, saves cache, and exits non-zero instead of hanging; resume later to continue where you left off
+- **Local-data backup and restore** — creates versioned archives without OAuth credentials and validates, previews, and conflict-checks restores before changing data
 
 ## Prerequisites
 
@@ -66,6 +67,25 @@ djsupport library show
 ```
 
 ## Usage
+
+### Back up and restore local data
+
+Create one timestamped archive in the private application-data directory:
+
+```bash
+djsupport backup
+```
+
+Validate and preview an archive without changing current data, then apply it:
+
+```bash
+djsupport restore /path/to/djsupport-backup-20260801T123456.zip
+djsupport restore /path/to/djsupport-backup-20260801T123456.zip --apply
+```
+
+If Approval or playlist-state truth conflicts, restore stops without mutation
+and prints the conflict identifier. Resolve it explicitly with
+`--resolve 'CONFLICT_ID=current'` or `--resolve 'CONFLICT_ID=archive'`.
 
 ### List playlists
 

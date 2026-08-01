@@ -150,6 +150,69 @@ def library_show():
         click.echo(f"Status: INVALID ({error})")
 
 
+@cli.command("backup")
+@click.option(
+    "--destination", type=click.Path(file_okay=False), default=None,
+    help="Directory for the timestamped archive (defaults to local app data/backups).",
+)
+def backup_local_data(destination: str | None) -> None:
+    """Create one versioned archive of local djsupport data."""
+    from djsupport.backup import LocalDataBackup, default_app_data_path
+
+    app_data = default_app_data_path()
+    archive = LocalDataBackup(app_data).create(
+        Path(destination) if destination else app_data / "backups"
+    )
+    click.echo(f"Backup created: {archive}")
+
+
+@cli.command("restore")
+@click.argument("archive", type=click.Path(exists=True, dir_okay=False))
+@click.option("--apply", is_flag=True, help="Apply the validated restore preview.")
+@click.option(
+    "--resolve", "resolution_values", multiple=True, metavar="CONFLICT=CHOICE",
+    help="Resolve a listed conflict with current or archive.",
+)
+def restore_local_data(
+    archive: str, apply: bool, resolution_values: tuple[str, ...],
+) -> None:
+    """Validate and preview a backup; use --apply to restore it."""
+    from djsupport.backup import LocalDataBackup, default_app_data_path
+
+    service = LocalDataBackup(default_app_data_path())
+    preview = service.preview(archive)
+    if not preview.valid:
+        raise click.ClickException("; ".join(preview.errors))
+    click.echo("Archive contents:")
+    for path in preview.contents:
+        click.echo(f"  {path}")
+    click.echo("Proposed changes:")
+    for change in preview.changes:
+        click.echo(f"  {change}")
+    for conflict in preview.conflicts:
+        click.echo(
+            f"Conflict {conflict.conflict_id} ({conflict.kind}); "
+            "choose current or archive"
+        )
+    if not apply:
+        click.echo("Preview only; current data was not changed.")
+        return
+    try:
+        resolutions = dict(value.split("=", 1) for value in resolution_values)
+    except ValueError as exc:
+        raise click.UsageError(
+            "Each --resolve value must be CONFLICT=CHOICE."
+        ) from exc
+    result = service.restore(archive, resolutions=resolutions)
+    if not result.restored:
+        if result.errors:
+            raise click.ClickException("; ".join(result.errors))
+        raise click.ClickException(
+            "Unresolved conflicts; current data was not changed."
+        )
+    click.echo("Restore completed.")
+
+
 @cli.command()
 @click.argument("xml_path", required=False, type=click.Path(exists=True, dir_okay=False))
 @click.option("--playlist", "-p", help="Sync only this playlist (by name).")
