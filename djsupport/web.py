@@ -125,6 +125,12 @@ def create_app(
     def oauth_manager():
         return auth_manager() if auth_manager is not None else _auth_manager()
 
+    def require_authenticated() -> None:
+        mgr = oauth_manager()
+        token = mgr.get_cached_token()
+        if not token or mgr.is_token_expired(token):
+            raise HTTPException(status_code=401, detail="Not authenticated with Spotify")
+
     def transfer_for(transfer_id: str, request: SyncRequest | None = None):
         probe_request = request or SyncRequest(
             url="https://www.beatport.com/chart/durable/1"
@@ -175,10 +181,7 @@ def create_app(
             url_type = _detect_url_type(request.url)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        mgr = oauth_manager()
-        token = mgr.get_cached_token()
-        if not token or mgr.is_token_expired(token):
-            raise HTTPException(status_code=401, detail="Not authenticated with Spotify")
+        require_authenticated()
         transfer_id = uuid4().hex
         transfer = make_transfer(url_type, request)
         transfer_request = TransferRequest(
@@ -191,9 +194,9 @@ def create_app(
             playlist_prefix=request.prefix,
             transfer_id=transfer_id,
         )
+        transfer.prepare(transfer_request)
         run_background(_run_transfer, (transfer, transfer_request))
         return {
-            "job_id": transfer_id,
             "transfer_id": transfer_id,
             "url_type": url_type,
         }
@@ -206,11 +209,12 @@ def create_app(
                 data = {
                     "phase": (
                         "complete" if progress.status == "completed"
+                        else "error" if progress.error
                         else progress.status
                     ),
                     "current": progress.current,
                     "total": progress.total,
-                    "detail": f"{progress.current}/{progress.total}",
+                    "detail": progress.error or f"{progress.current}/{progress.total}",
                 }
                 yield f"data: {json.dumps(data)}\n\n"
                 if progress.status in {"completed", "paused", "abandoned"}:
@@ -220,10 +224,7 @@ def create_app(
 
     @web_app.post("/sync/{transfer_id}/resume")
     def resume_sync(transfer_id: str):
-        mgr = oauth_manager()
-        token = mgr.get_cached_token()
-        if not token or mgr.is_token_expired(token):
-            raise HTTPException(status_code=401, detail="Not authenticated with Spotify")
+        require_authenticated()
         transfer, progress = transfer_for(transfer_id)
         if progress.status not in {"completed", "abandoned"}:
             run_background(
@@ -237,6 +238,8 @@ def create_app(
     @web_app.get("/sync/{transfer_id}/result")
     def sync_result(transfer_id: str):
         transfer, progress = transfer_for(transfer_id)
+        if progress.error:
+            return {"error": progress.error, "transfer_id": transfer_id}
         if progress.status != "completed":
             raise HTTPException(status_code=202, detail="Transfer still in progress")
         report = transfer.execute(TransferRequest(

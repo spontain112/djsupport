@@ -1786,6 +1786,70 @@ class TestRekordboxBatchExecution:
 
 
 class TestTransferPublicationLifecycle:
+    def test_prepared_transfer_is_visible_before_source_intake_and_resumes(self, tmp_path):
+        class CountingSource(FixtureBeatportSource):
+            consumptions = 0
+
+            def consume(self, reference):
+                self.consumptions += 1
+                return super().consume(reference)
+
+        source = CountingSource(FIXTURE)
+        spotify = StatefulSpotify()
+        state_path = tmp_path / "transfers.json"
+        request = TransferRequest(
+            source="fixture", preview=True, transfer_id="prepared-transfer",
+        )
+        Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=source, spotify=spotify, matching_knowledge=InMemoryStorage(),
+            transfer_storage=FileTransferStorage(state_path),
+        ).prepare(request)
+
+        reloaded = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=source, spotify=spotify, matching_knowledge=InMemoryStorage(),
+            transfer_storage=FileTransferStorage(state_path),
+        )
+        progress = reloaded.progress("prepared-transfer")
+        report = reloaded.execute(request)
+
+        assert progress.status == "matching"
+        assert (progress.current, progress.total) == (0, 0)
+        assert source.consumptions == 1
+        assert report.status == "completed"
+
+    def test_failure_is_a_durable_observable_outcome(self, tmp_path):
+        class FailingSource:
+            source_label = "Beatport"
+
+            def consume(self, reference):
+                raise ValueError("fixture intake failed")
+
+        state_path = tmp_path / "transfers.json"
+        request = TransferRequest(
+            source="fixture", preview=True, transfer_id="failed-transfer",
+        )
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=FailingSource(), spotify=StatefulSpotify(),
+            matching_knowledge=InMemoryStorage(),
+            transfer_storage=FileTransferStorage(state_path),
+        )
+        transfer.prepare(request)
+        with pytest.raises(ValueError, match="fixture intake failed"):
+            transfer.execute(request)
+
+        progress = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=FailingSource(), spotify=StatefulSpotify(),
+            matching_knowledge=InMemoryStorage(),
+            transfer_storage=FileTransferStorage(state_path),
+        ).progress("failed-transfer")
+
+        assert progress.status == "paused"
+        assert progress.error == "fixture intake failed"
+
     def test_progress_reloads_from_durable_state_without_resuming_work(self, tmp_path):
         spotify = StatefulSpotify({
             ("Known Artist", "Known Track"): _match(

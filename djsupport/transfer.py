@@ -165,9 +165,10 @@ class TransferProgress:
 
     transfer_id: str
     source: str
-    status: str
+    status: TransferStatus
     current: int
     total: int
+    error: str | None = None
 
 
 class BatchPhase(str, Enum):
@@ -1126,6 +1127,32 @@ class Transfer:
         """Request a pause after the current track reaches a safe checkpoint."""
         self._pause_requested = True
 
+    def prepare(self, request: TransferRequest) -> str:
+        """Durably reserve a Transfer ID before potentially slow source intake."""
+        if self._transfer_storage is None:
+            raise ValueError("Preparation requires durable Transfer storage")
+        if request.mode is None:
+            request = replace(
+                request,
+                mode=getattr(self._source, "default_mode", TransferMode.SNAPSHOT),
+            )
+        transfer_id = request.transfer_id or uuid4().hex
+        state = self._transfer_storage.load_transfer(transfer_id)
+        if state is not None:
+            return transfer_id
+        state = TransferState(
+            status=TransferStatus.MATCHING,
+            source=request.source,
+            account_id=self._spotify.account_id(),
+            request=self._stored_request(request),
+            selection={},
+            created_at=datetime.now().isoformat(),
+            next_track_index=0,
+            matched=[], unmatched=[], publication_items=[], alternatives=[],
+        )
+        self._save_transfer(transfer_id, state)
+        return transfer_id
+
     def progress(self, transfer_id: str) -> TransferProgress:
         """Reload observable progress without consuming or resuming the source."""
         if self._transfer_storage is None:
@@ -1138,10 +1165,32 @@ class Transfer:
         return TransferProgress(
             transfer_id=transfer_id,
             source=state.source,
-            status=state.status.value,
+            status=state.status,
             current=state.next_track_index,
             total=len(state.selection.get("tracks", ())),
+            error=state.outcome if state.status == TransferStatus.PAUSED else None,
         )
+
+    @staticmethod
+    def _stored_request(request: TransferRequest) -> dict:
+        assert request.mode is not None
+        return {
+            "source": request.source,
+            "mode": request.mode.value,
+            "preview": request.preview,
+            "threshold": request.threshold,
+            "retry": request.retry,
+            "retry_days": request.retry_days,
+            "playlist_prefix": request.playlist_prefix,
+            "drift_resolution": (
+                request.drift_resolution.value if request.drift_resolution else None
+            ),
+            "mirror_disposition": (
+                request.mirror_disposition.value
+                if request.mirror_disposition else None
+            ),
+            "mirror_playlist_id": request.mirror_playlist_id,
+        }
 
     def plan_batch(self, request: BatchPlanRequest) -> BatchPlan:
         """Plan an explicitly selected Rekordbox Batch without side effects."""
@@ -1676,7 +1725,32 @@ class Transfer:
             self._transfer_storage.load_transfer(transfer_id)
             if self._transfer_storage is not None else None
         )
-        if state is None:
+        if state is None or not state.selection:
+            prepared_state = state
+            if prepared_state is not None:
+                if prepared_state.source != request.source:
+                    raise ValueError("A resumed Transfer must use its original source")
+                if prepared_state.account_id != self._spotify.account_id():
+                    raise ValueError(
+                        "A Transfer cannot resume under another Spotify account"
+                    )
+                request = TransferRequest(
+                    **{
+                        **prepared_state.request,
+                        "mode": TransferMode(prepared_state.request["mode"]),
+                        "drift_resolution": (
+                            DriftResolution(prepared_state.request["drift_resolution"])
+                            if prepared_state.request.get("drift_resolution") else None
+                        ),
+                        "mirror_disposition": (
+                            MirrorDisposition(
+                                prepared_state.request["mirror_disposition"]
+                            )
+                            if prepared_state.request.get("mirror_disposition") else None
+                        ),
+                    },
+                    transfer_id=transfer_id,
+                )
             try:
                 selection = self._source.consume(request.source)
             except SourceNotFound:
@@ -1732,6 +1806,16 @@ class Transfer:
                         transfer_id=transfer_id,
                         status=status,
                     )
+                if prepared_state is not None:
+                    prepared_state.status = TransferStatus.PAUSED
+                    prepared_state.outcome = "Source selection was not found"
+                    self._save_transfer(transfer_id, prepared_state)
+                raise
+            except Exception as exc:
+                if prepared_state is not None:
+                    prepared_state.status = TransferStatus.PAUSED
+                    prepared_state.outcome = str(exc)
+                    self._save_transfer(transfer_id, prepared_state)
                 raise
             relinked_mirror = None
             if request.mirror_disposition == MirrorDisposition.RELINK:
@@ -1747,29 +1831,15 @@ class Transfer:
                     raise ValueError(
                         "The Mirror to relink does not belong to this Spotify account"
                     )
-            created_at = datetime.now()
+            created_at = (
+                datetime.fromisoformat(prepared_state.created_at)
+                if prepared_state is not None else datetime.now()
+            )
             state = TransferState(
                 status=TransferStatus.MATCHING,
                 source=request.source,
                 account_id=self._spotify.account_id(),
-                request={
-                    "source": request.source,
-                    "mode": request.mode.value,
-                    "preview": request.preview,
-                    "threshold": request.threshold,
-                    "retry": request.retry,
-                    "retry_days": request.retry_days,
-                    "playlist_prefix": request.playlist_prefix,
-                    "drift_resolution": (
-                        request.drift_resolution.value
-                        if request.drift_resolution else None
-                    ),
-                    "mirror_disposition": (
-                        request.mirror_disposition.value
-                        if request.mirror_disposition else None
-                    ),
-                    "mirror_playlist_id": request.mirror_playlist_id,
-                },
+                request=self._stored_request(request),
                 selection={
                     "name": selection.name,
                     "reference": selection.reference,
@@ -2280,6 +2350,7 @@ class Transfer:
             report.status = "completed"
         except (RateLimitError, requests.Timeout, requests.ConnectionError) as exc:
             state.status = TransferStatus.PAUSED
+            state.outcome = str(exc)
             self._save_transfer(transfer_id, state)
             raise exc
         except spotipy.SpotifyException as exc:
@@ -2288,16 +2359,18 @@ class Transfer:
             ):
                 raise
             state.status = TransferStatus.PAUSED
+            state.outcome = str(exc)
             self._save_transfer(transfer_id, state)
             raise
         except KeyboardInterrupt:
             state.status = TransferStatus.PAUSED
             self._save_transfer(transfer_id, state)
             raise
-        except Exception:
+        except Exception as exc:
             # A durable single Transfer remains resumable after adapter or
             # integration failures that are not classified above.
             state.status = TransferStatus.PAUSED
+            state.outcome = str(exc)
             self._save_transfer(transfer_id, state)
             raise
         finally:

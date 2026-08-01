@@ -596,7 +596,7 @@
 
                 const data = await res.json();
                 localStorage.setItem(activeTransferKey, data.transfer_id);
-                listenProgress(data.job_id);
+                listenProgress(data.transfer_id);
             } catch (e) {
                 showError(e.message);
             }

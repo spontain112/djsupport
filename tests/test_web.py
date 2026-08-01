@@ -143,10 +143,13 @@ class TestSyncEndpoints:
         mgr = MagicMock()
         mgr.get_cached_token.return_value = {"access_token": "tok"}
         mgr.is_token_expired.return_value = False
+        pending_background_work = []
         first_app = create_app(
             transfer_factory=factory,
             auth_manager=lambda: mgr,
-            background_runner=lambda target, args: target(*args),
+            background_runner=lambda target, args: pending_background_work.append(
+                (target, args)
+            ),
         )
         res = TestClient(first_app).post(
             "/sync", json={"url": "https://www.beatport.com/chart/test/123"},
@@ -155,11 +158,22 @@ class TestSyncEndpoints:
         data = res.json()
         assert "transfer_id" in data
         assert data["url_type"] == "chart"
+        assert len(pending_background_work) == 1
+
+        prepared = TestClient(first_app).get(
+            f"/sync/{data['transfer_id']}/result",
+        )
+        assert prepared.status_code == 202
+
         restarted_app = create_app(
             transfer_factory=factory,
             auth_manager=lambda: mgr,
             background_runner=lambda target, args: target(*args),
         )
+        resumed = TestClient(restarted_app).post(
+            f"/sync/{data['transfer_id']}/resume",
+        )
+        assert resumed.status_code == 200
         result = TestClient(restarted_app).get(
             f"/sync/{data['transfer_id']}/result",
         )
@@ -193,6 +207,57 @@ class TestSyncEndpoints:
         request = transfer.execute.call_args.args[0]
         assert request.source == "https://www.beatport.com/label/test/1"
         assert request.mode.value == "snapshot"
+
+    def test_failed_outcome_reloads_after_restart(self, tmp_path):
+        class FailingSource:
+            source_label = "Beatport"
+
+            def consume(self, reference):
+                raise ValueError("fixture chart is invalid")
+
+        spotify = MagicMock()
+        spotify.account_id.return_value = "spotify-user-1"
+
+        class Knowledge:
+            persistent = False
+            def lookup(self, track, threshold): return None
+            def should_retry(self, track, threshold, retry_days, force): return True
+            def retain(self, track, threshold, result): pass
+            def checkpoint(self): pass
+
+        def factory(_kind, _request):
+            return Transfer(
+                source=FailingSource(), spotify=spotify,
+                matching_knowledge=Knowledge(),
+                publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
+                publication_storage=FilePublicationStorage(
+                    tmp_path / "publications.json"
+                ),
+                transfer_storage=FileTransferStorage(tmp_path / "transfers.json"),
+            )
+
+        mgr = MagicMock()
+        mgr.get_cached_token.return_value = {"access_token": "tok"}
+        mgr.is_token_expired.return_value = False
+        failed_app = create_app(
+            transfer_factory=factory, auth_manager=lambda: mgr,
+            background_runner=lambda target, args: target(*args),
+        )
+        started = TestClient(failed_app).post(
+            "/sync", json={"url": "https://www.beatport.com/chart/test/123"},
+        )
+        transfer_id = started.json()["transfer_id"]
+
+        restarted = create_app(
+            transfer_factory=factory, auth_manager=lambda: mgr,
+            background_runner=lambda target, args: target(*args),
+        )
+        result = TestClient(restarted).get(f"/sync/{transfer_id}/result")
+
+        assert result.status_code == 200
+        assert result.json() == {
+            "error": "fixture chart is invalid", "transfer_id": transfer_id,
+        }
 
 
 class TestURLDetection:
