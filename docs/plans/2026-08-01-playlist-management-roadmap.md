@@ -6,7 +6,11 @@
 
 **Evidence base:** [playlist-management API review](../research/2026-08-01-playlist-management-api-review.md)
 
-**Baseline:** DJ Support 0.4.0 at `5ad78c5894e9ff3eae640a81d7a63f8e9b767e87`
+**Released-product baseline:** DJ Support 0.4.0 at
+`d7c84f5f144b18920b0edcf32799b5bb8169bd46`
+
+**Research/planning baseline:** API review merged at
+`5ad78c5894e9ff3eae640a81d7a63f8e9b767e87`
 
 ## Purpose and product boundary
 
@@ -626,7 +630,7 @@ on a production PR as though it already specifies implementation.
 | Approval or Correction application | Spotify/local-authority mutation | Playlist-scoped Approval; Correction supplied explicitly; conflicts require review |
 | Restore or Drift restoration | Destructive Spotify mutation | Exact Preview, destination/head confirmation, risk/cost display, resumable checkpoint |
 | Revoke Approved Match | Local-authority mutation | Explicit Drift choice; never coupled silently to playlist change |
-| Orphan library removal | Spotify mutation with non-delete semantics | Explicit disposition and current capability wording |
+| Orphaned Mirror disposition: keep, relink, or remove from the Spotify library | Local-authority and/or Spotify mutation, depending on the selected disposition | Explicit disposition and current capability wording; never infer deletion intent |
 | Metadata/privacy/collaboration change | Spotify mutation | Per-field Preview and confirmation; additional scope only for separately accepted capability |
 | Live API validation or user-derived evidence export | Gated operation | Separate stated authorization, bounds, redaction, and destination |
 
@@ -644,7 +648,8 @@ on a production PR as though it already specifies implementation.
 - Playlist Drift, Orphaned Mirror disposition, relinking, broad Batch selection,
   and destructive mutation require explicit user choice.
 - User-derived state and evidence stay in versioned private application storage
-  under ADR-0001; repository fixtures are synthetic or explicitly consented.
+  under ADR-0001; repository fixtures are synthetic or explicitly exported,
+  consented, and privacy-reviewed.
 - Development Mode is the supported planning baseline. Extended Quota, official
   Beatport access, live Rekordbox management, true delete, playlist folders, and
   server-side rollback are not assumed.
