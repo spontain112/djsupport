@@ -61,7 +61,7 @@ class TestRepositoryPrivacy:
             )
             assert result.returncode == 0, f"generated artifact is not ignored: {path}"
 
-    def test_only_runtime_html_is_tracked(self):
+    def test_only_intentional_runtime_and_research_html_is_tracked(self):
         result = subprocess.run(
             ["git", "ls-files", "*.html"],
             cwd=REPOSITORY_ROOT,
@@ -74,7 +74,10 @@ class TestRepositoryPrivacy:
             path for path in result.stdout.splitlines()
             if (REPOSITORY_ROOT / path).exists()
         ]
-        assert existing == ["djsupport/static/index.html"]
+        assert existing == [
+            "djsupport/static/index.html",
+            "docs/research/studies/mirror-drift/index.html",
+        ]
 
     def test_chrome_design_source_is_not_retained_in_core(self):
         assert not (REPOSITORY_ROOT / "docs/design/NewUI.pen").exists()

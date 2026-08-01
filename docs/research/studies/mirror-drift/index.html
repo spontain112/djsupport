@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DJ Support Mirror study</title>
+  <style>
+    :root { color-scheme: dark; font: 18px/1.5 system-ui, sans-serif; }
+    body { margin: 0; background: #101114; color: #f7f7f8; }
+    main { width: min(42rem, calc(100% - 2rem)); margin: 3rem auto; }
+    section { display: none; background: #191b20; padding: 2rem; border-radius: 1rem; }
+    section:first-of-type { display: block; }
+    main:has(section:target) section:first-of-type { display: none; }
+    section:target, main:has(#select:target) section:first-of-type { display: block; }
+    nav { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 2rem; }
+    a { color: #101114; background: #9ee7c2; padding: .7rem 1rem; border-radius: .5rem; }
+    .muted { color: #b9bdc7; }
+    li { margin-block: .7rem; }
+    label { display: block; margin-block: .75rem; padding: .75rem; border: 1px solid #555b66; border-radius: .5rem; }
+    .selection-continue, .selected-source { display: none; }
+    main:has(input:checked) .selection-continue { display: inline-block; }
+    main:has(input[value="late-shift"]:checked) .selected-late-shift { display: block; }
+    main:has(input[value="sunrise-tools"]:checked) .selected-sunrise-tools { display: block; }
+  </style>
+</head>
+<body>
+<main>
+  <p class="muted">Research prototype · fictitious data · nothing connects to Spotify</p>
+
+  <section id="select" data-screen="select">
+    <h1>Choose one source playlist</h1>
+    <label><input type="radio" name="source-playlist" value="late-shift" required> Late Shift — 8 tracks from Rekordbox</label>
+    <label><input type="radio" name="source-playlist" value="sunrise-tools" required> Sunrise Tools — 12 tracks from Rekordbox</label>
+    <nav><a class="selection-continue" data-requires-selection href="#preview">Continue</a></nav>
+  </section>
+
+  <section id="preview" data-screen="preview">
+    <h1>Preview the check</h1>
+    <p class="selected-source selected-late-shift">Selected source: Late Shift</p>
+    <p class="selected-source selected-sunrise-tools">Selected source: Sunrise Tools</p>
+    <p>DJ Support will inspect one source playlist and its Spotify Mirror.</p>
+    <p><strong>Preview makes no changes to Spotify.</strong> Estimated cost: 2 requests.</p>
+    <nav><a href="#select">Back</a><a href="#unchanged">Check unchanged example</a></nav>
+  </section>
+
+  <section id="unchanged" data-screen="unchanged">
+    <h1>The Mirror has not changed</h1>
+    <p>The retained Spotify snapshot is the same as the latest snapshot.</p>
+    <nav><a href="#preview">Back</a><a href="#changed">See changed example</a></nav>
+  </section>
+
+  <section id="changed" data-screen="changed">
+    <h1>The Mirror changed</h1>
+    <p>Retained snapshot demo-A differs from latest snapshot demo-B. Cause not inferred.</p>
+    <p>Inspect the ordered differences before deciding what to do.</p>
+    <ol>
+      <li>01 · Cinder Arc — Night Signal · unchanged</li>
+      <li>02 · Vale Index — Second Light · moved from 03</li>
+      <li>03 · Vale Index — Second Light · duplicate occurrence added</li>
+      <li>04 · Unknown item · unavailable on Spotify · identity uncertain</li>
+    </ol>
+    <p><strong>Inspection makes no changes to Spotify.</strong></p>
+    <nav><a href="#unchanged">Back</a><a href="#choice">Inspect differences</a></nav>
+  </section>
+
+  <section id="choice" data-screen="choice">
+    <h1>Choose what happens next</h1>
+    <p>Nothing will be repaired automatically. No repair has been selected.</p>
+    <nav><a href="#changed">Back</a><a href="#choice">Leave unchanged</a><a href="#select">Return</a></nav>
+  </section>
+</main>
+</body>
+</html>
