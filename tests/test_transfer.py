@@ -1,6 +1,7 @@
 """Behavior tests at the public Transfer seam."""
 
 import json
+import csv
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
@@ -58,6 +59,7 @@ class StatefulSpotify:
         self.searches = []
         self.playlists = {"existing": ["spotify:track:untouched"]}
         self.publication_keys = {}
+        self.playlist_replacements = 0
 
     def account_id(self):
         return "spotify-user-1"
@@ -87,6 +89,18 @@ class StatefulSpotify:
             return None
         return list(playlist["tracks"])
 
+    def replace_provisional_playlist_tracks(self, playlist_id, track_uris):
+        self.playlist_replacements += 1
+        self.playlists[playlist_id]["tracks"] = list(track_uris)
+
+    def spotify_track(self, uri):
+        track_id = uri.removeprefix("spotify:track:")
+        return {
+            "uri": uri,
+            "name": f"Corrected {track_id}",
+            "artist": "Correction Artist",
+        }
+
     def match(self, track, threshold):
         self.searches.append((track.artist, track.name, threshold))
         return self.matches.get((track.artist, track.name))
@@ -103,6 +117,7 @@ class InMemoryStorage:
         self.approvals = []
         self.approved_matches = []
         self.rejected_matches = []
+        self.corrections = []
 
     def lookup(self, track, threshold):
         result = self.matches.get((track.artist, track.name))
@@ -144,6 +159,9 @@ class InMemoryStorage:
 
     def reject(self, item):
         self.rejected_matches.append(item)
+
+    def correct(self, item):
+        self.corrections.append(item)
 
 
 FIXTURE = Path(__file__).parent / "fixtures" / "beatport_chart.json"
@@ -893,6 +911,187 @@ class TestProvisionalPlaylistApproval:
         assert storage.approved_matches == list(review.approved)
         assert storage.rejected_matches == list(review.rejected)
 
+    def test_review_csv_corrections_repair_playlist_and_become_local_truth(
+        self, tmp_path,
+    ):
+        transfer, spotify, storage, playlist_id = self.publish()
+        spotify.playlists[playlist_id]["tracks"] = [
+            "spotify:track:abcdefghijklmnopqrstuv",
+            "spotify:track:known",
+            "spotify:track:new",
+            "spotify:track:manual",
+        ]
+        review_csv = tmp_path / "review.csv"
+        with review_csv.open("w", newline="") as csv_file:
+            writer = csv.DictWriter(csv_file, fieldnames=[
+                "source_track_id", "source_track", "spotify_url",
+                "spotify_track", "score", "match_type",
+            ])
+            writer.writeheader()
+            writer.writerow({
+                "source_track_id": "bp-2",
+                "spotify_url": (
+                    "https://open.spotify.com/track/abcdefghijklmnopqrstuv"
+                    "?si=review"
+                ),
+            })
+
+        review = transfer.approve(playlist_id, corrections=review_csv)
+
+        assert spotify.playlists[playlist_id]["tracks"] == [
+            "spotify:track:known",
+            "spotify:track:abcdefghijklmnopqrstuv",
+            "spotify:track:manual",
+        ]
+        assert [item.source_track_id for item in review.approved] == ["bp-1", "bp-2"]
+        assert [item.spotify_uri for item in review.approved] == [
+            "spotify:track:known", "spotify:track:abcdefghijklmnopqrstuv",
+        ]
+        assert review.rejected == ()
+        assert review.corrections == (review.approved[1],)
+        assert storage.corrections == [review.approved[1]]
+
+    def test_unchanged_review_rows_are_ordinary_approvals(self, tmp_path):
+        transfer, _, storage, playlist_id = self.publish()
+        review_csv = tmp_path / "review.csv"
+        with review_csv.open("w", newline="") as csv_file:
+            writer = csv.DictWriter(
+                csv_file, fieldnames=["source_track_id", "spotify_url"],
+            )
+            writer.writeheader()
+            writer.writerow({
+                "source_track_id": "bp-1",
+                "spotify_url": "spotify:track:known",
+            })
+
+        review = transfer.approve(playlist_id, corrections=review_csv)
+
+        assert [item.source_track_id for item in review.approved] == ["bp-1", "bp-2"]
+        assert storage.corrections == []
+
+    @pytest.mark.parametrize(
+        ("rows", "message"),
+        [
+            ([{"source_track_id": "missing", "spotify_url": "spotify:track:abcdefghijklmnopqrstuv"}], "unknown source_track_id"),
+            ([{"source_track_id": "bp-1", "spotify_url": "https://example.com/track/abcdefghijklmnopqrstuv"}], "invalid Spotify track"),
+            ([{"source_track_id": "bp-1", "spotify_url": "https://example.com/track/known"}], "invalid Spotify track"),
+            ([
+                {"source_track_id": "bp-1", "spotify_url": "spotify:track:abcdefghijklmnopqrstuv"},
+                {"source_track_id": "bp-1", "spotify_url": "spotify:track:zyxwvutsrqponmlkjihgfe"},
+            ], "repeats source_track_id"),
+            ([
+                {"source_track_id": "bp-1", "spotify_url": "spotify:track:known"},
+                {"source_track_id": "bp-1", "spotify_url": "spotify:track:abcdefghijklmnopqrstuv"},
+            ], "repeats source_track_id"),
+        ],
+    )
+    def test_invalid_corrections_are_rejected_before_playlist_changes(
+        self, tmp_path, rows, message,
+    ):
+        transfer, spotify, storage, playlist_id = self.publish()
+        original = list(spotify.playlists[playlist_id]["tracks"])
+        review_csv = tmp_path / "review.csv"
+        with review_csv.open("w", newline="") as csv_file:
+            writer = csv.DictWriter(
+                csv_file, fieldnames=["source_track_id", "spotify_url"],
+            )
+            writer.writeheader()
+            writer.writerows(rows)
+
+        with pytest.raises(ValueError, match=message):
+            transfer.approve(playlist_id, corrections=review_csv)
+
+        assert spotify.playlists[playlist_id]["tracks"] == original
+        assert storage.approvals == []
+        assert storage.corrections == []
+
+    def test_correction_is_durable_approved_knowledge_and_local_regression(
+        self, tmp_path,
+    ):
+        _, spotify, publications, playlist_id = self.publish()
+        cache_path = tmp_path / "matching-knowledge.json"
+        cache = MatchCache(str(cache_path))
+        transfer = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+            matching_knowledge=MatchCacheKnowledge(cache),
+            publication_storage=publications,
+        )
+        review_csv = tmp_path / "review.csv"
+        with review_csv.open("w", newline="") as csv_file:
+            writer = csv.DictWriter(
+                csv_file, fieldnames=["source_track_id", "spotify_url"],
+            )
+            writer.writeheader()
+            writer.writerow({
+                "source_track_id": "bp-2",
+                "spotify_url": "spotify:track:abcdefghijklmnopqrstuv",
+            })
+
+        transfer.approve(playlist_id, corrections=review_csv)
+
+        reloaded = MatchCache(str(cache_path))
+        reloaded.load()
+        approved = reloaded.lookup("New Artist", "New Track", 100)
+        assert approved is not None
+        assert approved.spotify_uri == "spotify:track:abcdefghijklmnopqrstuv"
+        assert approved.approval_status == "approved"
+        assert reloaded.local_regressions == [{
+            "source_track_id": "bp-2",
+            "source_artist": "New Artist",
+            "source_title": "New Track",
+            "spotify_uri": "spotify:track:abcdefghijklmnopqrstuv",
+            "spotify_name": "Corrected abcdefghijklmnopqrstuv",
+            "spotify_artist": "Correction Artist",
+        }]
+
+    def test_missing_correction_is_added_once_across_repeated_approval(self, tmp_path):
+        transfer, spotify, _, playlist_id = self.publish()
+        spotify.playlists[playlist_id]["tracks"] = [
+            "spotify:track:known", "spotify:track:manual",
+        ]
+        review_csv = tmp_path / "review.csv"
+        review_csv.write_text(
+            "source_track_id,spotify_url\n"
+            "bp-2,spotify:track:abcdefghijklmnopqrstuv\n"
+        )
+
+        transfer.approve(playlist_id, corrections=review_csv)
+        transfer.approve(playlist_id, corrections=review_csv)
+
+        assert spotify.playlists[playlist_id]["tracks"] == [
+            "spotify:track:known",
+            "spotify:track:abcdefghijklmnopqrstuv",
+            "spotify:track:manual",
+        ]
+        assert spotify.playlist_replacements == 1
+
+    def test_ambiguous_source_reference_cannot_receive_a_correction(self, tmp_path):
+        transfer, _, storage, playlist_id = self.publish()
+        manifest = storage.publications[0]
+        storage.publications[0] = type(manifest)(
+            **{
+                **manifest.__dict__,
+                "items": (
+                    manifest.items[0],
+                    type(manifest.items[1])(
+                        **{
+                            **manifest.items[1].__dict__,
+                            "source_track_id": manifest.items[0].source_track_id,
+                        }
+                    ),
+                ),
+            }
+        )
+        review_csv = tmp_path / "review.csv"
+        review_csv.write_text(
+            "source_track_id,spotify_url\n"
+            "bp-1,spotify:track:abcdefghijklmnopqrstuv\n"
+        )
+
+        with pytest.raises(ValueError, match="not a unique stable source reference"):
+            transfer.approve(playlist_id, corrections=review_csv)
+
     def test_deleted_provisional_playlist_is_abandoned_with_history_retained(self):
         transfer, spotify, storage, playlist_id = self.publish()
         del spotify.playlists[playlist_id]
@@ -1107,3 +1306,25 @@ class TestBeatportCliTransfer:
         approve.assert_called_once_with("snapshot-1")
         assert "1 approved" in result.output
         assert "2 rejected" in result.output
+
+    @patch("djsupport.transfer.Transfer.approve")
+    @patch("djsupport.cli.get_client", return_value=MagicMock())
+    def test_cli_applies_an_edited_review_csv(
+        self, mock_client, approve, tmp_path,
+    ):
+        approve.return_value = ApprovalOutcome(
+            account_id="spotify-user-1",
+            spotify_playlist_id="snapshot-1",
+            reviewed_at=datetime.now(),
+            status=ApprovalStatus.APPROVED,
+        )
+        review_csv = tmp_path / "review.csv"
+        review_csv.write_text("source_track_id,spotify_url\n")
+
+        result = CliRunner().invoke(cli, [
+            "approve", "snapshot-1", "--review-csv", str(review_csv),
+            "--state-path", str(tmp_path / "state.json"),
+        ])
+
+        assert result.exit_code == 0, result.output
+        approve.assert_called_once_with("snapshot-1", corrections=str(review_csv))

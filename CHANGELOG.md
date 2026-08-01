@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Explicit Corrections from edited review CSV files, with validated stable source
+  references and Spotify track URLs/URIs, idempotent playlist repair, Approved
+  Match promotion, and local-only matcher regression knowledge
 - Playlist-scoped Provisional Playlist approval with durable approved, rejected,
   and abandoned review outcomes
 - Clickable Spotify proposals and stable source references in Markdown reports,
