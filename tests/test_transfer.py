@@ -1432,7 +1432,7 @@ class TestRekordboxBatchPlanning:
 
         with pytest.raises(ValueError, match="duplicate playlist"):
             transfer.plan_batch(BatchPlanRequest(playlist_references=(
-                "My Playlists/Deep", "My Playlists/Deep",
+                "Deep", "My Playlists/Deep",
             )))
 
     def test_positive_and_negative_cache_entries_are_not_expected_lookups(

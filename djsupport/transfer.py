@@ -779,10 +779,14 @@ class RekordboxPlaylistSource:
             tuple(playlist.path for playlist in playlists)
             if whole_library else references
         )
-        return tuple(
+        selections = tuple(
             self._select(tracks, playlists, reference)
             for reference in selected_references
         )
+        canonical_references = [selection.reference for selection in selections]
+        if len(set(canonical_references)) != len(canonical_references):
+            raise ValueError("A Batch cannot contain a duplicate playlist reference")
+        return selections
 
 
 class SpotifyMatcher:
