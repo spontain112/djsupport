@@ -47,7 +47,7 @@ from djsupport.report import (
 from djsupport.spotify import MAX_RATE_LIMIT_WAIT, RateLimitError, _parse_retry_after
 
 
-PUBLICATION_MANIFEST_VERSION = 1
+PUBLICATION_MANIFEST_VERSION = 2
 TRANSFER_STATE_VERSION = 1
 SPOTIFY_TRACK_URI = re.compile(r"^spotify:track:([A-Za-z0-9]{22})$")
 SPOTIFY_TRACK_URL = re.compile(
@@ -289,7 +289,6 @@ class ApprovalConflict:
 
 class SourceAdapter(Protocol):
     source_label: str
-    default_mode: TransferMode
 
     def consume(self, reference: str) -> SourceSelection: ...
 
@@ -346,7 +345,7 @@ class FilePublicationStorage:
             data = json.loads(self.path.read_text())
         except (json.JSONDecodeError, OSError):
             return
-        if data.get("version") != PUBLICATION_MANIFEST_VERSION:
+        if data.get("version") not in (1, PUBLICATION_MANIFEST_VERSION):
             return
         self.manifests = data.get("manifests", [])
         self.approvals = data.get("approvals", data.get("reviews", []))
@@ -581,10 +580,18 @@ class RekordboxPlaylistSource:
                 f"Rekordbox playlist name is ambiguous; select its path: {reference}"
             )
         playlist = selected[0]
+        missing_track_ids = [
+            track_id for track_id in playlist.track_ids if track_id not in tracks
+        ]
+        if missing_track_ids:
+            raise ValueError(
+                "Rekordbox playlist has missing track references: "
+                + ", ".join(missing_track_ids)
+            )
         return SourceSelection(
             playlist.name,
             playlist.path,
-            [tracks[track_id] for track_id in playlist.track_ids if track_id in tracks],
+            [tracks[track_id] for track_id in playlist.track_ids],
         )
 
 
@@ -1074,6 +1081,7 @@ class Transfer:
             raise ValueError("Publishing Transfers require publication storage")
 
         if request.mode is None:
+            # Older internal/test adapters predate source-owned mode policy.
             request = replace(
                 request,
                 mode=getattr(self._source, "default_mode", TransferMode.SNAPSHOT),

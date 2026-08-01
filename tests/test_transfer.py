@@ -35,6 +35,7 @@ from djsupport.transfer import (
     ApprovalOutcome,
     BeatportLabelSource,
     RekordboxPlaylistSource,
+    MirrorRelationship,
 )
 
 
@@ -173,6 +174,9 @@ class InMemoryStorage:
 
 FIXTURE = Path(__file__).parent / "fixtures" / "beatport_chart.json"
 REKORDBOX_FIXTURE = Path(__file__).parent / "fixtures" / "library.xml"
+INCOMPLETE_REKORDBOX_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "rekordbox_missing_track.xml"
+)
 LABEL_FIXTURE = Path(__file__).parent / "fixtures" / "beatport_label_page.json"
 TEST_PUBLISHING_GUARDS = AccountPublishingGuards()
 
@@ -600,6 +604,22 @@ class TestSnapshotPublication:
 
 
 class TestRekordboxMirror:
+    def test_missing_rekordbox_track_stops_before_matching_or_publication(self):
+        spotify = StatefulSpotify()
+        storage = InMemoryStorage()
+
+        with pytest.raises(ValueError, match="missing track references: missing"):
+            Transfer(
+                publishing_guards=TEST_PUBLISHING_GUARDS,
+                source=RekordboxPlaylistSource(INCOMPLETE_REKORDBOX_FIXTURE),
+                spotify=spotify, matching_knowledge=storage,
+                publication_storage=storage,
+            ).execute(TransferRequest(source="Incomplete"))
+
+        assert spotify.searches == []
+        assert spotify.playlists == {"existing": ["spotify:track:untouched"]}
+        assert storage.publications == []
+
     def test_one_selected_playlist_previews_publishes_and_approval_retains_mirror(
         self, tmp_path,
     ):
@@ -661,7 +681,7 @@ class TestRekordboxMirror:
         )["authoritative"] is True
 
 
-class TestSnapshotPublicationContinued:
+class TestTransferPublicationLifecycle:
     def test_paused_transfer_reloads_and_resumes_without_repeating_work(self, tmp_path):
         matches = {
             ("Known Artist", "Known Track"): _match(
@@ -1122,6 +1142,31 @@ class TestSnapshotPublicationContinued:
             item["account_id"]
             for item in reloaded.manifests_for_account("spotify-user-2")
         } == {"spotify-user-2"}
+
+    def test_version_one_publication_state_migrates_when_mirror_state_is_saved(
+        self, tmp_path,
+    ):
+        path = tmp_path / "publication-manifests.json"
+        path.write_text(json.dumps({
+            "version": 1,
+            "manifests": [],
+            "approvals": [],
+        }))
+        storage = FilePublicationStorage(path)
+
+        storage.retain_mirror(MirrorRelationship(
+            account_id="spotify-user-1",
+            source_label="Rekordbox",
+            source_reference="My Playlists/Peak Time",
+            spotify_playlist_id="mirror-1",
+            spotify_playlist_name="Peak Time",
+            approved_at=datetime(2026, 8, 1),
+        ))
+
+        assert json.loads(path.read_text())["version"] == 2
+        assert len(FilePublicationStorage(path).mirrors_for_account(
+            "spotify-user-1"
+        )) == 1
 
 class TestProvisionalPlaylistApproval:
     def publish(self):
