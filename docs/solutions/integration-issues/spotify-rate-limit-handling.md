@@ -136,9 +136,9 @@ Removed `retries=0` — spotipy's built-in retry (default 3) handles transient 5
 
 ## Related Documentation
 
-- [Architectural patterns](.claude/docs/architectural_patterns.md) — `RateLimitError` is the 4th error handling pattern
-- [CHANGELOG.md](CHANGELOG.md) — Documented under [Unreleased]
-- [Gitignore drift solution](docs/solutions/integration-issues/outdated-claude-md-and-gitignore-drift.md) — Related project documentation framework
+- [Architectural patterns](../../../.claude/docs/architectural_patterns.md) — `RateLimitError` is the 4th error handling pattern
+- [CHANGELOG.md](../../../CHANGELOG.md) — Documented under [Unreleased]
+- [Gitignore drift solution](outdated-claude-md-and-gitignore-drift.md) — Related project documentation framework
 
 ## Commits
 

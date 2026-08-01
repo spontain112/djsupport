@@ -40,8 +40,9 @@ djsupport/
   static/       # Web frontend (index.html with Tailwind CSS)
 tests/          # pytest suite
 docs/           # Plans, reports, and solution docs
-  solutions/    # Documented problem solutions (YAML frontmatter, searchable)
-  plans/        # Implementation and feature plans
+  design/       # Retained, non-runtime design sources for the core application
+  solutions/    # Retained incident knowledge (YAML frontmatter, searchable)
+  plans/        # Core-application implementation history and converted research
 ```
 
 ## Key commands
@@ -130,7 +131,10 @@ pytest --cov=djsupport     # Run with coverage
   exports and consents to a privacy-reviewed contribution.
 - Version tracked in `pyproject.toml` (`version = "0.4.0"`)
 - Changelog follows Keep a Changelog format in `CHANGELOG.md`
-- `docs/` contains plans, test plans, and reports
+- `docs/` contains canonical guidance, core implementation history, and solutions;
+  generated reports and out-of-scope product plans do not belong in Git
+- `docs/design/` contains intentionally retained core-product design sources;
+  generated exports belong under the ignored `design-exports/` directory
 - `docs/solutions/` holds documented problem solutions with YAML frontmatter (created via `/compound` workflow)
 - Update `agent.md` in the same PR when adding modules, CLI flags, or changing conventions
 

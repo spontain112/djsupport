@@ -47,3 +47,35 @@ class TestRepositoryPrivacy:
         assert not (
             REPOSITORY_ROOT / "tests/fixtures/match_test_data.csv"
         ).exists()
+
+    def test_obsolete_artifact_locations_are_ignored(self):
+        for path in (
+            "djsupport-datamodel.html",
+            "matcher-playground.html",
+            "djsupport/NewUI.pen",
+        ):
+            result = subprocess.run(
+                ["git", "check-ignore", "--quiet", "--no-index", path],
+                cwd=REPOSITORY_ROOT,
+                check=False,
+            )
+            assert result.returncode == 0, f"generated artifact is not ignored: {path}"
+
+    def test_only_runtime_html_is_tracked(self):
+        result = subprocess.run(
+            ["git", "ls-files", "*.html"],
+            cwd=REPOSITORY_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        existing = [
+            path for path in result.stdout.splitlines()
+            if (REPOSITORY_ROOT / path).exists()
+        ]
+        assert existing == ["djsupport/static/index.html"]
+
+    def test_core_design_source_is_retained_outside_runtime_package(self):
+        assert (REPOSITORY_ROOT / "docs/design/NewUI.pen").is_file()
+        assert not (REPOSITORY_ROOT / "djsupport/NewUI.pen").exists()

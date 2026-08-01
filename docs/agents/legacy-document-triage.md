@@ -18,10 +18,19 @@ Audit performed on 2026-07-31 after GitHub Issues became the configured work tra
 - Completed `todos/` remain historical review records; they do not re-enter triage.
 - Tests remain executable verification rather than tracker items. The default suite contains no skipped or expected-failure tests.
 
-## Superseded or out of scope
+## Removed from the current tree
 
-- The old repository-hygiene plan is superseded by ADR-0001, which permits project documentation while keeping user-specific data local.
-- The Chrome-extension plan is outside this repository's scope and should move to the dedicated extensions workspace if pursued.
+- The old repository-hygiene plan was superseded by ADR-0001 and removed; Git
+  history remains the recovery source.
+- The Chrome-extension plan was removed because extension work is outside this
+  repository's scope. It was not relocated into another unit.
+- The unreferenced data-model and matcher-playground HTML visualizers were
+  removed. The shipped web UI remains `djsupport/static/index.html` with its
+  runtime image assets. Its deliberately authored `NewUI.pen` design source was
+  retained under `docs/design/` rather than mixed into the runtime package.
+
+The evidence and complete classification are recorded in
+[repository-artifact-audit.md](repository-artifact-audit.md).
 
 ## Data ownership
 
