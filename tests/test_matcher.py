@@ -415,6 +415,10 @@ class TestTerminalAudioExtensionFallback:
         sp.search.side_effect = [
             {"tracks": {"items": []}},
             {"tracks": {"items": []}},
+            {"tracks": {"items": [make_spotify_item(
+                "Unrelated", "Different Artist", "spotify:track:wrong",
+                360000,
+            )]}},
             {"tracks": {"items": [recovered]}},
         ]
 
@@ -428,6 +432,7 @@ class TestTerminalAudioExtensionFallback:
         assert [call.kwargs["q"] for call in sp.search.call_args_list] == [
             "artist:Known Artist track:Signal (Original Mix).aiff",
             "artist:Known Artist track:Signal.aiff",
+            "Known Artist Signal (Original Mix).aiff",
             "artist:Known Artist track:Signal (Original Mix)",
         ]
 
@@ -441,10 +446,30 @@ class TestTerminalAudioExtensionFallback:
         queries = [call.kwargs["q"] for call in sp.search.call_args_list]
         assert queries == [
             f"artist:Known Artist track:Signal{suffix}",
-            "artist:Known Artist track:Signal",
             f"Known Artist Signal{suffix}",
+            "artist:Known Artist track:Signal",
         ]
         assert len(queries) == len(set(queries))
+
+    def test_duplicate_extension_free_variant_adds_no_search_call(self):
+        class DuplicateVariantTitle(str):
+            def __getitem__(self, key):
+                if isinstance(key, slice) and key.stop == len("Signal"):
+                    return self
+                return super().__getitem__(key)
+
+        sp = MagicMock()
+        sp.search.return_value = {"tracks": {"items": []}}
+
+        match_track(
+            sp,
+            make_track(DuplicateVariantTitle("Signal.aiff"), "Known Artist"),
+        )
+
+        assert [call.kwargs["q"] for call in sp.search.call_args_list] == [
+            "artist:Known Artist track:Signal.aiff",
+            "Known Artist Signal.aiff",
+        ]
 
     @pytest.mark.parametrize(
         "title",
@@ -479,6 +504,7 @@ class TestTerminalAudioExtensionFallback:
         sp.search.side_effect = [
             {"tracks": {"items": []}},
             {"tracks": {"items": []}},
+            {"tracks": {"items": []}},
             {"tracks": {"items": [unrelated]}},
         ]
 
@@ -489,7 +515,7 @@ class TestTerminalAudioExtensionFallback:
         )
 
         assert result is None
-        assert sp.search.call_count == 3
+        assert sp.search.call_count == 4
 
     def test_acceptable_earlier_result_skips_extension_fallback(self):
         exact = make_spotify_item(
@@ -546,6 +572,7 @@ class TestTerminalAudioExtensionFallback:
         sp.search.side_effect = [
             {"tracks": {"items": []}},
             {"tracks": {"items": []}},
+            {"tracks": {"items": []}},
             {"tracks": {"items": [recovered]}},
         ]
 
@@ -556,7 +583,7 @@ class TestTerminalAudioExtensionFallback:
 
         assert result is not None
         assert source == "retry"
-        assert sp.search.call_count == 3
+        assert sp.search.call_count == 4
         assert set(cache.entries) == {original_key}
         assert cache.entries[original_key].spotify_uri == "spotify:track:signal"
         cache.record_approval("Known Artist", title, "approved", result)

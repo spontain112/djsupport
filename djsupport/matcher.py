@@ -313,7 +313,11 @@ def _search_candidates(sp, track: Track, threshold: int) -> list[dict]:
     clean_title = _normalize(stripped)
     if clean_artist != track.artist.lower().strip() or clean_title != stripped.lower().strip():
         search(clean_artist, clean_title)
-    extension_match = re.search(r"\.(?:mp3|aiff|wav|flac)$", track.name, re.IGNORECASE)
+    if not all_results:
+        search(track.artist, track.name, plain=True)
+    extension_match = re.search(
+        r"\.(?:mp3|aiff|wav|flac)$", track.name, re.IGNORECASE,
+    )
     if (
         track.artist.strip()
         and extension_match is not None
@@ -321,8 +325,6 @@ def _search_candidates(sp, track: Track, threshold: int) -> list[dict]:
         and _select_best(track, all_results, threshold) is None
     ):
         search(track.artist, track.name[:extension_match.start()])
-    if not all_results:
-        search(track.artist, track.name, plain=True)
     return all_results
 
 
