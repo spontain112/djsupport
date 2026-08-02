@@ -65,6 +65,7 @@ djsupport restore <archive>     # Validate and preview an archive
 djsupport restore <archive> --apply  # Apply a conflict-free restore
 djsupport migrate-0-3 <directory>    # Preview 0.3.0 local-data migration
 djsupport migrate-0-3 <directory> --apply  # Back up, verify, and apply migration
+djsupport migrate-0-5 --legacy-account-id <old> --account-id <stable>  # Back up and migrate retained account ownership
 
 # Rekordbox Transfer flags
 djsupport sync --playlist "My Playlist"  # Select a playlist (repeat for a Batch)
@@ -129,7 +130,7 @@ pytest --cov=djsupport     # Run with coverage
   credentials, local paths, and playlist state stay in private application
   storage. Repository matcher tests are synthetic unless a user explicitly
   exports and consents to a privacy-reviewed contribution.
-- Version tracked in `pyproject.toml` (`version = "0.4.0"`)
+- Version tracked in `pyproject.toml` (`version = "0.5.0"`)
 - Changelog follows Keep a Changelog format in `CHANGELOG.md`
 - `docs/` contains canonical guidance, core implementation history, and solutions;
   generated reports and out-of-scope product plans do not belong in Git

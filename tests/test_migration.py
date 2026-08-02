@@ -8,7 +8,7 @@ from click.testing import CliRunner
 
 from djsupport.backup import LocalDataBackup
 from djsupport.cli import cli
-from djsupport.migration import LegacyMigration
+from djsupport.migration import FoundationMigration, LegacyMigration
 
 
 def _write_json(path, value):
@@ -435,3 +435,56 @@ class TestLegacyMigration:
         assert result.applied
         archive = next((app_data / "backups").glob("*.zip"))
         assert LocalDataBackup(app_data).preview(archive).valid
+
+
+def test_foundation_migration_is_backup_first_and_idempotent(tmp_path):
+    app_data = tmp_path / "app-data"
+    _write_json(app_data / "publication-manifests.json", {
+        "version": 4,
+        "manifests": [{"account_id": "legacy-profile", "spotify_playlist_id": "p"}],
+        "approvals": [],
+        "mirrors": [{"spotify_user_id": "legacy-profile"}],
+    })
+
+    migration = FoundationMigration(app_data)
+    first = migration.apply("legacy-profile", "stable-account")
+    second = migration.apply("legacy-profile", "stable-account")
+
+    stored = json.loads((app_data / "publication-manifests.json").read_text())
+    assert first.applied and first.backup_created and first.changed_records == 2
+    assert not second.applied and not second.backup_created
+    assert stored["manifests"][0]["account_id"] == "stable-account"
+    assert stored["mirrors"][0]["account_id"] == "stable-account"
+    archive = next((app_data / "backups").glob("*.zip"))
+    assert LocalDataBackup(app_data).preview(archive).valid
+
+
+def test_foundation_migration_stops_on_account_conflict_before_backup(tmp_path):
+    app_data = tmp_path / "app-data"
+    _write_json(app_data / "publication-manifests.json", {
+        "version": 4,
+        "manifests": [{"account_id": "another-account"}],
+        "approvals": [], "mirrors": [],
+    })
+
+    with pytest.raises(ValueError, match="ownership conflicts"):
+        FoundationMigration(app_data).apply("legacy-profile", "stable-account")
+
+    assert not (app_data / "backups").exists()
+
+
+def test_foundation_migration_preserves_conflicting_legacy_ownership(tmp_path):
+    app_data = tmp_path / "app-data"
+    original = {
+        "version": 4,
+        "manifests": [{"spotify_user_id": "another-account"}],
+        "approvals": [], "mirrors": [],
+    }
+    _write_json(app_data / "publication-manifests.json", original)
+
+    with pytest.raises(ValueError, match="Legacy account ownership conflicts"):
+        FoundationMigration(app_data).apply("legacy-profile", "stable-account")
+
+    assert json.loads(
+        (app_data / "publication-manifests.json").read_text()
+    ) == original

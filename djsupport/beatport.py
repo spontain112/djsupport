@@ -11,7 +11,7 @@ BEATPORT_CHART_URL_PREFIX = "beatport.com/chart/"
 BEATPORT_CHART_PATTERN = re.compile(
     r"^https://(www\.)?beatport\.com/chart/[\w-]+/\d+/?$"
 )
-USER_AGENT = "Mozilla/5.0 (compatible; djsupport/0.4.0)"
+USER_AGENT = "Mozilla/5.0 (compatible; djsupport/0.5.0)"
 REQUEST_TIMEOUT = (5, 30)  # (connect, read) seconds
 MAX_RESPONSE_SIZE = 5 * 1024 * 1024  # 5 MB
 
@@ -27,7 +27,7 @@ class InvalidBeatportURL(ValueError):
 def compose_chart_playlist_name(chart_name: str, curator: str | None) -> str:
     """Compose playlist name from chart name and curator."""
     if curator and curator != "Unknown":
-        return f"{curator} - {chart_name}"
+        return f"{chart_name} — {curator}"
     return chart_name
 
 

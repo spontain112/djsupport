@@ -7,9 +7,11 @@ import spotipy
 
 from djsupport.spotify import (
     RateLimitError,
+    SCOPES,
     _api_call_with_rate_limit,
     _parse_retry_after,
 )
+from djsupport.transfer import SpotifyMatcher, SpotifyItemKind
 
 
 def _make_429(retry_after: int) -> spotipy.SpotifyException:
@@ -140,3 +142,58 @@ class TestParseRetryAfter:
         exc.http_status = 429
         exc.headers = None
         assert _parse_retry_after(exc) == 1
+
+
+def test_private_playlist_read_is_the_only_new_read_scope():
+    assert set(SCOPES.split()) == {
+        "playlist-read-private",
+        "playlist-modify-public",
+        "playlist-modify-private",
+    }
+
+
+def test_spotify_adapter_uses_current_account_and_playlist_contracts():
+    client = MagicMock()
+    client.current_user.return_value = {"id": "stable-account"}
+    client.current_user_playlist_create.return_value = {"id": "playlist-1"}
+
+    adapter = SpotifyMatcher(client)
+    created = adapter.create_playlist("Name", "Description")
+
+    assert adapter.account_id() == "stable-account"
+    assert created == "playlist-1"
+    client.current_user_playlist_create.assert_called_once_with(
+        "Name", public=False, description="Description",
+    )
+    client.user_playlist_create.assert_not_called()
+
+
+def test_ordered_playlist_facts_preserve_duplicates_and_unknown_shapes():
+    client = MagicMock()
+    client.playlist.return_value = {"snapshot_id": "head-1"}
+    client.playlist_items.return_value = {
+        "items": [
+            {"track": {"type": "track", "uri": "spotify:track:one"}},
+            {"track": {"type": "track", "uri": "spotify:track:one"}},
+            {"track": None},
+            {"track": {"type": "episode", "uri": "spotify:episode:e"}},
+            {"track": {"type": "future", "uri": "spotify:future:f"}},
+        ],
+        "next": None,
+    }
+
+    adapter = SpotifyMatcher(client)
+
+    assert adapter.playlist_head("playlist-1").snapshot_id == "head-1"
+    page = adapter.ordered_playlist_items("playlist-1")
+    assert [item.position for item in page.items] == [0, 1, 2, 3, 4]
+    assert [item.kind for item in page.items] == [
+        SpotifyItemKind.TRACK,
+        SpotifyItemKind.TRACK,
+        SpotifyItemKind.NULL,
+        SpotifyItemKind.EPISODE,
+        SpotifyItemKind.UNSUPPORTED,
+    ]
+    assert [item.uri for item in page.items[:2]] == [
+        "spotify:track:one", "spotify:track:one",
+    ]

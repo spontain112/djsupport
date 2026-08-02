@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-08-02
+
+### Added
+
+- Typed Spotify playlist-head, ordered-item, page, and mutation facts.
+- Durable mutation snapshots and completed 100-item chunk identities for
+  resumable publication, with changed-head stop conditions.
+- Private-playlist read consent using only `playlist-read-private` in addition
+  to the existing playlist modification permissions.
+
+### Changed
+
+- Playlist creation uses Spotify's current-user route and item reads/writes use
+  the current playlist-item contract.
+- Approval verifies one stable playlist head around its complete ordered read.
+- Publication and Approval preserve duplicate occurrences and explicitly
+  classify null, local, episode, unsupported, restricted, and relinked items.
+- Private publication state writes schema 5 and Transfer state writes schema 2;
+  previous supported schemas remain readable and backup-compatible.
+
+### Fixed
+
+- Beatport chart curator provenance survives intake, durable resume, playlist
+  title construction, manifests, and approved Snapshot or Mirror copy.
+- Recovery markers are removed immediately after playlist ID retention, and
+  settled descriptions no longer expose opaque Transfer IDs or timestamps.
+
 ## [0.4.0] - 2026-08-01
 
 ### Added

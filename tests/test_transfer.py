@@ -19,7 +19,7 @@ from djsupport.cache import MatchCache
 from djsupport.rekordbox import Track
 from djsupport.regression import load_local_regressions
 from djsupport.report import PlaylistReport, SyncReport, save_report, save_review_csv
-from djsupport.spotify import RateLimitError
+from djsupport.spotify import QuotaExceededError, RateLimitError
 from djsupport.transfer import (
     AccountPublishingGuards,
     BatchPlan,
@@ -30,6 +30,10 @@ from djsupport.transfer import (
     PublishingTransferConflict,
     RetryPolicy,
     SpotifyMatcher,
+    SpotifyItemKind,
+    SpotifyPlaylistHead,
+    SpotifyPlaylistItem,
+    SpotifyPlaylistPage,
     SourceSelection,
     Transfer,
     TransferMode,
@@ -272,6 +276,23 @@ def _spotify_error(status, *, retry_after=None):
     return spotipy.SpotifyException(
         status, -1, "Spotify failure", headers=headers,
     )
+
+
+def test_transfer_retry_policy_distinguishes_quota_exhaustion():
+    error = spotipy.SpotifyException(
+        429, -1, "QUOTA_EXCEEDED", headers={"Retry-After": "1"},
+    )
+    calls = 0
+
+    def operation():
+        nonlocal calls
+        calls += 1
+        raise error
+
+    with pytest.raises(QuotaExceededError):
+        RetryPolicy(sleep=lambda _: None).run(operation)
+
+    assert calls == 1
 
 
 def test_preview_reuses_and_retains_matching_knowledge_without_playlist_writes():
@@ -1241,7 +1262,7 @@ class TestRekordboxMirror:
             "spotify:track:first", "spotify:track:second",
         ]
 
-    def test_refresh_deduplicates_orders_and_reports_genuine_source_removals(
+    def test_refresh_preserves_occurrences_order_and_reports_genuine_source_removals(
         self, tmp_path,
     ):
         fixture = json.loads(MIRROR_REFRESH_FIXTURE.read_text())
@@ -1289,6 +1310,7 @@ class TestRekordboxMirror:
 
         assert spotify.playlists[playlist.spotify_playlist_id]["tracks"] == [
             "spotify:track:second", "spotify:track:third",
+            "spotify:track:second",
         ]
         assert [removal.source_track_id for removal in playlist.source_removals] == [
             "rb-1"
@@ -1302,7 +1324,7 @@ class TestRekordboxMirror:
         final = transfer.execute(TransferRequest(source=fixture["reference"]))
 
         assert [removal.source_track_id for removal in final.playlists[0].source_removals] == [
-            "rb-2"
+            "rb-2", "rb-2-copy",
         ]
 
     def test_missing_rekordbox_track_stops_before_matching_or_publication(self):
@@ -1851,6 +1873,40 @@ class TestRekordboxBatchExecution:
 
 
 class TestTransferPublicationLifecycle:
+    def test_settled_playlist_copy_hides_recovery_key_and_retains_curator(self, tmp_path):
+        class LifecycleSpotify(StatefulSpotify):
+            def set_playlist_description(self, playlist_id, description):
+                self.playlists[playlist_id]["description"] = description
+
+        class ChartSource(FixtureBeatportSource):
+            def consume(self, reference):
+                selection = super().consume(reference)
+                return SourceSelection(
+                    "Synthetic Chart — Ada DJ", selection.reference, selection.tracks,
+                    chart_title="Synthetic Chart", curator="Ada DJ",
+                )
+
+        spotify = LifecycleSpotify({
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+        })
+        report = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=ChartSource(FIXTURE), spotify=spotify,
+            matching_knowledge=InMemoryStorage(),
+            publication_storage=InMemoryStorage(),
+            transfer_storage=FileTransferStorage(tmp_path / "transfers.json"),
+        ).execute(TransferRequest(source="fixture", transfer_id="transfer-private"))
+
+        playlist = spotify.playlists[report.playlists[0].spotify_playlist_id]
+        assert report.playlists[0].name.startswith(
+            "djsupport / Synthetic Chart — Ada DJ"
+        )
+        assert "awaiting review and Approval" in playlist["description"]
+        assert "fixture" in playlist["description"]
+        assert "transfer-private" not in playlist["description"]
+        assert "Created " not in playlist["description"]
     def test_mixed_publication_retains_one_review_entry_per_source_track(
         self, tmp_path,
     ):
@@ -2478,7 +2534,7 @@ class TestTransferPublicationLifecycle:
             approved_at=datetime(2026, 8, 1),
         ))
 
-        assert json.loads(path.read_text())["version"] == 4
+        assert json.loads(path.read_text())["version"] == 5
         assert len(FilePublicationStorage(path).mirrors_for_account(
             "spotify-user-1"
         )) == 1
@@ -2523,6 +2579,22 @@ class TestTransferPublicationLifecycle:
         assert manifest.managed_items == manifest.items
 
 class TestProvisionalPlaylistApproval:
+    def test_changed_head_discards_ordered_approval_read(self):
+        transfer, spotify, storage, playlist_id = self.publish()
+        spotify.playlist_head = MagicMock(side_effect=[
+            SpotifyPlaylistHead("before"), SpotifyPlaylistHead("after"),
+        ])
+        spotify.ordered_playlist_items = MagicMock(return_value=SpotifyPlaylistPage((
+            SpotifyPlaylistItem(
+                0, SpotifyItemKind.TRACK, "spotify:track:known",
+            ),
+        )))
+
+        with pytest.raises(Exception, match="changed during Approval"):
+            transfer.approve(playlist_id)
+
+        assert storage.approvals == []
+        assert storage.approved_matches == []
     def publish(self):
         matches = {
             ("Known Artist", "Known Track"): _match(
@@ -3095,12 +3167,12 @@ class TestSpotifyApprovalAdapter:
             "items": list(playlists), "next": None,
         }
 
-        def create_playlist(user_id, name, public, description):
+        def create_playlist(name, public, description):
             playlist = {"id": "mirror-1", "description": description}
             playlists.append(playlist)
             return playlist
 
-        client.user_playlist_create.side_effect = create_playlist
+        client.current_user_playlist_create.side_effect = create_playlist
 
         first_id = SpotifyMatcher(client).publish_provisional_snapshot(
             "Fixture Mirror", ["spotify:track:first"], "description", "stable-key",
@@ -3110,7 +3182,8 @@ class TestSpotifyApprovalAdapter:
         )
 
         assert first_id == second_id == "mirror-1"
-        assert client.user_playlist_create.call_count == 1
+        assert client.current_user_playlist_create.call_count == 1
+        client.user_playlist_create.assert_not_called()
         assert client.playlist_replace_items.call_args.args == (
             "mirror-1", ["spotify:track:second"],
         )

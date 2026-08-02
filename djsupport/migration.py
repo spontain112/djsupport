@@ -25,7 +25,7 @@ LEGACY_STATE_FILES = (
 )
 MIGRATION_VERSION = 1
 MATCHING_KNOWLEDGE_VERSION = 1
-SUPPORTED_PUBLICATION_VERSIONS = (1, 2, 3, 4)
+SUPPORTED_PUBLICATION_VERSIONS = (1, 2, 3, 4, 5)
 SPOTIFY_TRACK_URI = re.compile(r"^spotify:track:[A-Za-z0-9]{22}$")
 CACHE_FIELDS = {
     "spotify_uri", "spotify_name", "spotify_artist", "score", "matched",
@@ -408,3 +408,105 @@ class LegacyMigration:
                     else:
                         target.unlink(missing_ok=True)
                 raise
+
+
+@dataclass(frozen=True)
+class FoundationMigrationResult:
+    applied: bool
+    changed_records: int
+    backup_created: bool
+
+
+class FoundationMigration:
+    """Backup-first, repeatable migration to stable Spotify account identity."""
+
+    FILES = ("publication-manifests.json", "transfers.json",
+             "publication-manifests.transfers.json")
+
+    def __init__(self, app_data: str | Path) -> None:
+        self.app_data = Path(app_data)
+
+    def apply(
+        self, legacy_account_id: str, account_id: str,
+    ) -> FoundationMigrationResult:
+        if not legacy_account_id or not account_id:
+            raise ValueError("Both legacy and stable account identities are required")
+        marker = self.app_data / "foundation-migration.json"
+        if marker.exists():
+            value = json.loads(marker.read_text())
+            if value == {"version": 1, "account_id": account_id}:
+                return FoundationMigrationResult(False, 0, False)
+            raise ValueError("A different Spotify account migration is already retained")
+
+        planned: dict[Path, bytes] = {}
+        changed = 0
+        for name in self.FILES:
+            path = self.app_data / name
+            if not path.exists():
+                continue
+            value = json.loads(path.read_text())
+            migrated, count = self._replace_account_ids(
+                value, legacy_account_id, account_id,
+            )
+            changed += count
+            if count:
+                planned[path] = json.dumps(migrated, indent=2).encode()
+
+        self.app_data.mkdir(parents=True, exist_ok=True)
+        backup_dir = self.app_data / "backups"
+        archive = LocalDataBackup(self.app_data).create(backup_dir)
+        if not LocalDataBackup(self.app_data).preview(archive).valid:
+            raise ValueError("Foundation migration backup verification failed")
+        planned[marker] = json.dumps(
+            {"version": 1, "account_id": account_id}, indent=2,
+        ).encode()
+        self._atomic_commit(planned)
+        return FoundationMigrationResult(True, changed, True)
+
+    @classmethod
+    def _replace_account_ids(
+        cls, value, legacy_account_id: str, account_id: str,
+    ):
+        changed = 0
+        if isinstance(value, list):
+            result = []
+            for item in value:
+                migrated, count = cls._replace_account_ids(
+                    item, legacy_account_id, account_id,
+                )
+                result.append(migrated)
+                changed += count
+            return result, changed
+        if not isinstance(value, dict):
+            return value, 0
+        result = dict(value)
+        retained = result.get("account_id")
+        legacy = result.get("spotify_user_id")
+        if retained not in (None, legacy_account_id, account_id):
+            raise ValueError("Current account ownership conflicts with migration")
+        if legacy not in (None, legacy_account_id, account_id):
+            raise ValueError("Legacy account ownership conflicts with migration")
+        result.pop("spotify_user_id", None)
+        if retained == legacy_account_id or legacy == legacy_account_id:
+            result["account_id"] = account_id
+            changed += 1
+        for key, item in list(result.items()):
+            migrated, count = cls._replace_account_ids(
+                item, legacy_account_id, account_id,
+            )
+            result[key] = migrated
+            changed += count
+        return result, changed
+
+    def _atomic_commit(self, writes: dict[Path, bytes]) -> None:
+        staged: list[tuple[Path, Path]] = []
+        try:
+            for target, content in writes.items():
+                temporary = target.with_suffix(f"{target.suffix}.migration.tmp")
+                temporary.write_bytes(content)
+                staged.append((temporary, target))
+            for temporary, target in staged:
+                os.replace(temporary, target)
+        finally:
+            for temporary, _ in staged:
+                temporary.unlink(missing_ok=True)

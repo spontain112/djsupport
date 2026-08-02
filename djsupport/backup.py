@@ -18,11 +18,12 @@ from typing import Callable
 BACKUP_VERSION = 1
 SUPPORTED_SCHEMAS = {
     "matching-knowledge.json": (1,),
-    "transfers.json": (1,),
-    "publication-manifests.transfers.json": (1,),
-    "publication-manifests.json": (1, 2, 3, 4),
+    "transfers.json": (1, 2),
+    "publication-manifests.transfers.json": (1, 2),
+    "publication-manifests.json": (1, 2, 3, 4, 5),
     "playlist-state.json": (1, 2),
     "legacy-migration.json": (1,),
+    "foundation-migration.json": (1,),
 }
 DATA_FILES = tuple(SUPPORTED_SCHEMAS)
 SECRET_KEYS = {
