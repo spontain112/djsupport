@@ -17,7 +17,7 @@ import tempfile
 import time
 from collections import Counter
 from contextlib import contextmanager
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
@@ -47,11 +47,17 @@ from djsupport.report import (
     UnmatchedAlternatives,
     UnavailableApprovedMatch,
 )
-from djsupport.spotify import MAX_RATE_LIMIT_WAIT, RateLimitError, _parse_retry_after
+from djsupport.spotify import (
+    MAX_RATE_LIMIT_WAIT,
+    QuotaExceededError,
+    RateLimitError,
+    SpotifyCapabilityError,
+    _parse_retry_after,
+)
 
 
-PUBLICATION_MANIFEST_VERSION = 4
-TRANSFER_STATE_VERSION = 1
+PUBLICATION_MANIFEST_VERSION = 5
+TRANSFER_STATE_VERSION = 2
 EXPENSIVE_BATCH_LOOKUP_THRESHOLD = 100
 SPOTIFY_TRACK_URI = re.compile(r"^spotify:track:([A-Za-z0-9]{22})$")
 SPOTIFY_TRACK_URL = re.compile(
@@ -254,6 +260,42 @@ class ApprovalStatus(str, Enum):
     NEEDS_REVIEW = "needs review"
 
 
+class SpotifyItemKind(str, Enum):
+    """Explicit classification of one ordered Spotify playlist occurrence."""
+
+    TRACK = "track"
+    NULL = "null"
+    LOCAL = "local"
+    EPISODE = "episode"
+    UNSUPPORTED = "unsupported"
+
+
+@dataclass(frozen=True)
+class SpotifyPlaylistHead:
+    snapshot_id: str
+
+
+@dataclass(frozen=True)
+class SpotifyPlaylistItem:
+    position: int
+    kind: SpotifyItemKind
+    uri: str | None
+    is_local: bool = False
+    is_playable: bool | None = None
+    restrictions: dict | None = None
+    linked_from_uri: str | None = None
+
+
+@dataclass(frozen=True)
+class SpotifyPlaylistPage:
+    items: tuple[SpotifyPlaylistItem, ...]
+
+
+@dataclass(frozen=True)
+class SpotifyMutationResult:
+    snapshot_id: str
+
+
 @dataclass(frozen=True)
 class RetryPolicy:
     """Bound retries for transient Spotify failures and short rate limits."""
@@ -271,6 +313,11 @@ class RetryPolicy:
                 retryable_error: Exception = exc
                 status = exc.http_status
                 if status == 429:
+                    if "QUOTA_EXCEEDED" in str(exc).upper():
+                        raise QuotaExceededError(
+                            "Spotify quota exhausted; Transfer checkpointed "
+                            "and paused"
+                        ) from exc
                     delay = _parse_retry_after(exc)
                     if delay > self.max_rate_limit_wait:
                         raise RateLimitError(delay) from exc
@@ -289,6 +336,14 @@ class RetryPolicy:
 
 class PublishingTransferConflict(RuntimeError):
     """Raised when another publishing Transfer owns an account guard."""
+
+
+class SpotifyPlaylistChanged(RuntimeError):
+    """Spotify's playlist head no longer matches retained Transfer evidence."""
+
+
+class SpotifyPlaylistReviewRequired(RuntimeError):
+    """Approval encountered playlist facts requiring an explicit user decision."""
 
 
 class SourceNotFound(ValueError):
@@ -362,11 +417,14 @@ class TransferState:
     spotify_playlist_name: str | None = None
     publication_manifest: dict | None = None
     outcome: str | None = None
+    mutation_snapshots: list[str] = field(default_factory=list)
+    completed_chunks: list[str] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, value: dict) -> TransferState:
         return cls(**{
-            "alternatives": [], **value,
+            "alternatives": [], "mutation_snapshots": [],
+            "completed_chunks": [], **value,
             "status": TransferStatus(value["status"]),
         })
 
@@ -378,6 +436,8 @@ class SourceSelection:
     name: str
     reference: str
     tracks: list[Track]
+    chart_title: str | None = None
+    curator: str | None = None
 
 
 @dataclass(frozen=True)
@@ -410,6 +470,8 @@ class PublicationManifest:
     items: tuple[PublicationItem, ...]
     mode: TransferMode = TransferMode.SNAPSHOT
     managed_items: tuple[PublicationItem, ...] = ()
+    chart_title: str | None = None
+    curator: str | None = None
 
 
 @dataclass(frozen=True)
@@ -477,6 +539,10 @@ class SpotifyAdapter(Protocol):
         self, playlist_id: str, track_uris: list[str],
     ) -> None: ...
 
+    def set_playlist_description(
+        self, playlist_id: str, description: str,
+    ) -> None: ...
+
     def spotify_track(self, uri: str) -> dict: ...
 
 
@@ -524,7 +590,7 @@ class FilePublicationStorage:
             data = json.loads(self.path.read_text())
         except (json.JSONDecodeError, OSError):
             return
-        if data.get("version") not in (1, 2, 3, PUBLICATION_MANIFEST_VERSION):
+        if data.get("version") not in (1, 2, 3, 4, PUBLICATION_MANIFEST_VERSION):
             return
         self.manifests = data.get("manifests", [])
         self.approvals = data.get("approvals", data.get("reviews", []))
@@ -712,7 +778,7 @@ class FileTransferStorage:
             data = json.loads(self.path.read_text())
         except (json.JSONDecodeError, OSError):
             return
-        if data.get("version") == TRANSFER_STATE_VERSION:
+        if data.get("version") in (1, TRANSFER_STATE_VERSION):
             for transfer_id, state in data.get("transfers", {}).items():
                 try:
                     self.transfers[transfer_id] = TransferState.from_dict(state)
@@ -796,6 +862,8 @@ class BeatportChartSource:
             name=compose_chart_playlist_name(chart_name, curator),
             reference=url,
             tracks=tracks,
+            chart_title=chart_name,
+            curator=curator if curator != "Unknown" else None,
         )
 
 
@@ -908,7 +976,85 @@ class SpotifyMatcher:
         self._client = client
 
     def account_id(self) -> str:
-        return self._client.current_user()["id"]
+        profile = self._client.current_user()
+        return profile.get("account_id") or profile["id"]
+
+    def create_playlist(self, name: str, description: str) -> str:
+        playlist = self._client.current_user_playlist_create(
+            name, public=False, description=description,
+        )
+        return playlist["id"]
+
+    def find_recovery_playlist(self, publication_key: str) -> str | None:
+        return self._find_publication(f"djsupport-transfer:{publication_key}")
+
+    def playlist_head(self, playlist_id: str) -> SpotifyPlaylistHead:
+        try:
+            playlist = self._client.playlist(playlist_id, fields="snapshot_id")
+        except spotipy.SpotifyException as exc:
+            if exc.http_status == 403:
+                raise SpotifyCapabilityError("playlist-read-private") from exc
+            raise
+        return SpotifyPlaylistHead(snapshot_id=playlist["snapshot_id"])
+
+    def ordered_playlist_items(self, playlist_id: str) -> SpotifyPlaylistPage:
+        try:
+            page = self._client.playlist_items(playlist_id)
+        except spotipy.SpotifyException as exc:
+            if exc.http_status == 403:
+                raise SpotifyCapabilityError("playlist-read-private") from exc
+            raise
+        items: list[SpotifyPlaylistItem] = []
+        position = 0
+        while page:
+            for wrapper in page.get("items", []):
+                value = wrapper.get("track") or wrapper.get("item")
+                if value is None:
+                    kind = SpotifyItemKind.NULL
+                elif value.get("is_local"):
+                    kind = SpotifyItemKind.LOCAL
+                elif value.get("type") == "track":
+                    kind = SpotifyItemKind.TRACK
+                elif value.get("type") == "episode":
+                    kind = SpotifyItemKind.EPISODE
+                else:
+                    kind = SpotifyItemKind.UNSUPPORTED
+                items.append(SpotifyPlaylistItem(
+                    position=position,
+                    kind=kind,
+                    uri=value.get("uri") if value else None,
+                    is_local=bool(value and value.get("is_local")),
+                    is_playable=value.get("is_playable") if value else None,
+                    restrictions=value.get("restrictions") if value else None,
+                    linked_from_uri=(
+                        (value.get("linked_from") or {}).get("uri")
+                        if value else None
+                    ),
+                ))
+                position += 1
+            if not page.get("next"):
+                break
+            try:
+                page = self._client.next(page)
+            except spotipy.SpotifyException as exc:
+                if exc.http_status == 403:
+                    raise SpotifyCapabilityError(
+                        "playlist-read-private"
+                    ) from exc
+                raise
+        return SpotifyPlaylistPage(tuple(items))
+
+    def replace_items(
+        self, playlist_id: str, uris: list[str],
+    ) -> SpotifyMutationResult:
+        result = self._client.playlist_replace_items(playlist_id, uris)
+        return SpotifyMutationResult(result["snapshot_id"])
+
+    def add_items(
+        self, playlist_id: str, uris: list[str],
+    ) -> SpotifyMutationResult:
+        result = self._client.playlist_add_items(playlist_id, uris)
+        return SpotifyMutationResult(result["snapshot_id"])
 
     def match(self, track: Track, threshold: int) -> dict | None:
         return match_track_with_alternatives(
@@ -926,10 +1072,7 @@ class SpotifyMatcher:
         description = f"{description} {marker}"
         playlist_id = self._find_publication(marker)
         if playlist_id is None:
-            playlist = self._client.user_playlist_create(
-                self.account_id(), name, public=False, description=description,
-            )
-            playlist_id = playlist["id"]
+            playlist_id = self.create_playlist(name, description)
         try:
             if track_uris:
                 self._client.playlist_replace_items(playlist_id, track_uris[:100])
@@ -987,6 +1130,13 @@ class SpotifyMatcher:
             self._client.playlist_add_items(
                 playlist_id, track_uris[offset:offset + 100],
             )
+
+    def set_playlist_description(
+        self, playlist_id: str, description: str,
+    ) -> None:
+        self._client.playlist_change_details(
+            playlist_id, description=description,
+        )
 
     def spotify_track(self, uri: str) -> dict:
         track = self._client.track(uri)
@@ -1526,9 +1676,54 @@ class Transfer:
             )
         with self._publishing_guards.acquire(account_id):
             corrected_items = self._read_corrections(corrections, manifest)
-            current_uris = self._retry_policy.run(
-                lambda: self._spotify.provisional_playlist_track_uris(playlist_id)
-            )
+            if all(hasattr(self._spotify, method) for method in (
+                "playlist_head", "ordered_playlist_items",
+            )):
+                try:
+                    before = self._retry_policy.run(
+                        lambda: self._spotify.playlist_head(playlist_id)
+                    )
+                    ordered = self._retry_policy.run(
+                        lambda: self._spotify.ordered_playlist_items(playlist_id)
+                    )
+                    after = self._retry_policy.run(
+                        lambda: self._spotify.playlist_head(playlist_id)
+                    )
+                    if before.snapshot_id != after.snapshot_id:
+                        raise SpotifyPlaylistChanged(
+                            "Spotify playlist changed during Approval; "
+                            "re-review required"
+                        )
+                    review_required = [
+                        item for item in ordered.items
+                        if item.kind != SpotifyItemKind.TRACK
+                        or item.is_playable is False
+                        or item.restrictions is not None
+                        or item.linked_from_uri is not None
+                    ]
+                    if review_required:
+                        positions = ", ".join(
+                            str(item.position) for item in review_required
+                        )
+                        raise SpotifyPlaylistReviewRequired(
+                            "Spotify playlist contains unavailable, local, "
+                            "episode, unsupported, restricted, or relinked "
+                            f"items at positions {positions}; explicit review required"
+                        )
+                    current_uris = [
+                        item.uri for item in ordered.items
+                        if item.kind == SpotifyItemKind.TRACK and item.uri
+                    ]
+                except spotipy.SpotifyException as exc:
+                    if exc.http_status != 404:
+                        raise
+                    current_uris = None
+            else:
+                current_uris = self._retry_policy.run(
+                    lambda: self._spotify.provisional_playlist_track_uris(
+                        playlist_id
+                    )
+                )
             if current_uris is None:
                 outcome = ApprovalOutcome(
                     account_id=account_id,
@@ -1633,8 +1828,30 @@ class Transfer:
                         spotify_playlist_name=manifest.spotify_playlist_name,
                         approved_at=outcome.reviewed_at,
                     ))
+                if (
+                    outcome.status == ApprovalStatus.APPROVED
+                    and hasattr(self._spotify, "set_playlist_description")
+                ):
+                    self._retry_policy.run(
+                        lambda: self._spotify.set_playlist_description(
+                            playlist_id, self._approved_description(manifest),
+                        )
+                    )
             self._publication_storage.retain_approval(outcome)
             return outcome
+
+    @staticmethod
+    def _approved_description(manifest: PublicationManifest) -> str:
+        relationship = (
+            "managed Mirror relationship" if manifest.mode == TransferMode.MIRROR
+            else "approved Snapshot provenance"
+        )
+        chart = manifest.chart_title or manifest.source_label
+        curator = f" by {manifest.curator}" if manifest.curator else ""
+        return (
+            f"{chart}{curator}; {relationship}. Source: "
+            f"{manifest.source_reference}"
+        )
 
     def _read_corrections(
         self, corrections: str | Path | None, manifest: PublicationManifest,
@@ -1902,6 +2119,8 @@ class Transfer:
                     "name": selection.name,
                     "reference": selection.reference,
                     "tracks": [asdict(track) for track in selection.tracks],
+                    "chart_title": selection.chart_title,
+                    "curator": selection.curator,
                 },
                 created_at=created_at.isoformat(),
                 next_track_index=0,
@@ -1945,6 +2164,8 @@ class Transfer:
             selection = SourceSelection(
                 stored_selection["name"], stored_selection["reference"],
                 [Track(**track) for track in stored_selection["tracks"]],
+                chart_title=stored_selection.get("chart_title"),
+                curator=stored_selection.get("curator"),
             )
             created_at = datetime.fromisoformat(state.created_at)
 
@@ -2301,32 +2522,46 @@ class Transfer:
                         snapshot_name = f"{selection.name} — {discriminator}"
                     if request.playlist_prefix:
                         snapshot_name = f"{request.playlist_prefix} / {snapshot_name}"
-                    description = (
-                        f"Provisional {request.mode.value.title()} from "
-                        f"{self._source.source_label}: "
-                        f"{selection.reference}. Created {created_at.isoformat()}."
+                    description = self._provisional_description(
+                        request.mode, selection,
                     )
                     publication_key = transfer_id
                     if request.mode == TransferMode.MIRROR:
                         publication_key = hashlib.sha256(
                             f"{state.account_id}\0{selection.reference}".encode()
                         ).hexdigest()
-                    playlist_id = self._retry_policy.run(
-                        lambda: self._spotify.publish_provisional_snapshot(
-                            snapshot_name,
-                            list(dict.fromkeys(
-                                item.spotify_uri for item in publication_items
-                                if item.spotify_uri
-                                and item.spotify_uri not in collision_uris
-                            )),
-                            description,
-                            publication_key,
+                    publish_uris = [
+                        item.spotify_uri for item in publication_items
+                        if item.spotify_uri
+                        and item.spotify_uri not in collision_uris
+                    ]
+                    if all(hasattr(self._spotify, method) for method in (
+                        "create_playlist", "find_recovery_playlist",
+                        "replace_items", "add_items", "playlist_head",
+                    )):
+                        playlist_id = self._publish_checkpointed(
+                            transfer_id, state, snapshot_name, description,
+                            publication_key, publish_uris,
                         )
-                    )
+                    else:
+                        playlist_id = self._retry_policy.run(
+                            lambda: self._spotify.publish_provisional_snapshot(
+                                snapshot_name, publish_uris, description,
+                                publication_key,
+                            )
+                        )
                     state.spotify_playlist_id = playlist_id
                     state.spotify_playlist_name = snapshot_name
                     state.status = TransferStatus.RETAINING_PUBLICATION
                     self._save_transfer(transfer_id, state)
+                    # The recovery key is permitted only until the returned ID
+                    # has crossed the durable local checkpoint above.
+                    if hasattr(self._spotify, "set_playlist_description"):
+                        self._retry_policy.run(
+                            lambda: self._spotify.set_playlist_description(
+                                playlist_id, description,
+                            )
+                        )
                     if self._pause_requested:
                         self._pause_requested = False
                         state.status = TransferStatus.PAUSED
@@ -2347,11 +2582,35 @@ class Transfer:
                             )),
                         )
                     )
+                elif (
+                    state.publication_manifest is None
+                    and all(hasattr(self._spotify, method) for method in (
+                        "create_playlist", "find_recovery_playlist",
+                        "replace_items", "add_items", "playlist_head",
+                    ))
+                ):
+                    description = self._provisional_description(
+                        request.mode, selection,
+                    )
+                    publication_key = transfer_id
+                    if request.mode == TransferMode.MIRROR:
+                        publication_key = hashlib.sha256(
+                            f"{state.account_id}\0{selection.reference}".encode()
+                        ).hexdigest()
+                    publish_uris = [
+                        item.spotify_uri for item in publication_items
+                        if item.spotify_uri
+                        and item.spotify_uri not in collision_uris
+                    ]
+                    playlist_id = self._publish_checkpointed(
+                        transfer_id, state, snapshot_name, description,
+                        publication_key, publish_uris,
+                    )
                 assert snapshot_name is not None
-                managed_items_by_uri: dict[str, PublicationItem] = {}
-                for item in publication_items:
-                    if item.spotify_uri and item.spotify_uri not in collision_uris:
-                        managed_items_by_uri.setdefault(item.spotify_uri, item)
+                managed_items = tuple(
+                    item for item in publication_items
+                    if item.spotify_uri and item.spotify_uri not in collision_uris
+                )
                 manifest = PublicationManifest(
                     account_id=state.account_id,
                     spotify_playlist_id=playlist_id,
@@ -2364,7 +2623,9 @@ class Transfer:
                         if not item.authoritative
                     ),
                     mode=request.mode,
-                    managed_items=tuple(managed_items_by_uri.values()),
+                    managed_items=managed_items,
+                    chart_title=selection.chart_title,
+                    curator=selection.curator,
                 )
                 stored_manifest = asdict(manifest)
                 stored_manifest["created_at"] = manifest.created_at.isoformat()
@@ -2391,6 +2652,11 @@ class Transfer:
                     else:
                         self._publication_storage.retain_publication(manifest)
                 except Exception:
+                    if state.completed_chunks:
+                        # Remote mutation evidence and playlist identity are
+                        # authoritative recovery facts. Keep them intact so a
+                        # resume retries only local manifest retention.
+                        raise
                     if created_playlist:
                         self._spotify.delete_provisional_snapshot(playlist_id)
                     elif relink_original_uris is not None:
@@ -2420,7 +2686,10 @@ class Transfer:
             state.status = TransferStatus.COMPLETED
             self._save_transfer(transfer_id, state)
             report.status = "completed"
-        except (RateLimitError, requests.Timeout, requests.ConnectionError) as exc:
+        except (
+            QuotaExceededError, RateLimitError, requests.Timeout,
+            requests.ConnectionError,
+        ) as exc:
             state.status = TransferStatus.PAUSED
             state.outcome = str(exc)
             self._save_transfer(transfer_id, state)
@@ -2450,6 +2719,87 @@ class Transfer:
             self._knowledge.checkpoint()
 
         return report
+
+    def _publish_checkpointed(
+        self,
+        transfer_id: str,
+        state: TransferState,
+        name: str,
+        description: str,
+        publication_key: str,
+        uris: list[str],
+    ) -> str:
+        """Publish ordered chunks with durable mutation evidence.
+
+        Spotify has no atomic multi-chunk replace. An edit may still land
+        between the fresh head read and the next write; every observable head
+        mismatch stops publication for explicit review.
+        """
+        playlist_id = state.spotify_playlist_id
+        if playlist_id is None:
+            playlist_id = self._retry_policy.run(
+                lambda: self._spotify.find_recovery_playlist(publication_key)
+            )
+        if playlist_id is None:
+            marker = f"djsupport-transfer:{publication_key}"
+            playlist_id = self._retry_policy.run(
+                lambda: self._spotify.create_playlist(
+                    name, f"{description} {marker}",
+                )
+            )
+        state.spotify_playlist_id = playlist_id
+        state.spotify_playlist_name = name
+        state.status = TransferStatus.RETAINING_PUBLICATION
+        self._save_transfer(transfer_id, state)
+        if hasattr(self._spotify, "set_playlist_description"):
+            self._retry_policy.run(
+                lambda: self._spotify.set_playlist_description(
+                    playlist_id, description,
+                )
+            )
+
+        chunks = [uris[:100]] + [
+            uris[offset:offset + 100] for offset in range(100, len(uris), 100)
+        ]
+        for index, chunk in enumerate(chunks):
+            chunk_id = hashlib.sha256(
+                json.dumps([index, chunk], separators=(",", ":")).encode()
+            ).hexdigest()
+            if chunk_id in state.completed_chunks:
+                continue
+            if state.mutation_snapshots:
+                current = self._retry_policy.run(
+                    lambda: self._spotify.playlist_head(playlist_id)
+                )
+                if current.snapshot_id != state.mutation_snapshots[-1]:
+                    raise SpotifyPlaylistChanged(
+                        "Spotify playlist changed during publication; "
+                        "publication paused for explicit review"
+                    )
+            result = self._retry_policy.run(
+                lambda: (
+                    self._spotify.replace_items(playlist_id, chunk)
+                    if index == 0 else self._spotify.add_items(playlist_id, chunk)
+                )
+            )
+            state.mutation_snapshots.append(result.snapshot_id)
+            state.completed_chunks.append(chunk_id)
+            self._save_transfer(transfer_id, state)
+        return playlist_id
+
+    def _provisional_description(
+        self, mode: TransferMode, selection: SourceSelection,
+    ) -> str:
+        if self._source.source_label == "Beatport":
+            curator = f" by {selection.curator}" if selection.curator else ""
+            return (
+                f"Provisional Beatport chart{curator}; awaiting review and "
+                f"Approval as a {mode.value.title()}. Source: {selection.reference}"
+            )
+        return (
+            f"Provisional {mode.value.title()} from {self._source.source_label}; "
+            f"awaiting review and Approval. Source: {selection.reference}"
+        )
 
     def _save_transfer(self, transfer_id: str, state: TransferState) -> None:
         if self._transfer_storage is not None:

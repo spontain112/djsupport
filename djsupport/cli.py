@@ -191,6 +191,29 @@ def migrate_0_3(legacy_directory: str, apply: bool) -> None:
     click.echo("Migration completed; legacy files were left unchanged.")
 
 
+@cli.command("migrate-0-5")
+@click.option("--legacy-account-id", required=True)
+@click.option("--account-id", required=True)
+def migrate_0_5(legacy_account_id: str, account_id: str) -> None:
+    """Back up and migrate retained state to stable Spotify account identity."""
+    from djsupport.backup import default_app_data_path
+    from djsupport.migration import FoundationMigration
+
+    try:
+        result = FoundationMigration(default_app_data_path()).apply(
+            legacy_account_id, account_id,
+        )
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if result.applied:
+        click.echo(
+            "Foundation migration completed after verified backup. "
+            f"Updated records: {result.changed_records}"
+        )
+    else:
+        click.echo("Foundation migration already applied; no changes made.")
+
+
 @cli.command()
 @click.argument("xml_path", required=False, type=click.Path(exists=True, dir_okay=False))
 @click.option(

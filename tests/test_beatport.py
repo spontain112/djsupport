@@ -19,8 +19,12 @@ from djsupport.rekordbox import Track
 
 
 class TestComposeChartPlaylistName:
+    def test_chart_title_precedes_curator_for_provenance(self):
+        assert compose_chart_playlist_name("Synthetic Chart", "Ada DJ") == (
+            "Synthetic Chart — Ada DJ"
+        )
     def test_with_curator(self):
-        assert compose_chart_playlist_name("Tech House Vibes", "Adam Beyer") == "Adam Beyer - Tech House Vibes"
+        assert compose_chart_playlist_name("Tech House Vibes", "Adam Beyer") == "Tech House Vibes — Adam Beyer"
 
     def test_unknown_curator(self):
         assert compose_chart_playlist_name("Vibes", "Unknown") == "Vibes"

@@ -52,6 +52,31 @@ python -m pip install -e ".[dev,web]"
 > named `djsupport-main`. Also note that `pipx` does not support editable
 > installs (`-e`); use `pip` instead.
 
+### Upgrading to 0.5.0
+
+Spotify authorization now includes only one additional permission,
+`playlist-read-private`, so DJ Support can inspect a private Provisional
+Playlist reliably during Approval. Sign in again when prompted; denying that
+permission leaves private-playlist inspection unavailable and DJ Support will
+not broaden permissions automatically.
+
+Existing publication schema versions 1–4 and Transfer schema version 1 remain
+readable. The next durable write upgrades them to publication schema 5 and
+Transfer schema 2, retaining account ownership, resumable work, ordered chunk
+evidence, Mirrors, and Approval history. Create a local-data backup before the
+first 0.5.0 publication.
+
+If retained state uses a previous Spotify profile identity, apply the explicit
+backup-first migration with the old and stable account identities supplied by
+your Spotify account details:
+
+```bash
+djsupport migrate-0-5 --legacy-account-id <old> --account-id <stable>
+```
+
+The command verifies its backup, stops on conflicting ownership, reports only
+aggregate counts, and is safe to repeat.
+
 ### Upgrading from 0.3.0
 
 Install 0.4.0, keep the old working directory intact, and use the explicit
@@ -286,7 +311,7 @@ default durable Transfer data is stored under the platform data directory
 Rekordbox XML path remains in the local configuration file created by
 `djsupport library set`.
 
-See [the 0.4.0 release notes](docs/release-notes-0.4.0.md) for the complete
+See [the 0.5.0 release notes](docs/release-notes-0.5.0.md) for the complete
 upgrade summary and known limitations.
 
 ### Playlist naming

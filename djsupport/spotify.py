@@ -9,7 +9,7 @@ from typing import Any
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 
-SCOPES = "playlist-modify-public playlist-modify-private"
+SCOPES = "playlist-read-private playlist-modify-public playlist-modify-private"
 
 MAX_RATE_LIMIT_WAIT = 60  # seconds — abort if Spotify asks us to wait longer
 
@@ -30,6 +30,21 @@ class RateLimitError(Exception):
         super().__init__(
             f"Spotify rate limit exceeded. Retry after {wait_str}. "
             f"Aborting — resume later to continue where you left off."
+        )
+
+
+class QuotaExceededError(Exception):
+    """Spotify account quota is exhausted; retrying cannot make progress."""
+
+
+class SpotifyCapabilityError(Exception):
+    """A required Spotify permission or account capability is unavailable."""
+
+    def __init__(self, capability: str):
+        self.capability = capability
+        super().__init__(
+            f"Spotify capability unavailable: {capability}. Re-consent with "
+            "playlist-read-private; DJ Support will not broaden permissions."
         )
 
 
@@ -62,6 +77,10 @@ def _api_call_with_rate_limit(func: Callable[..., Any], *args: Any, **kwargs: An
         return func(*args, **kwargs)
     except spotipy.SpotifyException as e:
         if e.http_status == 429:
+            if "QUOTA_EXCEEDED" in str(e).upper():
+                raise QuotaExceededError(
+                    "Spotify quota exhausted; Transfer checkpointed and paused"
+                ) from e
             retry_after = _parse_retry_after(e)
             if retry_after <= MAX_RATE_LIMIT_WAIT:
                 time.sleep(retry_after)
@@ -72,6 +91,8 @@ def _api_call_with_rate_limit(func: Callable[..., Any], *args: Any, **kwargs: An
                         raise RateLimitError(_parse_retry_after(e2)) from e2
                     raise
             raise RateLimitError(retry_after) from e
+        if e.http_status == 403:
+            raise SpotifyCapabilityError("playlist-read-private") from e
         raise
 
 
