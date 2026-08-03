@@ -461,6 +461,33 @@ def test_preview_reuses_and_retains_matching_knowledge_without_playlist_writes()
     assert storage.playlist_writes == 0
 
 
+def test_preview_preserves_shorter_version_reason_for_review_without_publication():
+    reason = "Spotify version is 31s shorter than source (6:29 vs 7:00)"
+    spotify = StatefulSpotify({
+        ("New Artist", "New Track"): {
+            **_match("spotify:track:shorter", "New Track", "New Artist"),
+            "match_type": "shorter_version",
+            "score_reasons": ["source artist similarity", reason],
+        },
+    })
+    storage = InMemoryStorage()
+    original_playlists = dict(spotify.playlists)
+
+    report = Transfer(
+        publishing_guards=TEST_PUBLISHING_GUARDS,
+        source=FixtureBeatportSource(FIXTURE), spotify=spotify,
+        matching_knowledge=storage, publication_storage=storage,
+    ).execute(TransferRequest(source="fixture", preview=True))
+
+    proposal = report.playlists[0].matched[0]
+    review_item = report.playlists[0].review_items[1]
+    assert proposal.match_type == "shorter_version"
+    assert reason in proposal.score_reasons
+    assert reason in review_item.score_reasons
+    assert spotify.playlists == original_playlists
+    assert storage.playlist_writes == 0
+
+
 def test_preview_with_zero_acceptable_matches_succeeds_with_zero_percent():
     spotify = StatefulSpotify()
     storage = InMemoryStorage()
@@ -2076,6 +2103,7 @@ class TestTransferPublicationLifecycle:
             "spotify_track": "",
             "score": "",
             "match_type": "unmatched",
+            "score_reasons": "",
         }
 
     def test_prepared_transfer_is_visible_before_source_intake_and_resumes(self, tmp_path):
@@ -3138,9 +3166,15 @@ class TestProvisionalPlaylistApproval:
                 return super().spotify_track(uri)
 
         cache = MatchCache(str(tmp_path / "matching-knowledge.json"))
+        reason = "Spotify version is 31s shorter than source (5:29 vs 6:00)"
+        approved = _match(
+            "spotify:track:approved", "Known Track", "Known Artist",
+        )
+        approved["match_type"] = "shorter_version"
+        approved["score_reasons"] = [reason]
         cache.record_approval(
             "Known Artist", "Known Track", "approved",
-            _match("spotify:track:approved", "Known Track", "Known Artist"),
+            approved,
         )
         cache.save()
         spotify = UnavailableApprovedSpotify({
@@ -3162,6 +3196,9 @@ class TestProvisionalPlaylistApproval:
         assert cache.lookup("Known Artist", "Known Track", 100).spotify_uri == (
             "spotify:track:approved"
         )
+        approved_review = report.playlists[0].review_items[0]
+        assert approved_review.match_type == "shorter_version"
+        assert approved_review.score_reasons == (reason,)
 
     def test_missing_correction_is_added_once_across_repeated_approval(self, tmp_path):
         transfer, spotify, _, playlist_id = self.publish()

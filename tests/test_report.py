@@ -238,6 +238,23 @@ class TestSaveReport:
         content = (tmp_path / "report.md").read_text()
         assert "Low Confidence" not in content
 
+    def test_shorter_version_is_explained_in_review_section_at_high_score(self, tmp_path):
+        path = str(tmp_path / "report.md")
+        reason = "Spotify version is 31s shorter than source (4:29 vs 5:00)"
+        match = _matched(
+            score=95.0,
+            match_type="shorter_version",
+            score_reasons=(reason,),
+        )
+
+        save_report(_report(playlists=[_playlist(matched=[match])]), path)
+
+        review_section = (tmp_path / "report.md").read_text().split(
+            "## Low Confidence and Version Review Matches", maxsplit=1,
+        )
+        assert len(review_section) == 2
+        assert reason in review_section[1]
+
 
 class TestSaveReviewCsv:
     def test_writes_editable_rows_with_stable_reference_and_spotify_url(self, tmp_path):
@@ -250,3 +267,18 @@ class TestSaveReviewCsv:
         content = (tmp_path / "review.csv").read_text()
         assert "source_track_id,source_track,spotify_url" in content
         assert "source-1,Track A,https://open.spotify.com/track/abc123" in content
+
+    def test_includes_shorter_version_reason_for_human_review(self, tmp_path):
+        path = str(tmp_path / "review.csv")
+        reason = "Spotify version is 31s shorter than source (4:29 vs 5:00)"
+
+        save_review_csv(
+            _report(playlists=[_playlist(matched=[_matched(
+                match_type="shorter_version", score_reasons=(reason,),
+            )])]),
+            path,
+        )
+
+        content = (tmp_path / "review.csv").read_text()
+        assert "score_reasons" in content.splitlines()[0]
+        assert reason in content

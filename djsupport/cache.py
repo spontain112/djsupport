@@ -25,6 +25,10 @@ class CacheEntry:
     match_type: str | None = None
     approval_status: str | None = None
     source_duration: int = 0
+    score_reasons: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        self.score_reasons = tuple(self.score_reasons)
 
 
 class MatchCache:
@@ -113,6 +117,7 @@ class MatchCache:
                 spotify_artist=result["artist"],
                 score=result["score"],
                 match_type=result.get("match_type"),
+                score_reasons=tuple(result.get("score_reasons", ())),
                 matched=True,
                 timestamp=datetime.now().isoformat(),
                 threshold=threshold,
@@ -168,6 +173,7 @@ class MatchCache:
                 timestamp=datetime.now().isoformat(),
                 threshold=0,
                 match_type=result.get("match_type"),
+                score_reasons=tuple(result.get("score_reasons", ())),
                 source_duration=source_duration,
             )
             self.entries[key] = entry

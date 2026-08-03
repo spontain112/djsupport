@@ -35,6 +35,7 @@ class ReviewTrack:
     spotify_artist: str = ""
     score: float = 0.0
     match_type: str = "unmatched"
+    score_reasons: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -340,18 +341,27 @@ def save_report(report: SyncReport, path: str) -> None:
     low_confidence = []
     for pl in report.playlists:
         for m in pl.matched:
-            if m.score < 90 or m.match_type == "fallback_version":
+            if m.score < 90 or m.match_type in {
+                "fallback_version", "shorter_version",
+            }:
                 low_confidence.append((pl.path, m))
 
     if low_confidence:
-        lines.append("## Low Confidence Matches (score < 90)")
+        lines.append("## Low Confidence and Version Review Matches")
         lines.append("")
-        lines.append(f"| Playlist | {report.source_label} | Spotify Match | Score | Match Type |")
-        lines.append("|----------|-----------|---------------|-------|------------|")
+        lines.append(
+            f"| Playlist | {report.source_label} | Spotify Match | Score"
+            " | Match Type | Reasons |"
+        )
+        lines.append(
+            "|----------|-----------|---------------|-------|------------|---------|"
+        )
         for pl_path, m in low_confidence:
+            reasons = "; ".join(m.score_reasons)
             lines.append(
                 f"| {pl_path} | {m.source_name}"
-                f" | {m.spotify_artist} - {m.spotify_name} | {m.score:.1f} | {m.match_type} |"
+                f" | {m.spotify_artist} - {m.spotify_name} | {m.score:.1f}"
+                f" | {m.match_type} | {reasons} |"
             )
         lines.append("")
 
@@ -385,7 +395,7 @@ def save_review_csv(report: SyncReport, path: str) -> None:
         writer = csv.writer(csv_file)
         writer.writerow([
             "source_track_id", "source_track", "spotify_url", "spotify_track",
-            "score", "match_type", "source_artist", "source_title",
+            "score", "match_type", "score_reasons", "source_artist", "source_title",
             "source_duration",
         ])
         for playlist in report.playlists:
@@ -408,6 +418,7 @@ def save_review_csv(report: SyncReport, path: str) -> None:
                         ),
                         f"{item.score:.1f}" if item.spotify_uri else "",
                         item.match_type,
+                        "; ".join(item.score_reasons),
                         item.source_artist,
                         item.source_title,
                         item.source_duration,
@@ -421,6 +432,7 @@ def save_review_csv(report: SyncReport, path: str) -> None:
                     f"{match.spotify_artist} - {match.spotify_name}",
                     f"{match.score:.1f}",
                     match.match_type,
+                    "; ".join(match.score_reasons),
                     "",
                     "",
                     "",

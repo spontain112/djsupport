@@ -285,6 +285,151 @@ class TestMatchTrack:
         assert result["score"] >= 80
         assert result["match_type"] == "exact"
 
+    def test_materially_shorter_candidate_is_reviewable_not_exact(self):
+        sp = self._mock_sp([
+            make_spotify_item(
+                "Synthetic Signal", "Synthetic Artist",
+                "spotify:track:shorter", duration_ms=269000,
+            ),
+        ])
+        track = make_track(
+            "Synthetic Signal", "Synthetic Artist", duration=300,
+        )
+
+        result = match_track(sp, track, threshold=80)
+
+        assert result is not None
+        assert result["match_type"] == "shorter_version"
+        assert (
+            "Spotify version is 31s shorter than source (4:29 vs 5:00)"
+            in result["score_reasons"]
+        )
+
+    def test_high_confidence_shorter_version_does_not_expand_search(self):
+        sp = self._mock_sp([
+            make_spotify_item(
+                "Synthetic Signal (Original Mix)", "Synthetic Artist",
+                "spotify:track:shorter", duration_ms=269000,
+            ),
+        ])
+
+        result = match_track(
+            sp,
+            make_track(
+                "Synthetic Signal (Original Mix)",
+                "Synthetic Artist",
+                duration=300,
+            ),
+            threshold=80,
+        )
+
+        assert result is not None
+        assert result["match_type"] == "shorter_version"
+        assert sp.search.call_count == 1
+
+    def test_candidate_exactly_thirty_seconds_shorter_remains_exact(self):
+        sp = self._mock_sp([
+            make_spotify_item(
+                "Synthetic Signal", "Synthetic Artist",
+                "spotify:track:boundary", duration_ms=270000,
+            ),
+        ])
+
+        result = match_track(
+            sp,
+            make_track("Synthetic Signal", "Synthetic Artist", duration=300),
+            threshold=80,
+        )
+
+        assert result is not None
+        assert result["match_type"] == "exact"
+
+    def test_equal_candidates_prefer_smallest_known_duration_delta(self):
+        sp = self._mock_sp([
+            make_spotify_item(
+                "Synthetic Signal", "Synthetic Artist",
+                "spotify:track:first", duration_ms=270000,
+            ),
+            make_spotify_item(
+                "Synthetic Signal", "Synthetic Artist",
+                "spotify:track:closest", duration_ms=295000,
+            ),
+        ])
+
+        result = match_track(
+            sp,
+            make_track("Synthetic Signal", "Synthetic Artist", duration=300),
+            threshold=80,
+        )
+
+        assert result is not None
+        assert result["uri"] == "spotify:track:closest"
+        assert sp.search.call_count == 1
+
+    def test_existing_candidates_choose_closer_duration_without_extra_search(self):
+        sp = self._mock_sp([
+            make_spotify_item(
+                "Synthetic Signal", "Synthetic Artist",
+                "spotify:track:short", duration_ms=240000,
+            ),
+            make_spotify_item(
+                "Synthetic Signal", "Synthetic Artist",
+                "spotify:track:close", duration_ms=295000,
+            ),
+        ])
+
+        result = match_track(
+            sp,
+            make_track("Synthetic Signal", "Synthetic Artist", duration=300),
+            threshold=80,
+        )
+
+        assert result is not None
+        assert result["uri"] == "spotify:track:close"
+        assert sp.search.call_count == 1
+
+    @pytest.mark.parametrize(
+        ("source_duration", "spotify_duration_ms"),
+        [(0, 269000), (300, 0)],
+    )
+    def test_unknown_duration_does_not_infer_a_shorter_version(
+        self, source_duration, spotify_duration_ms,
+    ):
+        sp = self._mock_sp([
+            make_spotify_item(
+                "Synthetic Signal", "Synthetic Artist",
+                "spotify:track:unknown", duration_ms=spotify_duration_ms,
+            ),
+        ])
+
+        result = match_track(
+            sp,
+            make_track(
+                "Synthetic Signal", "Synthetic Artist", duration=source_duration,
+            ),
+            threshold=80,
+        )
+
+        assert result is not None
+        assert result["match_type"] == "exact"
+
+    def test_materially_longer_candidate_remains_exact(self):
+        sp = self._mock_sp([
+            make_spotify_item(
+                "Synthetic Signal", "Synthetic Artist",
+                "spotify:track:longer", duration_ms=331000,
+            ),
+        ])
+
+        result = match_track(
+            sp,
+            make_track("Synthetic Signal", "Synthetic Artist", duration=300),
+            threshold=80,
+        )
+
+        assert result is not None
+        assert result["match_type"] == "exact"
+
     def test_recovers_existing_repeated_subtitle_candidate_without_new_search(self):
         source_title = "Signal (Sunrise Mix) (  sunrise   mix )"
         track = make_track(source_title, "Synthetic Artist")

@@ -194,12 +194,43 @@ def _classify_version_match(track: Track, result: dict) -> str:
             result_text = _normalize(f'{result["artist"]} {result["name"]}')
             if remixer and remixer not in result_text:
                 return "fallback_version"
-        return "exact"
+        return _classify_duration_version(track, result)
 
     # Track appears to be original/default version. Named remix/edit on Spotify is a fallback.
     if result_named_variant:
         return "fallback_version"
+    return _classify_duration_version(track, result)
+
+
+def _classify_duration_version(track: Track, result: dict) -> str:
+    """Flag a known Spotify representation over 30 seconds shorter."""
+    result_duration_ms = result.get("duration_ms", 0)
+    if track.duration <= 0 or result_duration_ms <= 0:
+        return "exact"
+    if track.duration - (result_duration_ms / 1000) > 30:
+        return "shorter_version"
     return "exact"
+
+
+def _format_duration(seconds: int) -> str:
+    minutes, remaining_seconds = divmod(seconds, 60)
+    return f"{minutes}:{remaining_seconds:02d}"
+
+
+def _shorter_version_reason(track: Track, result: dict) -> str:
+    spotify_seconds = result["duration_ms"] // 1000
+    delta = track.duration - spotify_seconds
+    return (
+        f"Spotify version is {delta}s shorter than source "
+        f"({_format_duration(spotify_seconds)} vs {_format_duration(track.duration)})"
+    )
+
+
+def _known_duration_delta(track: Track, result: dict) -> float:
+    result_duration_ms = result.get("duration_ms", 0)
+    if track.duration <= 0 or result_duration_ms <= 0:
+        return float("inf")
+    return abs(track.duration - (result_duration_ms / 1000))
 
 
 def _duration_penalty(track_duration_s: int, result_duration_ms: int) -> float:
@@ -274,25 +305,37 @@ def _select_best(track: Track, results: list[dict], threshold: int) -> dict | No
         match_type = _classify_version_match(track, r)
         scored.append((r, exact_score, base_score, components, match_type))
 
-    # First pass: exact version matches only.
-    exact_candidates = [s for s in scored if s[4] == "exact"]
-    exact_candidates.sort(key=lambda x: x[1], reverse=True)
+    # First pass: matching/default versions, including shorter representations
+    # that must remain eligible for human review.
+    exact_candidates = [s for s in scored if s[4] in {"exact", "shorter_version"}]
+    exact_candidates.sort(
+        key=lambda candidate: (
+            -candidate[1], _known_duration_delta(track, candidate[0]),
+        ),
+    )
     if exact_candidates:
-        best, best_score, _base_score, components, _match_type = exact_candidates[0]
+        best, best_score, _base_score, components, match_type = exact_candidates[0]
         if best_score >= threshold:
             _artist_score_value, artist_score_reason = _artist_score(track, best)
+            score_reasons = [artist_score_reason]
+            if match_type == "shorter_version":
+                score_reasons.append(_shorter_version_reason(track, best))
             return {
                 **best,
                 "score": best_score,
-                "match_type": "exact",
-                "score_reasons": [artist_score_reason],
+                "match_type": match_type,
+                "score_reasons": score_reasons,
             }
 
     # Second pass: fallback to a different version if the base track is strong.
     # This preserves the user's track intent in reporting while avoiding silent
     # "exact" classifications for remix/version substitutions.
     fallback_candidates = [s for s in scored if s[4] == "fallback_version"]
-    fallback_candidates.sort(key=lambda x: x[2], reverse=True)
+    fallback_candidates.sort(
+        key=lambda candidate: (
+            -candidate[2], _known_duration_delta(track, candidate[0]),
+        ),
+    )
     if fallback_candidates:
         best, _exact_score, base_score, components, _match_type = fallback_candidates[0]
         if (
@@ -328,7 +371,7 @@ def _search_candidates(sp, track: Track, threshold: int) -> list[dict]:
 
     search(track.artist, track.name)
     early = _select_best(track, all_results, EARLY_EXIT_THRESHOLD)
-    if early is not None and early["match_type"] == "exact":
+    if early is not None and early["match_type"] in {"exact", "shorter_version"}:
         return all_results
     stripped = _strip_mix_info(track.name)
     if stripped != track.name:
@@ -410,6 +453,7 @@ def match_track_cached(
                 "artist": entry.spotify_artist,
                 "score": entry.score,
                 "match_type": entry.match_type or "exact",
+                "score_reasons": list(entry.score_reasons),
             }, "cache"
         else:
             if not cache.is_retry_eligible(track.artist, track.name,
