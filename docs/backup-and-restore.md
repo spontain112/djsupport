@@ -5,6 +5,13 @@ It includes matching knowledge, Transfer and publication state, migration
 records, and privacy-screened reports. Credentials and unrelated files are not
 included.
 
+Matching-knowledge schema 2 includes private local-audio observations and
+account-scoped Approved Match associations. Transfer-state schema 3 includes
+the opt-in and completed evidence checkpoint handles. Both are backed up and
+restored as private application data. Conflicting local-audio authority requires
+an explicit restore choice identified by a privacy-safe hashed label; reports
+and archive manifests do not print fingerprints or source paths.
+
 Restore is preview-first:
 
 ```bash

@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in, Rekordbox-only local Chromaprint evidence that can recover an exact,
+  account-scoped Approved Match after XML metadata changes without another
+  Spotify search.
+- Versioned agent-native capability, bounded planning, separate authorization,
+  non-interactive execution, stable resume, and privacy-redacted outcome
+  contracts, exposed through `capabilities --json` and `sync --json`.
+- Durable matching-knowledge schema 2, including private fingerprint
+  observations and associations with backup, restore, and legacy-migration
+  support.
+- Transfer-state schema 3 for durable local-audio opt-in, evidence checkpoints,
+  and stable aggregate outcomes; schemas 1 and 2 remain readable.
+
+### Changed
+
+- Transfer checkpoints completed local observations and aggregate API/local
+  evidence counts so resumed and repeated agent outcomes remain stable.
+- Rekordbox XML intake retains each selected track's private `Location` solely
+  for opted-in local calculation; reports and machine output omit it.
+
 ### Fixed
 
 - Materially shorter Spotify substitutes remain eligible for Approval but are

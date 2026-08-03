@@ -57,7 +57,7 @@ from djsupport.spotify import (
 
 
 PUBLICATION_MANIFEST_VERSION = 5
-TRANSFER_STATE_VERSION = 2
+TRANSFER_STATE_VERSION = 3
 EXPENSIVE_BATCH_LOOKUP_THRESHOLD = 100
 SPOTIFY_TRACK_URI = re.compile(r"^spotify:track:([A-Za-z0-9]{22})$")
 SPOTIFY_TRACK_URL = re.compile(
@@ -109,6 +109,33 @@ class TransferRequest:
     mirror_disposition: MirrorDisposition | None = None
     mirror_playlist_id: str | None = None
     retain_matching_knowledge: bool = True
+    local_audio_identity: bool = False
+
+
+@dataclass(frozen=True)
+class LocalAudioObservation:
+    """One private local observation; values never enter reports or manifests."""
+
+    status: str
+    fingerprint: str | None = None
+    algorithm: str = "chromaprint"
+    algorithm_version: str = ""
+    duration: int = 0
+    reason: str | None = None
+
+    @classmethod
+    def available(
+        cls, *, fingerprint: str, algorithm: str,
+        algorithm_version: str, duration: int,
+    ) -> LocalAudioObservation:
+        return cls(
+            status="available", fingerprint=fingerprint, algorithm=algorithm,
+            algorithm_version=algorithm_version, duration=duration,
+        )
+
+    @classmethod
+    def unavailable(cls, reason: str) -> LocalAudioObservation:
+        return cls(status="unavailable", reason=reason)
 
 
 @dataclass(frozen=True)
@@ -123,6 +150,7 @@ class BatchPlanRequest:
     retry: bool = False
     retry_days: int = 7
     playlist_prefix: str | None = "djsupport"
+    local_audio_identity: bool = False
 
 
 @dataclass(frozen=True)
@@ -133,6 +161,10 @@ class PlaylistPreflight:
     approved_match_hits: int
     cache_hits: int
     expected_uncached_lookups: int
+    local_audio_eligible: int = 0
+    local_audio_indexed: int = 0
+    local_audio_pending: int = 0
+    local_audio_unavailable: int = 0
 
 
 @dataclass(frozen=True)
@@ -144,6 +176,7 @@ class BatchPlan:
     retry: bool = False
     retry_days: int = 7
     playlist_prefix: str | None = "djsupport"
+    local_audio_identity: bool = False
 
     @property
     def ready(self) -> bool:
@@ -166,6 +199,22 @@ class BatchPlan:
         return sum(
             playlist.expected_uncached_lookups for playlist in self.playlists
         )
+
+    @property
+    def local_audio_eligible(self) -> int:
+        return sum(item.local_audio_eligible for item in self.playlists)
+
+    @property
+    def local_audio_indexed(self) -> int:
+        return sum(item.local_audio_indexed for item in self.playlists)
+
+    @property
+    def local_audio_pending(self) -> int:
+        return sum(item.local_audio_pending for item in self.playlists)
+
+    @property
+    def local_audio_unavailable(self) -> int:
+        return sum(item.local_audio_unavailable for item in self.playlists)
 
 class TransferStatus(str, Enum):
     MATCHING = "matching"
@@ -241,6 +290,7 @@ class BatchState:
     retry: bool = False
     retry_days: int = 7
     playlist_prefix: str | None = "djsupport"
+    local_audio_identity: bool = False
 
     @classmethod
     def from_dict(cls, value: dict) -> BatchState:
@@ -252,6 +302,16 @@ class BatchState:
                 for playlist in value["playlists"]
             ],
         })
+
+
+@dataclass(frozen=True)
+class BatchProgress:
+    transfer_id: str
+    status: BatchStatus
+    playlists: int
+    completed: int
+    failed: int
+    pending: int
 
 
 class ApprovalStatus(str, Enum):
@@ -419,12 +479,21 @@ class TransferState:
     outcome: str | None = None
     mutation_snapshots: list[str] = field(default_factory=list)
     completed_chunks: list[str] = field(default_factory=list)
+    api_lookups: int = 0
+    local_audio_eligible: int = 0
+    local_audio_observed: int = 0
+    local_audio_unavailable: int = 0
+    local_audio_reused: int = 0
+    local_evidence_ids: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, value: dict) -> TransferState:
         return cls(**{
             "alternatives": [], "mutation_snapshots": [],
-            "completed_chunks": [], **value,
+            "completed_chunks": [], "api_lookups": 0,
+            "local_audio_eligible": 0, "local_audio_observed": 0,
+            "local_audio_unavailable": 0, "local_audio_reused": 0,
+            "local_evidence_ids": {}, **value,
             "status": TransferStatus(value["status"]),
         })
 
@@ -456,6 +525,7 @@ class PublicationItem:
     score_reasons: tuple[str, ...] = ()
     source_duration: int = 0
     authoritative: bool = False
+    local_evidence_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -779,7 +849,7 @@ class FileTransferStorage:
             data = json.loads(self.path.read_text())
         except (json.JSONDecodeError, OSError):
             return
-        if data.get("version") in (1, TRANSFER_STATE_VERSION):
+        if data.get("version") in (1, 2, TRANSFER_STATE_VERSION):
             for transfer_id, state in data.get("transfers", {}).items():
                 try:
                     self.transfers[transfer_id] = TransferState.from_dict(state)
@@ -1239,6 +1309,82 @@ class MatchCacheKnowledge:
             item.source_artist, item.source_title, item.source_duration,
         )
 
+    def revoke_local_audio(
+        self, item: PublicationItem, account_id: str,
+    ) -> None:
+        self._cache.revoke_fingerprints(
+            source_artist=item.source_artist,
+            source_title=item.source_title,
+            source_duration=item.source_duration,
+            evidence_id=item.local_evidence_id,
+            account_id=account_id,
+        )
+
+    def retain_local_audio(
+        self, track: Track, observation: LocalAudioObservation,
+    ) -> str:
+        assert observation.fingerprint is not None
+        return self._cache.retain_fingerprint_observation(
+            algorithm=observation.algorithm,
+            algorithm_version=observation.algorithm_version,
+            fingerprint=observation.fingerprint,
+            audio_duration=observation.duration,
+            source_track_id=track.track_id,
+        )
+
+    def lookup_local_audio(
+        self, observation: LocalAudioObservation, account_id: str,
+    ) -> dict | None:
+        if observation.status != "available" or observation.fingerprint is None:
+            return None
+        return self._cache.lookup_fingerprint(
+            algorithm=observation.algorithm,
+            algorithm_version=observation.algorithm_version,
+            fingerprint=observation.fingerprint,
+            account_id=account_id,
+        )
+
+    def approve_local_audio(
+        self, item: PublicationItem, account_id: str,
+    ) -> ApprovalConflict | None:
+        if item.local_evidence_id is None:
+            return None
+        conflict = self._cache.approve_fingerprint(
+            evidence_id=item.local_evidence_id,
+            account_id=account_id,
+            source_artist=item.source_artist,
+            source_title=item.source_title,
+            source_duration=item.source_duration,
+            result={
+                "uri": item.spotify_uri,
+                "name": item.spotify_name,
+                "artist": item.spotify_artist,
+                "score": item.score,
+                "match_type": item.match_type,
+                "score_reasons": list(item.score_reasons),
+            },
+        )
+        return ApprovalConflict(**conflict) if conflict else None
+
+    def has_local_audio_observation(self, track: Track) -> bool:
+        return any(
+            item.get("source_track_id") == track.track_id
+            for item in self._cache.fingerprint_observations.values()
+        )
+
+    def local_audio_observation(
+        self, evidence_id: str,
+    ) -> LocalAudioObservation | None:
+        item = self._cache.fingerprint_observation(evidence_id)
+        if item is None:
+            return None
+        return LocalAudioObservation.available(
+            fingerprint=item["fingerprint"],
+            algorithm=item["algorithm"],
+            algorithm_version=item["algorithm_version"],
+            duration=item["audio_duration"],
+        )
+
 
 class EphemeralMatchingKnowledge:
     """Non-persistent matching knowledge used for explicit ``--no-cache``."""
@@ -1285,6 +1431,7 @@ class Transfer:
         publication_storage: PublicationStorage | None = None,
         transfer_storage: TransferStorage | None = None,
         retry_policy: RetryPolicy | None = None,
+        local_audio=None,
     ) -> None:
         self._source = source
         self._spotify = spotify
@@ -1293,11 +1440,22 @@ class Transfer:
         self._publication_storage = publication_storage
         self._transfer_storage = transfer_storage
         self._retry_policy = retry_policy or RetryPolicy()
+        self._local_audio = local_audio
         self._pause_requested = False
 
     def pause(self) -> None:
         """Request a pause after the current track reaches a safe checkpoint."""
         self._pause_requested = True
+
+    def local_audio_capability(self):
+        """Inspect optional local identity support without consuming a source."""
+        if self._local_audio is None:
+            from djsupport.local_audio import LocalAudioCapability
+
+            return LocalAudioCapability(
+                available=False, reason="not_configured",
+            )
+        return self._local_audio.capability()
 
     def prepare(self, request: TransferRequest) -> str:
         """Durably reserve a Transfer ID before potentially slow source intake."""
@@ -1354,6 +1512,36 @@ class Transfer:
             ),
         )
 
+    def batch_progress(self, transfer_id: str) -> BatchProgress:
+        """Reload aggregate Batch progress without consuming its source."""
+        if self._transfer_storage is None:
+            raise ValueError("Progress requires durable Transfer storage")
+        batch = self._transfer_storage.load_batch(transfer_id)
+        if batch is None:
+            raise ValueError(f"Unknown Batch: {transfer_id}")
+        if (
+            batch.account_id is not None
+            and batch.account_id != self._spotify.account_id()
+        ):
+            raise ValueError("A Batch cannot be viewed under another Spotify account")
+        return BatchProgress(
+            transfer_id=transfer_id,
+            status=batch.status,
+            playlists=len(batch.playlists),
+            completed=sum(
+                item.outcome == PlaylistOutcome.COMPLETED
+                for item in batch.playlists
+            ),
+            failed=sum(
+                item.outcome == PlaylistOutcome.FAILED
+                for item in batch.playlists
+            ),
+            pending=sum(
+                item.outcome in (PlaylistOutcome.PENDING, PlaylistOutcome.SKIPPED)
+                for item in batch.playlists
+            ),
+        )
+
     @staticmethod
     def _stored_request(request: TransferRequest) -> dict:
         assert request.mode is not None
@@ -1374,10 +1562,18 @@ class Transfer:
             ),
             "mirror_playlist_id": request.mirror_playlist_id,
             "retain_matching_knowledge": request.retain_matching_knowledge,
+            "local_audio_identity": request.local_audio_identity,
         }
 
     def plan_batch(self, request: BatchPlanRequest) -> BatchPlan:
         """Plan an explicitly selected Rekordbox Batch without side effects."""
+        if request.local_audio_identity and not getattr(
+            self._knowledge, "persistent", True,
+        ):
+            raise ValueError(
+                "Local audio identity requires durable matching knowledge; "
+                "remove --no-cache"
+            )
         selections = self._source.consume_batch(
             request.playlist_references, request.whole_library,
         )
@@ -1386,6 +1582,10 @@ class Transfer:
             approved_match_hits = 0
             cache_hits = 0
             expected_uncached_lookups = 0
+            local_audio_eligible = 0
+            local_audio_indexed = 0
+            local_audio_pending = 0
+            local_audio_unavailable = 0
             for track in selection.tracks:
                 known = self._knowledge.lookup(track, request.threshold)
                 if known is not None and known.get("authoritative"):
@@ -1396,6 +1596,25 @@ class Transfer:
                     cache_hits += 1
                 else:
                     expected_uncached_lookups += 1
+                if request.local_audio_identity:
+                    status = (
+                        self._local_audio.preflight(track)
+                        if self._local_audio is not None else "not_configured"
+                    )
+                    if status == "eligible":
+                        local_audio_eligible += 1
+                        indexed = (
+                            self._knowledge.has_local_audio_observation(track)
+                            if hasattr(
+                                self._knowledge, "has_local_audio_observation"
+                            ) else False
+                        )
+                        if indexed:
+                            local_audio_indexed += 1
+                        else:
+                            local_audio_pending += 1
+                    else:
+                        local_audio_unavailable += 1
             playlists.append(PlaylistPreflight(
                 name=selection.name,
                 reference=selection.reference,
@@ -1403,6 +1622,10 @@ class Transfer:
                 approved_match_hits=approved_match_hits,
                 cache_hits=cache_hits,
                 expected_uncached_lookups=expected_uncached_lookups,
+                local_audio_eligible=local_audio_eligible,
+                local_audio_indexed=local_audio_indexed,
+                local_audio_pending=local_audio_pending,
+                local_audio_unavailable=local_audio_unavailable,
             ))
         expected_lookups = sum(
             playlist.expected_uncached_lookups for playlist in playlists
@@ -1421,6 +1644,7 @@ class Transfer:
             retry=request.retry,
             retry_days=request.retry_days,
             playlist_prefix=request.playlist_prefix,
+            local_audio_identity=request.local_audio_identity,
         )
 
     def execute_batch(
@@ -1490,6 +1714,7 @@ class Transfer:
                 retry=plan.retry,
                 retry_days=plan.retry_days,
                 playlist_prefix=plan.playlist_prefix,
+                local_audio_identity=plan.local_audio_identity,
                 playlists=[
                     BatchPlaylistState(
                         planned.name, planned.reference, f"{batch_id}:{index}",
@@ -1518,6 +1743,7 @@ class Transfer:
                     retry_days=batch.retry_days,
                     playlist_prefix=batch.playlist_prefix,
                     transfer_id=item.transfer_id,
+                    local_audio_identity=batch.local_audio_identity,
                 ))
             except Exception as exc:
                 if not self._is_shared_failure(exc) and not self._is_playlist_failure(exc):
@@ -1620,6 +1846,11 @@ class Transfer:
             return report
         report.matched = [MatchedTrack(**matched) for matched in state.matched]
         report.unmatched = list(state.unmatched)
+        report.api_lookups = state.api_lookups
+        report.local_audio_eligible = state.local_audio_eligible
+        report.local_audio_observed = state.local_audio_observed
+        report.local_audio_unavailable = state.local_audio_unavailable
+        report.local_audio_reused = state.local_audio_reused
         report.alternatives = [
             UnmatchedAlternatives(
                 source_track_id=alternative["source_track_id"],
@@ -1801,6 +2032,12 @@ class Transfer:
                         conflict = self._knowledge.approve(item)
                     if conflict is not None:
                         conflicts.append(conflict)
+                    if hasattr(self._knowledge, "approve_local_audio"):
+                        local_conflict = self._knowledge.approve_local_audio(
+                            item, account_id,
+                        )
+                        if local_conflict is not None:
+                            conflicts.append(local_conflict)
                 for item in outcome.rejected:
                     self._knowledge.reject(item)
                 if conflicts:
@@ -1993,6 +2230,13 @@ class Transfer:
         """
         if not request.preview and self._publication_storage is None:
             raise ValueError("Publishing Transfers require publication storage")
+        if request.local_audio_identity and not getattr(
+            self._knowledge, "persistent", True,
+        ):
+            raise ValueError(
+                "Local audio identity requires durable matching knowledge; "
+                "remove --no-cache"
+            )
 
         if request.mode is None:
             # Older internal/test adapters predate source-owned mode policy.
@@ -2192,6 +2436,11 @@ class Transfer:
         )
         playlist.matched = [MatchedTrack(**item) for item in state.matched]
         playlist.unmatched = list(state.unmatched)
+        playlist.api_lookups = state.api_lookups
+        playlist.local_audio_eligible = state.local_audio_eligible
+        playlist.local_audio_observed = state.local_audio_observed
+        playlist.local_audio_unavailable = state.local_audio_unavailable
+        playlist.local_audio_reused = state.local_audio_reused
         playlist.alternatives = [
             UnmatchedAlternatives(
                 source_track_id=item["source_track_id"],
@@ -2256,6 +2505,47 @@ class Transfer:
             for index in range(state.next_track_index, len(selection.tracks)):
                 track = selection.tracks[index]
                 result = self._knowledge.lookup(track, request.threshold)
+                local_evidence_id = None
+                if (
+                    request.local_audio_identity
+                    and self._local_audio is not None
+                    and not (result is not None and result.get("authoritative"))
+                ):
+                    evidence_key = str(index)
+                    local_evidence_id = state.local_evidence_ids.get(evidence_key)
+                    observation = (
+                        self._knowledge.local_audio_observation(local_evidence_id)
+                        if (
+                            local_evidence_id is not None
+                            and hasattr(
+                                self._knowledge, "local_audio_observation"
+                            )
+                        ) else None
+                    )
+                    if observation is None:
+                        observation = self._local_audio.observe(track)
+                    if observation.status == "available":
+                        playlist.local_audio_eligible += 1
+                        playlist.local_audio_observed += 1
+                        if (
+                            local_evidence_id is None
+                            and hasattr(self._knowledge, "retain_local_audio")
+                        ):
+                            local_evidence_id = self._knowledge.retain_local_audio(
+                                track, observation,
+                            )
+                            state.local_evidence_ids[evidence_key] = local_evidence_id
+                            self._knowledge.checkpoint()
+                            self._save_transfer(transfer_id, state)
+                        if hasattr(self._knowledge, "lookup_local_audio"):
+                            local_result = self._knowledge.lookup_local_audio(
+                                observation, self._spotify.account_id(),
+                            )
+                            if local_result is not None:
+                                result = local_result
+                                playlist.local_audio_reused += 1
+                    else:
+                        playlist.local_audio_unavailable += 1
                 if result is not None:
                     playlist.cache_hits += 1
                     if result.get("authoritative") and not self._approved_available(
@@ -2281,6 +2571,7 @@ class Transfer:
                             score_reasons=tuple(result.get("score_reasons", ())),
                             source_duration=track.duration,
                             authoritative=True,
+                            local_evidence_id=local_evidence_id,
                         ))
                         result = None
                 elif self._knowledge.should_retry(
@@ -2307,6 +2598,7 @@ class Transfer:
                             source_artist=track.artist,
                             source_title=track.name,
                             source_duration=track.duration,
+                            local_evidence_id=local_evidence_id,
                         ))
                     candidates = tuple(
                         AlternativeCandidate(
@@ -2355,9 +2647,15 @@ class Transfer:
                             score_reasons=matched_track.score_reasons,
                             source_duration=track.duration,
                             authoritative=bool(result.get("authoritative")),
+                            local_evidence_id=local_evidence_id,
                         ))
 
                 state.next_track_index = index + 1
+                state.api_lookups = playlist.api_lookups
+                state.local_audio_eligible = playlist.local_audio_eligible
+                state.local_audio_observed = playlist.local_audio_observed
+                state.local_audio_unavailable = playlist.local_audio_unavailable
+                state.local_audio_reused = playlist.local_audio_reused
                 state.matched = [asdict(item) for item in playlist.matched]
                 state.unmatched = list(playlist.unmatched)
                 state.alternatives = [asdict(item) for item in playlist.alternatives]
@@ -2495,6 +2793,10 @@ class Transfer:
                         ]
                         for item in revoked_items:
                             self._knowledge.revoke(item)
+                            if hasattr(self._knowledge, "revoke_local_audio"):
+                                self._knowledge.revoke_local_audio(
+                                    item, state.account_id,
+                                )
                         self._knowledge.checkpoint()
                         publication_items = [
                             item for item in publication_items

@@ -37,6 +37,8 @@ djsupport/
   transfer.py   # Durable Transfer/Batch orchestration, checkpoints, and publication
   backup.py     # Versioned local-data backup, preview, merge, and atomic restore
   migration.py  # Explicit preview/apply migration of known 0.3.0 local data
+  local_audio.py # Optional local-only Chromaprint system boundary
+  agent.py      # Versioned, harness-neutral Transfer contract rendering
   static/       # Web frontend (index.html with Tailwind CSS)
 tests/          # pytest suite
 docs/           # Plans, reports, and solution docs
@@ -54,6 +56,7 @@ djsupport list <xml>       # List playlists from Rekordbox XML
 djsupport sync <xml> --playlist "My Playlist"  # Transfer one Rekordbox Mirror
 djsupport sync <xml> --whole-library            # Explicit whole-library Batch
 djsupport sync <xml> --dry-run  # Preview without modifying Spotify
+djsupport capabilities --json   # Side-effect-free agent capability contract
 djsupport library set <xml>     # Save default Rekordbox XML path
 djsupport library show          # Show configured XML path
 djsupport beatport <url>       # Create a Beatport Snapshot
@@ -79,6 +82,10 @@ djsupport sync --cache-path my.json      # Matching-knowledge path (compatible f
 djsupport sync --prefix "dj"             # Prefix for Spotify playlist names
 djsupport sync --no-prefix               # Disable playlist name prefix
 djsupport sync --state-path state.json   # Custom playlist state file location
+djsupport sync --local-audio-identity     # Opt into selected local audio reads
+djsupport sync --json --authorize-private-source  # Non-interactive agent Preview
+djsupport sync --json --authorize-private-source --authorize-spotify-write  # Agent publication
+djsupport sync --confirm-expensive        # Explicit agent/CLI expensive-work gate
 
 # Beatport flags
 djsupport beatport <url> --dry-run                  # Preview matches
@@ -138,6 +145,13 @@ pytest --cov=djsupport     # Run with coverage
   generated design exports remain ignored through `design-exports/`
 - `docs/solutions/` holds documented problem solutions with YAML frontmatter (created via `/compound` workflow)
 - Update `agent.md` in the same PR when adding modules, CLI flags, or changing conventions
+- AI harnesses are first-class clients under ADR-0002. They use the shared
+  Transfer contract, explicit private-source and Spotify-write authorizations,
+  stable identifiers, and privacy-redacted versioned JSON. Never infer authority
+  from conversation or add agent-only matching/publication policy.
+- Local audio identity is Rekordbox-only, selected-Batch-only, opt-in, exact,
+  account-scoped, and subordinate to Approval. Never scan directories, upload
+  evidence, emit paths/fingerprints, or make `fpcalc` a required package binary.
 
 ## Additional documentation
 

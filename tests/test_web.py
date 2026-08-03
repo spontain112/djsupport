@@ -24,6 +24,22 @@ from djsupport.web import app, create_app
 client = TestClient(app)
 
 
+def test_capabilities_are_available_without_spotify_or_private_source(monkeypatch):
+    monkeypatch.setattr("djsupport.local_audio.shutil.which", lambda name: None)
+
+    response = TestClient(create_app()).get("/capabilities")
+
+    assert response.status_code == 200
+    assert response.json()["contract_version"] == 1
+    assert response.json()["phase"] == "capability"
+    assert response.json()["capabilities"]["local_audio_identity"] == {
+        "available": False,
+        "algorithm": "chromaprint",
+        "algorithm_version": None,
+        "reason": "binary_unavailable",
+    }
+
+
 class TestAuthEndpoints:
     @patch("djsupport.web._auth_manager")
     def test_auth_status_authenticated(self, mock_mgr_fn):

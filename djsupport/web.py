@@ -149,6 +149,13 @@ def create_app(
             ),
         ), progress
 
+    @web_app.get("/capabilities")
+    def capabilities():
+        from djsupport.agent import capability_document
+        from djsupport.local_audio import ChromaprintLocalAudio
+
+        return capability_document(ChromaprintLocalAudio())
+
     @web_app.get("/auth/status")
     def auth_status():
         mgr = oauth_manager()
@@ -298,6 +305,10 @@ def _report_to_dict(report: SyncReport) -> dict[str, Any]:
             "cache_hits": playlist.cache_hits,
             "api_lookups": playlist.api_lookups,
             "retried": playlist.retried,
+            "local_audio_eligible": playlist.local_audio_eligible,
+            "local_audio_observed": playlist.local_audio_observed,
+            "local_audio_unavailable": playlist.local_audio_unavailable,
+            "local_audio_reused": playlist.local_audio_reused,
         })
     return {
         "timestamp": report.timestamp.isoformat(),

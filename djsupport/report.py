@@ -113,6 +113,10 @@ class PlaylistReport:
     cache_hits: int = 0
     api_lookups: int = 0
     retried: int = 0
+    local_audio_eligible: int = 0
+    local_audio_observed: int = 0
+    local_audio_unavailable: int = 0
+    local_audio_reused: int = 0
 
     @property
     def total(self) -> int:
@@ -188,6 +192,16 @@ def print_report(report: SyncReport) -> None:
 
         if report.cache_enabled:
             click.echo(f"  Cache: {pl.cache_hits} hits | {pl.api_lookups} API | {pl.retried} retries")
+        if (
+            pl.local_audio_eligible or pl.local_audio_observed
+            or pl.local_audio_unavailable or pl.local_audio_reused
+        ):
+            click.echo(
+                f"  Local audio: {pl.local_audio_eligible} eligible"
+                f" | {pl.local_audio_observed} observed"
+                f" | {pl.local_audio_reused} Approved Match reuses"
+                f" | {pl.local_audio_unavailable} unavailable"
+            )
 
     click.echo()
     click.echo("\u2500" * 42)
@@ -382,6 +396,17 @@ def save_report(report: SyncReport, path: str) -> None:
             f"**Cache:** {total_cache} hits"
             f" | {total_api} API calls"
             f" | {total_retries} retries"
+        )
+    local_eligible = sum(p.local_audio_eligible for p in report.playlists)
+    local_observed = sum(p.local_audio_observed for p in report.playlists)
+    local_reused = sum(p.local_audio_reused for p in report.playlists)
+    local_unavailable = sum(p.local_audio_unavailable for p in report.playlists)
+    if local_eligible or local_observed or local_reused or local_unavailable:
+        lines.append(
+            f"**Local audio:** {local_eligible} eligible"
+            f" | {local_observed} observed"
+            f" | {local_reused} Approved Match reuses"
+            f" | {local_unavailable} unavailable"
         )
     lines.append("")
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from uuid import uuid4
 
@@ -32,6 +33,27 @@ DEFAULT_PUBLICATION_MANIFEST_PATH = str(default_publication_manifest_path())
 def cli():
     """DJ Support - Transfer DJ selections to Spotify."""
     load_dotenv()
+
+
+@cli.command("capabilities")
+@click.option("--json", "as_json", is_flag=True, help="Emit the agent contract.")
+def capabilities(as_json: bool) -> None:
+    """Inspect optional capabilities without reading a library or Spotify."""
+    from djsupport.agent import capability_document
+    from djsupport.local_audio import ChromaprintLocalAudio
+
+    document = capability_document(ChromaprintLocalAudio())
+    if as_json:
+        click.echo(json.dumps(document, sort_keys=True))
+        return
+    local_audio = document["capabilities"]["local_audio_identity"]
+    if local_audio["available"]:
+        click.echo(
+            "Local audio identity available "
+            f"({local_audio['algorithm']} {local_audio['algorithm_version']})."
+        )
+    else:
+        click.echo("Local audio identity unavailable; install fpcalc to enable it.")
 
 
 def _resolve_xml_path(explicit_xml_path: str | None) -> str:
@@ -234,6 +256,26 @@ def migrate_0_5(legacy_account_id: str, account_id: str) -> None:
 @click.option("--prefix", default="djsupport", show_default=True, help="Prefix for Spotify playlist names.")
 @click.option("--no-prefix", is_flag=True, help="Disable playlist name prefix.")
 @click.option("--state-path", default=DEFAULT_PUBLICATION_MANIFEST_PATH, show_default=True, help="Path to durable publication manifests (compatible flag).")
+@click.option(
+    "--local-audio-identity", is_flag=True,
+    help="Opt into local audio identity for the selected Rekordbox Batch.",
+)
+@click.option(
+    "--json", "agent_json", is_flag=True,
+    help="Emit the versioned non-interactive agent contract.",
+)
+@click.option(
+    "--authorize-private-source", is_flag=True,
+    help="Explicitly authorize reading the selected XML and local audio.",
+)
+@click.option(
+    "--authorize-spotify-write", is_flag=True,
+    help="Explicitly authorize Spotify mutation for this Batch.",
+)
+@click.option(
+    "--confirm-expensive", is_flag=True,
+    help="Explicitly confirm whole-library or expensive work.",
+)
 def sync(
     xml_path: str | None,
     playlist: tuple[str, ...],
@@ -248,11 +290,39 @@ def sync(
     prefix: str,
     no_prefix: bool,
     state_path: str,
+    local_audio_identity: bool,
+    agent_json: bool,
+    authorize_private_source: bool,
+    authorize_spotify_write: bool,
+    confirm_expensive: bool,
 ):
     """Transfer explicitly selected Rekordbox playlists to Spotify.
 
     XML_PATH is the path to your Rekordbox XML library export (optional if configured via `library set`).
     """
+    if agent_json and not authorize_private_source:
+        click.echo(json.dumps({
+            "contract_version": 1,
+            "phase": "plan",
+            "status": "authorization_required",
+            "required_authorizations": ["private_source"],
+            "next_actions": ["authorize_private_source"],
+        }, sort_keys=True))
+        raise click.exceptions.Exit(2)
+    if agent_json and not dry_run and not authorize_spotify_write:
+        click.echo(json.dumps({
+            "contract_version": 1,
+            "phase": "execute",
+            "status": "authorization_required",
+            "required_authorizations": ["spotify_write"],
+            "next_actions": ["authorize_spotify_write"],
+        }, sort_keys=True))
+        raise click.exceptions.Exit(2)
+    if local_audio_identity and no_cache:
+        raise click.UsageError(
+            "Local audio identity requires durable matching knowledge; "
+            "remove --no-cache"
+        )
     xml_path = _resolve_xml_path(xml_path)
     if not playlist and not whole_library:
         raise click.UsageError(
@@ -275,6 +345,7 @@ def sync(
         SpotifyMatcher,
         Transfer,
     )
+    from djsupport.local_audio import ChromaprintLocalAudio
 
     cache = None if no_cache else MatchCache(cache_path)
     if cache is not None:
@@ -293,6 +364,7 @@ def sync(
         transfer_storage=FileTransferStorage(
             str(Path(state_path).with_suffix(".transfers.json"))
         ),
+        local_audio=(ChromaprintLocalAudio() if local_audio_identity else None),
     )
     request = BatchPlanRequest(
         playlist_references=playlist,
@@ -302,7 +374,25 @@ def sync(
         retry=retry,
         retry_days=retry_days,
         playlist_prefix=None if no_prefix else prefix,
+        confirm_expensive=confirm_expensive,
+        local_audio_identity=local_audio_identity,
     )
+    if agent_json:
+        from djsupport.agent import AgentAuthorization, AgentTransferContract
+
+        outcome = AgentTransferContract(transfer).execute_batch(
+            request,
+            AgentAuthorization(
+                private_source=authorize_private_source,
+                spotify_write=authorize_spotify_write,
+            ),
+        )
+        click.echo(json.dumps(outcome, sort_keys=True))
+        if outcome["status"] in {
+            "authorization_required", "confirmation_required",
+        }:
+            raise click.exceptions.Exit(2)
+        return
     plan = transfer.plan_batch(request)
     click.echo(
         f"Transfer plan: {plan.total_tracks} tracks; "
@@ -310,6 +400,14 @@ def sync(
         f"{plan.cache_hits} retained proposal hits; "
         f"{plan.expected_uncached_lookups} expected Spotify lookups."
     )
+    if plan.local_audio_identity:
+        click.echo(
+            "Local audio: "
+            f"{plan.local_audio_eligible} eligible; "
+            f"{plan.local_audio_indexed} indexed; "
+            f"{plan.local_audio_pending} calculations; "
+            f"{plan.local_audio_unavailable} unavailable."
+        )
     if plan.confirmation_required:
         if not click.confirm("This Batch may be expensive. Continue?"):
             raise click.Abort()

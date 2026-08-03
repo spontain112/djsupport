@@ -144,6 +144,41 @@ class TestLegacyMigration:
         assert result.report.conflicts == 1
         assert any((app_data / "backups").glob("djsupport-backup-*.zip"))
 
+    def test_apply_preserves_version_two_local_audio_identity_knowledge(
+        self, tmp_path,
+    ):
+        legacy = tmp_path / "legacy"
+        legacy.mkdir()
+        _write_json(legacy / ".djsupport_cache.json", {
+            "version": 1,
+            "entries": {"new||track": _cache_entry("A")},
+        })
+        app_data = tmp_path / "app-data"
+        association = {
+            "algorithm": "chromaprint",
+            "algorithm_version": "1.6.1",
+            "fingerprint": "invented-private-evidence",
+            "account_id": "spotify-account-one",
+            "spotify_uri": "spotify:track:" + "B" * 22,
+            "authority_status": "approved",
+        }
+        _write_json(app_data / "matching-knowledge.json", {
+            "version": 2,
+            "entries": {},
+            "local_regressions": [],
+            "approval_conflicts": [],
+            "fingerprint_observations": {},
+            "fingerprint_associations": [association],
+        })
+
+        result = LegacyMigration(app_data).apply(legacy)
+
+        assert result.applied is True
+        stored = json.loads((app_data / "matching-knowledge.json").read_text())
+        assert stored["version"] == 2
+        assert stored["fingerprint_associations"] == [association]
+        assert "new||track" in stored["entries"]
+
 
     def test_ambiguous_cross_cache_entry_is_reported_and_not_imported(self, tmp_path):
         legacy = tmp_path / "legacy"
