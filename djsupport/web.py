@@ -16,21 +16,24 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from spotipy.oauth2 import SpotifyOAuth
 
 from djsupport.report import SyncReport
 from djsupport.spotify import SCOPES
 from djsupport.transfer import (
     AccountPublishingGuards,
+    BatchPlanRequest,
     BeatportChartSource,
     BeatportLabelSource,
     EphemeralMatchingKnowledge,
     FilePublicationStorage,
     FileTransferStorage,
     MatchCacheKnowledge,
+    RekordboxPlaylistSource,
     SpotifyMatcher,
     Transfer,
+    TransferAuthorization,
     TransferMode,
     TransferRequest,
     default_matching_knowledge_path,
@@ -56,7 +59,24 @@ class SyncRequest(BaseModel):
     retry: bool = False
     retry_days: int = 7
     no_cache: bool = False
+
+
+class RekordboxBatchRequest(BaseModel):
+    """Private, explicitly bounded Rekordbox request for the local web API."""
+
+    xml_path: str
+    playlists: list[str] = Field(default_factory=list)
+    whole_library: bool = False
+    threshold: int = 80
+    preview: bool = False
+    retry: bool = False
+    retry_days: int = 7
+    prefix: str | None = "djsupport"
+    no_cache: bool = False
     local_audio_identity: bool = False
+    confirm_expensive: bool = False
+    authorize_private_source: bool = False
+    authorize_spotify_write: bool = False
 
 
 def _auth_manager() -> SpotifyOAuth:
@@ -85,7 +105,6 @@ def _url_error() -> str:
 
 def _default_transfer_factory(url_type: str, request: SyncRequest) -> Transfer:
     from djsupport.cache import MatchCache
-    from djsupport.local_audio import ChromaprintLocalAudio
     from djsupport.spotify import get_client
 
     cache = None if request.no_cache else MatchCache(default_matching_knowledge_path())
@@ -105,6 +124,41 @@ def _default_transfer_factory(url_type: str, request: SyncRequest) -> Transfer:
         transfer_storage=FileTransferStorage(
             publication_path.with_suffix(".transfers.json")
         ),
+    )
+
+
+def _default_rekordbox_transfer_factory(
+    request: RekordboxBatchRequest, execute_authorized: bool,
+) -> Transfer:
+    from djsupport.cache import MatchCache
+    from djsupport.local_audio import ChromaprintLocalAudio
+    from djsupport.spotify import get_client
+
+    cache = None if request.no_cache else MatchCache(
+        default_matching_knowledge_path(),
+    )
+    if cache is not None:
+        cache.load()
+    publication_path = default_publication_manifest_path()
+    return Transfer(
+        source=RekordboxPlaylistSource(
+            request.xml_path,
+            include_locations=request.local_audio_identity,
+        ),
+        spotify=(
+            SpotifyMatcher(get_client()) if execute_authorized else object()
+        ),
+        publishing_guards=AccountPublishingGuards(),
+        matching_knowledge=(
+            EphemeralMatchingKnowledge()
+            if cache is None else MatchCacheKnowledge(cache)
+        ),
+        publication_storage=(
+            None if request.preview else FilePublicationStorage(publication_path)
+        ),
+        transfer_storage=FileTransferStorage(
+            publication_path.with_suffix(".transfers.json")
+        ),
         local_audio=(
             ChromaprintLocalAudio() if request.local_audio_identity else None
         ),
@@ -118,6 +172,9 @@ def _thread_runner(target: Callable, args: tuple) -> None:
 def create_app(
     *,
     transfer_factory: Callable[[str, SyncRequest], Transfer] | None = None,
+    rekordbox_transfer_factory: Callable[
+        [RekordboxBatchRequest, bool], Transfer
+    ] | None = None,
     auth_manager: Callable[[], SpotifyOAuth] | None = None,
     background_runner: Callable[[Callable, tuple], None] | None = None,
 ) -> FastAPI:
@@ -125,6 +182,9 @@ def create_app(
     web_app = FastAPI(title="djsupport", lifespan=lifespan)
     web_app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     make_transfer = transfer_factory or _default_transfer_factory
+    make_rekordbox_transfer = (
+        rekordbox_transfer_factory or _default_rekordbox_transfer_factory
+    )
     run_background = background_runner or _thread_runner
 
     def oauth_manager():
@@ -151,7 +211,6 @@ def create_app(
             request or SyncRequest(
                 url=progress.source,
                 no_cache=not progress.retain_matching_knowledge,
-                local_audio_identity=progress.local_audio_identity,
             ),
         ), progress
 
@@ -197,11 +256,6 @@ def create_app(
             url_type = _detect_url_type(request.url)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        if request.local_audio_identity and request.no_cache:
-            raise HTTPException(
-                status_code=400,
-                detail="Local audio identity requires durable matching knowledge",
-            )
         require_authenticated()
         transfer_id = uuid4().hex
         transfer = make_transfer(url_type, request)
@@ -215,7 +269,6 @@ def create_app(
             playlist_prefix=request.prefix,
             transfer_id=transfer_id,
             retain_matching_knowledge=not request.no_cache,
-            local_audio_identity=request.local_audio_identity,
         )
         transfer.prepare(transfer_request)
         run_background(_run_transfer, (transfer, transfer_request))
@@ -223,6 +276,69 @@ def create_app(
             "transfer_id": transfer_id,
             "url_type": url_type,
         }
+
+    def rekordbox_request(
+        request: RekordboxBatchRequest,
+    ) -> tuple[BatchPlanRequest, TransferAuthorization]:
+        return BatchPlanRequest(
+            playlist_references=tuple(request.playlists),
+            whole_library=request.whole_library,
+            threshold=request.threshold,
+            preview=request.preview,
+            retry=request.retry,
+            retry_days=request.retry_days,
+            playlist_prefix=request.prefix,
+            local_audio_identity=request.local_audio_identity,
+            confirm_expensive=request.confirm_expensive,
+        ), TransferAuthorization(
+            private_source=request.authorize_private_source,
+            spotify_write=request.authorize_spotify_write,
+        )
+
+    def rekordbox_contract(
+        request: RekordboxBatchRequest, *, execute: bool,
+    ) -> dict:
+        from djsupport.agent import (
+            AgentTransferContract,
+            authorization_required_document,
+            error_document,
+        )
+
+        plan_request, authorization = rekordbox_request(request)
+        required = Transfer.authorization_requirement(
+            plan_request, authorization, phase="plan",
+        )
+        if required:
+            return authorization_required_document("plan", required)
+        if request.local_audio_identity and request.no_cache:
+            return error_document("plan", "durable_knowledge_required")
+        execute_authorized = (
+            Transfer.authorization_requirement(
+                plan_request, authorization, phase="execute",
+            ) is None
+        )
+        if execute and execute_authorized:
+            require_authenticated()
+        try:
+            contract = AgentTransferContract(make_rekordbox_transfer(
+                request, execute and execute_authorized,
+            ))
+            if execute and execute_authorized:
+                return contract.execute_batch(plan_request, authorization)
+            return contract.plan_batch(plan_request, authorization)
+        except Exception:
+            return error_document(
+                "execute" if execute and execute_authorized else "plan",
+                "transfer_failed",
+            )
+
+    @web_app.post("/rekordbox/batches/plan")
+    def plan_rekordbox_batch(request: RekordboxBatchRequest):
+        return rekordbox_contract(request, execute=False)
+
+    @web_app.post("/rekordbox/batches/execute")
+    def execute_rekordbox_batch(request: RekordboxBatchRequest):
+        return rekordbox_contract(request, execute=True)
 
     @web_app.get("/sync/{transfer_id}/progress")
     async def sync_progress(transfer_id: str):
@@ -254,7 +370,6 @@ def create_app(
                 source=progress.source,
                 transfer_id=transfer_id,
                 retain_matching_knowledge=progress.retain_matching_knowledge,
-                local_audio_identity=progress.local_audio_identity,
             )
             transfer.prepare(resume_request)
             run_background(
@@ -272,7 +387,6 @@ def create_app(
             raise HTTPException(status_code=202, detail="Transfer still in progress")
         report = transfer.execute(TransferRequest(
             source=progress.source, transfer_id=transfer_id,
-            local_audio_identity=progress.local_audio_identity,
         ))
         return _report_to_dict(report)
 

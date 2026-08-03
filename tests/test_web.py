@@ -12,8 +12,10 @@ from djsupport.report import PlaylistReport, SyncReport
 from djsupport.rekordbox import Track
 from djsupport.transfer import (
     AccountPublishingGuards,
+    BatchPlan,
     FilePublicationStorage,
     FileTransferStorage,
+    PlaylistPreflight,
     SourceSelection,
     Transfer,
     TransferProgress,
@@ -41,6 +43,106 @@ def test_web_outcome_exposes_aggregate_local_audio_counts():
     assert rendered["local_audio_observed"] == 2
     assert rendered["local_audio_unavailable"] == 1
     assert rendered["local_audio_reused"] == 1
+
+
+def _agent_web_transfer(plan, report=None):
+    transfer = MagicMock()
+    transfer.authorization_requirement.side_effect = (
+        lambda request, authorization, phase: Transfer.authorization_requirement(
+            request, authorization, phase=phase,
+        )
+    )
+    transfer.plan_batch.return_value = plan
+    if report is not None:
+        transfer.execute_batch.return_value = report
+    return transfer
+
+
+def test_rekordbox_web_plan_exposes_explicit_local_audio_opt_in_without_spotify():
+    plan = BatchPlan((PlaylistPreflight(
+        name="Private Selection",
+        reference="Private/Selection",
+        total_tracks=2,
+        approved_match_hits=0,
+        cache_hits=0,
+        expected_uncached_lookups=2,
+        local_audio_eligible=2,
+        local_audio_pending=2,
+        selection_token="private-content-token",
+    ),), local_audio_identity=True)
+    factory_calls = []
+
+    def factory(request, execute_authorized):
+        factory_calls.append((request, execute_authorized))
+        return _agent_web_transfer(plan)
+
+    web = create_app(
+        rekordbox_transfer_factory=factory,
+        auth_manager=lambda: (_ for _ in ()).throw(
+            AssertionError("Spotify must stay untouched during planning")
+        ),
+    )
+    response = TestClient(web).post("/rekordbox/batches/plan", json={
+        "xml_path": "/private/synthetic-library.xml",
+        "playlists": ["Private/Selection"],
+        "local_audio_identity": True,
+        "authorize_private_source": True,
+    })
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["phase"] == "plan"
+    assert body["counts"]["local_audio_eligible"] == 2
+    assert body["counts"]["local_audio_pending"] == 2
+    assert factory_calls[0][0].local_audio_identity is True
+    assert factory_calls[0][1] is False
+    assert "synthetic-library" not in response.text
+
+
+def test_rekordbox_web_execute_returns_aggregate_local_audio_outcome():
+    plan = BatchPlan((PlaylistPreflight(
+        name="Private Selection",
+        reference="Private/Selection",
+        total_tracks=1,
+        approved_match_hits=0,
+        cache_hits=0,
+        expected_uncached_lookups=1,
+        local_audio_eligible=1,
+        local_audio_pending=1,
+        selection_token="private-content-token",
+    ),), local_audio_identity=True)
+    playlist = PlaylistReport(
+        name="Private Selection", path="Private/Selection", action="preview",
+    )
+    playlist.local_audio_eligible = 1
+    playlist.local_audio_observed = 1
+    playlist.local_audio_reused = 1
+    report = SyncReport(
+        timestamp=datetime(2026, 8, 3), threshold=80, dry_run=True,
+        playlists=[playlist], transfer_id=plan.batch_id, status="completed",
+    )
+    transfer = _agent_web_transfer(plan, report)
+    mgr = MagicMock()
+    mgr.get_cached_token.return_value = {"access_token": "tok"}
+    mgr.is_token_expired.return_value = False
+    web = create_app(
+        rekordbox_transfer_factory=lambda request, authorized: transfer,
+        auth_manager=lambda: mgr,
+    )
+
+    response = TestClient(web).post("/rekordbox/batches/execute", json={
+        "xml_path": "/private/synthetic-library.xml",
+        "playlists": ["Private/Selection"],
+        "preview": True,
+        "local_audio_identity": True,
+        "authorize_private_source": True,
+    })
+
+    assert response.status_code == 200
+    assert response.json()["phase"] == "outcome"
+    assert response.json()["counts"]["local_audio_observed"] == 1
+    assert response.json()["counts"]["local_audio_reused"] == 1
+    assert "synthetic-library" not in response.text
 
 
 def test_capabilities_are_available_without_spotify_or_private_source(monkeypatch):
@@ -241,27 +343,14 @@ class TestSyncEndpoints:
             background_runner=lambda target, args: target(*args),
         )
         res = TestClient(label_app).post(
-            "/sync", json={
-                "url": "https://www.beatport.com/label/test/1",
-                "local_audio_identity": True,
-            },
+            "/sync", json={"url": "https://www.beatport.com/label/test/1"},
         )
         assert res.status_code == 200
         assert res.json()["url_type"] == "label"
         request = transfer.execute.call_args.args[0]
         assert request.source == "https://www.beatport.com/label/test/1"
         assert request.mode.value == "snapshot"
-        assert request.local_audio_identity is True
-
-    def test_local_audio_identity_requires_durable_web_knowledge(self):
-        res = client.post("/sync", json={
-            "url": "https://www.beatport.com/chart/test/123",
-            "local_audio_identity": True,
-            "no_cache": True,
-        })
-
-        assert res.status_code == 400
-        assert "durable matching knowledge" in res.json()["detail"]
+        assert request.local_audio_identity is False
 
     def test_failed_outcome_reloads_after_restart(self, tmp_path):
         class FailingSource:

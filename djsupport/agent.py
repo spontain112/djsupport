@@ -44,12 +44,18 @@ def authorization_required_document(phase: str, required: str) -> dict:
 
 def error_document(phase: str, code: str) -> dict:
     """Render a privacy-safe machine error without source-derived details."""
+    next_action = {
+        "private_source_unavailable": "inspect_private_source",
+        "durable_knowledge_required": "enable_durable_knowledge",
+        "matching_knowledge_unavailable": "repair_matching_knowledge",
+        "transfer_failed": "inspect_transfer_status",
+    }.get(code, "review_error")
     return {
         "contract_version": AGENT_CONTRACT_VERSION,
         "phase": phase,
         "status": "error",
         "error": {"code": code},
-        "next_actions": ["inspect_private_source"],
+        "next_actions": [next_action],
     }
 
 
@@ -76,10 +82,9 @@ class AgentTransferContract:
     @staticmethod
     def _plan_document(request, authorization, plan) -> dict:
         batch_id = plan.batch_id
-        required = (
-            [] if request.preview or authorization.spotify_write
-            else ["spotify_write"]
-        )
+        required = list(Transfer.required_authorizations(
+            request, authorization, phase="plan",
+        ))
         next_actions = []
         if required:
             next_actions.append("authorize_spotify_write")

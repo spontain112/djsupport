@@ -4,7 +4,11 @@ import json
 
 import pytest
 
-from djsupport.agent import AgentAuthorization, AgentTransferContract
+from djsupport.agent import (
+    AgentAuthorization,
+    AgentTransferContract,
+    error_document,
+)
 from djsupport.local_audio import LocalAudioCapability
 from djsupport.rekordbox import Track
 from djsupport.transfer import (
@@ -26,6 +30,18 @@ class UntouchedSource:
     def consume(self, reference):
         self.calls += 1
         raise AssertionError("capability inspection must not read the source")
+
+
+def test_machine_error_next_actions_are_specific_to_the_failure():
+    assert error_document(
+        "plan", "durable_knowledge_required",
+    )["next_actions"] == ["enable_durable_knowledge"]
+    assert error_document(
+        "plan", "matching_knowledge_unavailable",
+    )["next_actions"] == ["repair_matching_knowledge"]
+    assert error_document(
+        "execute", "transfer_failed",
+    )["next_actions"] == ["inspect_transfer_status"]
 
 
 class UntouchedSpotify:

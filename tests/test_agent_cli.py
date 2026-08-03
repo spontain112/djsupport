@@ -96,6 +96,22 @@ def test_json_source_error_is_structured_and_does_not_echo_private_path(tmp_path
     assert "private-library-name" not in result.output
 
 
+def test_json_directory_source_error_cannot_bypass_the_redacted_contract(tmp_path):
+    private_directory = tmp_path / "private-library-directory"
+    private_directory.mkdir()
+
+    result = CliRunner().invoke(cli, [
+        "sync", str(private_directory), "--playlist", "Selected",
+        "--dry-run", "--json", "--authorize-private-source",
+    ])
+
+    assert result.exit_code == 2
+    assert json.loads(result.output)["error"]["code"] == (
+        "private_source_unavailable"
+    )
+    assert "private-library-directory" not in result.output
+
+
 def test_authorized_sync_json_returns_only_structured_outcome(
     monkeypatch, tmp_path,
 ):

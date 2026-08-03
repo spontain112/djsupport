@@ -240,7 +240,7 @@ def migrate_0_5(legacy_account_id: str, account_id: str) -> None:
 
 
 @cli.command()
-@click.argument("xml_path", required=False, type=click.Path(dir_okay=False))
+@click.argument("xml_path", required=False, type=click.Path())
 @click.option(
     "--playlist", "-p", multiple=True,
     help="Select a playlist by exact name or path; repeat for a Batch.",

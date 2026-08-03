@@ -269,6 +269,13 @@ conversation. Its versioned response contains only aggregate counts, stable
 identifiers, lifecycle status, and permitted next actions. See
 [ADR-0002](docs/adr/0002-make-transfer-agent-native.md).
 
+The local web API exposes the same Rekordbox-only contract at
+`POST /rekordbox/batches/plan` and `POST /rekordbox/batches/execute`. Requests
+name an explicit XML path and playlist selection plus the separate authority
+flags; responses omit that private material and return the same versioned plan
+or aggregate outcome. The existing `/sync` web route remains Beatport-only and
+does not accept local-audio identity.
+
 ### Tuning match quality
 
 Adjust the minimum match confidence (0–100, default 80):

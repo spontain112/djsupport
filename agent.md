@@ -149,6 +149,9 @@ pytest --cov=djsupport     # Run with coverage
   Transfer contract, explicit private-source and Spotify-write authorizations,
   stable identifiers, and privacy-redacted versioned JSON. Never infer authority
   from conversation or add agent-only matching/publication policy.
+- The local web adapter exposes Rekordbox Batch planning and execution under
+  `/rekordbox/batches/plan` and `/rekordbox/batches/execute`; `/sync` remains
+  Beatport-only.
 - Local audio identity is Rekordbox-only, selected-Batch-only, opt-in, exact,
   account-scoped, and subordinate to Approval. Never scan directories, upload
   evidence, emit paths/fingerprints, or make `fpcalc` a required package binary.

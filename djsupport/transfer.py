@@ -1551,18 +1551,33 @@ class Transfer:
         phase: str,
     ) -> str | None:
         """Return the next missing authority; adapters only render the result."""
+        if phase == "plan":
+            return Transfer.private_source_authorization_requirement(authorization)
+        required = Transfer.required_authorizations(
+            request, authorization, phase=phase,
+        )
+        return required[0] if required else None
+
+    @staticmethod
+    def required_authorizations(
+        request: BatchPlanRequest,
+        authorization: TransferAuthorization,
+        *,
+        phase: str,
+    ) -> tuple[str, ...]:
+        """Return all missing authorities for a bounded Transfer phase."""
         private_required = Transfer.private_source_authorization_requirement(
             authorization,
         )
         if private_required:
-            return private_required
+            return (private_required,)
         if (
-            phase == "execute"
+            phase in {"plan", "execute"}
             and not request.preview
             and not authorization.spotify_write
         ):
-            return "spotify_write"
-        return None
+            return ("spotify_write",)
+        return ()
 
     def pause(self) -> None:
         """Request a pause after the current track reaches a safe checkpoint."""
