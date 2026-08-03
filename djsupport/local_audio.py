@@ -134,4 +134,3 @@ class ChromaprintLocalAudio:
         if not raw_path:
             return None
         return Path(raw_path)
-

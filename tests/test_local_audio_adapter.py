@@ -73,4 +73,3 @@ def test_unavailable_observation_never_exposes_the_private_location(tmp_path):
     assert observation.status == "unavailable"
     assert observation.reason == "missing_file"
     assert "private-name" not in repr(observation)
-
