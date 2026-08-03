@@ -101,6 +101,22 @@ class TestMatchCacheStore:
         key = cache.cache_key("Artist", "Track")
         assert cache.entries[key].match_type == "fallback_version"
 
+    def test_roundtrips_shorter_version_review_reason(self, tmp_path):
+        path = str(tmp_path / "cache.json")
+        reason = "Spotify version is 31s shorter than source (4:29 vs 5:00)"
+        result = _matched_result(match_type="shorter_version")
+        result["score_reasons"] = [reason]
+        first = MatchCache(path)
+        first.store("Synthetic Artist", "Synthetic Signal", 80, result)
+        first.save()
+
+        restored = MatchCache(path)
+        restored.load()
+
+        entry = restored.lookup("Synthetic Artist", "Synthetic Signal", 80)
+        assert entry is not None
+        assert entry.score_reasons == (reason,)
+
     def test_cache_key_is_normalized(self, cache):
         key1 = cache.cache_key("Solomun", "Vultora (Original Mix)")
         key2 = cache.cache_key("SOLOMUN", "VULTORA (ORIGINAL MIX)")

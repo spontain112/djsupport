@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- Materially shorter Spotify substitutes remain eligible for Approval but are
+  identified for review with their duration difference instead of being
+  labelled exact.
+
 ## [0.5.0] - 2026-08-02
 
 ### Added
@@ -94,8 +102,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Provisional Playlist descriptions retain an opaque Transfer marker and
   machine timestamp because crash recovery and duplicate-publication prevention
   currently depend on that marker (#61).
-- Material duration differences can still be classified as exact (#56). Review
-  proposals before Approval and use a Correction when needed.
 - Broader Spotify candidate recall, noisy-source cleanup, and ISRC-first lookup
   remain research work rather than release behavior (#31, #32, #39, #42).
 

@@ -453,6 +453,7 @@ class PublicationItem:
     spotify_artist: str = ""
     score: float = 0.0
     match_type: str = "unmatched"
+    score_reasons: tuple[str, ...] = ()
     source_duration: int = 0
     authoritative: bool = False
 
@@ -1169,6 +1170,7 @@ class MatchCacheKnowledge:
             "artist": entry.spotify_artist,
             "score": entry.score,
             "match_type": entry.match_type or "exact",
+            "score_reasons": list(entry.score_reasons),
             "authoritative": entry.approval_status == "approved",
         }
 
@@ -1199,6 +1201,7 @@ class MatchCacheKnowledge:
                 "artist": item.spotify_artist,
                 "score": item.score,
                 "match_type": item.match_type,
+                "score_reasons": list(item.score_reasons),
             }, item.source_duration,
         )
         return ApprovalConflict(**conflict) if conflict else None
@@ -1212,6 +1215,7 @@ class MatchCacheKnowledge:
                 "artist": item.spotify_artist,
                 "score": item.score,
                 "match_type": item.match_type,
+                "score_reasons": list(item.score_reasons),
             }, item.source_duration,
         )
 
@@ -2274,6 +2278,7 @@ class Transfer:
                             spotify_artist=result["artist"],
                             score=result["score"],
                             match_type=result.get("match_type", "exact"),
+                            score_reasons=tuple(result.get("score_reasons", ())),
                             source_duration=track.duration,
                             authoritative=True,
                         ))
@@ -2331,6 +2336,7 @@ class Transfer:
                         spotify_artist=result["artist"],
                         score=result["score"],
                         match_type=result.get("match_type", "exact"),
+                        score_reasons=tuple(result.get("score_reasons", ())),
                         source_track_id=track.track_id,
                         spotify_uri=result["uri"],
                     )
@@ -2346,6 +2352,7 @@ class Transfer:
                             spotify_artist=matched_track.spotify_artist,
                             score=matched_track.score,
                             match_type=matched_track.match_type,
+                            score_reasons=matched_track.score_reasons,
                             source_duration=track.duration,
                             authoritative=bool(result.get("authoritative")),
                         ))
@@ -2821,6 +2828,7 @@ class Transfer:
                 spotify_artist=item.spotify_artist,
                 score=item.score,
                 match_type=item.match_type,
+                score_reasons=item.score_reasons,
             )
             for item in items
         ]
