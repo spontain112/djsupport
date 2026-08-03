@@ -14,7 +14,12 @@ from urllib.parse import urlparse
 from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import (
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from spotipy.oauth2 import SpotifyOAuth
@@ -297,7 +302,7 @@ def create_app(
 
     def rekordbox_contract(
         request: RekordboxBatchRequest, *, execute: bool,
-    ) -> dict:
+    ) -> dict | JSONResponse:
         from djsupport.agent import (
             AgentTransferContract,
             authorization_required_document,
@@ -309,7 +314,9 @@ def create_app(
             plan_request, authorization, phase="plan",
         )
         if required:
-            return authorization_required_document("plan", required)
+            return authorization_required_document(
+                "execute" if execute else "plan", required,
+            )
         if request.local_audio_identity and request.no_cache:
             return error_document("plan", "durable_knowledge_required")
         execute_authorized = (
@@ -318,12 +325,20 @@ def create_app(
             ) is None
         )
         if execute and execute_authorized:
-            require_authenticated()
+            try:
+                require_authenticated()
+            except HTTPException as exc:
+                return JSONResponse(
+                    status_code=exc.status_code,
+                    content=error_document(
+                        "execute", "spotify_authentication_required",
+                    ),
+                )
         try:
             contract = AgentTransferContract(make_rekordbox_transfer(
                 request, execute and execute_authorized,
             ))
-            if execute and execute_authorized:
+            if execute:
                 return contract.execute_batch(plan_request, authorization)
             return contract.plan_batch(plan_request, authorization)
         except Exception:

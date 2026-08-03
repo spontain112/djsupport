@@ -42,6 +42,9 @@ def test_machine_error_next_actions_are_specific_to_the_failure():
     assert error_document(
         "execute", "transfer_failed",
     )["next_actions"] == ["inspect_transfer_status"]
+    assert error_document(
+        "execute", "spotify_authentication_required",
+    )["next_actions"] == ["authenticate_spotify"]
 
 
 class UntouchedSpotify:

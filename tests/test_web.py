@@ -145,6 +145,89 @@ def test_rekordbox_web_execute_returns_aggregate_local_audio_outcome():
     assert "synthetic-library" not in response.text
 
 
+def test_rekordbox_web_execute_preserves_execute_phase_authorization_contract():
+    web = create_app(
+        rekordbox_transfer_factory=lambda request, authorized: (
+            _ for _ in ()
+        ).throw(AssertionError("private source must stay untouched")),
+    )
+
+    response = TestClient(web).post("/rekordbox/batches/execute", json={
+        "xml_path": "/private/synthetic-library.xml",
+        "playlists": ["Private/Selection"],
+    })
+
+    assert response.json() == {
+        "contract_version": 1,
+        "phase": "execute",
+        "status": "authorization_required",
+        "required_authorizations": ["private_source"],
+        "next_actions": ["authorize_private_source"],
+    }
+
+
+def test_rekordbox_web_execute_plans_before_requesting_spotify_write():
+    plan = BatchPlan((PlaylistPreflight(
+        name="Private Selection",
+        reference="Private/Selection",
+        total_tracks=1,
+        approved_match_hits=0,
+        cache_hits=0,
+        expected_uncached_lookups=1,
+        selection_token="private-content-token",
+    ),))
+    transfer = _agent_web_transfer(plan)
+    web = create_app(
+        rekordbox_transfer_factory=lambda request, authorized: transfer,
+    )
+
+    response = TestClient(web).post("/rekordbox/batches/execute", json={
+        "xml_path": "/private/synthetic-library.xml",
+        "playlists": ["Private/Selection"],
+        "authorize_private_source": True,
+    })
+
+    assert response.json()["phase"] == "execute"
+    assert response.json()["status"] == "authorization_required"
+    assert response.json()["required_authorizations"] == ["spotify_write"]
+    assert response.json()["batch_id"] == plan.batch_id
+
+
+def test_rekordbox_web_execute_renders_spotify_login_as_versioned_error():
+    plan = BatchPlan((PlaylistPreflight(
+        name="Private Selection",
+        reference="Private/Selection",
+        total_tracks=1,
+        approved_match_hits=0,
+        cache_hits=0,
+        expected_uncached_lookups=1,
+        selection_token="private-content-token",
+    ),), preview=True)
+    transfer = _agent_web_transfer(plan)
+    mgr = MagicMock()
+    mgr.get_cached_token.return_value = None
+    web = create_app(
+        rekordbox_transfer_factory=lambda request, authorized: transfer,
+        auth_manager=lambda: mgr,
+    )
+
+    response = TestClient(web).post("/rekordbox/batches/execute", json={
+        "xml_path": "/private/synthetic-library.xml",
+        "playlists": ["Private/Selection"],
+        "preview": True,
+        "authorize_private_source": True,
+    })
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "contract_version": 1,
+        "phase": "execute",
+        "status": "error",
+        "error": {"code": "spotify_authentication_required"},
+        "next_actions": ["authenticate_spotify"],
+    }
+
+
 def test_capabilities_are_available_without_spotify_or_private_source(monkeypatch):
     monkeypatch.setattr("djsupport.local_audio.shutil.which", lambda name: None)
 

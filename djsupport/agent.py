@@ -48,6 +48,7 @@ def error_document(phase: str, code: str) -> dict:
         "private_source_unavailable": "inspect_private_source",
         "durable_knowledge_required": "enable_durable_knowledge",
         "matching_knowledge_unavailable": "repair_matching_knowledge",
+        "spotify_authentication_required": "authenticate_spotify",
         "transfer_failed": "inspect_transfer_status",
     }.get(code, "review_error")
     return {
