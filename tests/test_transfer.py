@@ -41,6 +41,7 @@ from djsupport.transfer import (
     DriftResolution,
     ApprovalStatus,
     ApprovalOutcome,
+    BeatportChartSource,
     BeatportLabelSource,
     RekordboxPlaylistSource,
     MirrorRelationship,
@@ -242,6 +243,87 @@ MIRROR_REFRESH_FIXTURE = (
     Path(__file__).parent / "fixtures" / "rekordbox_mirror_refresh.json"
 )
 TEST_PUBLISHING_GUARDS = AccountPublishingGuards()
+
+
+class TestBeatportChartSource:
+    @staticmethod
+    def _track():
+        return Track(
+            track_id="bp-60", artist="Ada DJ", name="Signal",
+            album="", remixer="", label="", genre="", date_added="",
+        )
+
+    def test_curator_precedes_chart_name(self, monkeypatch):
+        monkeypatch.setattr(
+            "djsupport.beatport.fetch_chart",
+            lambda url: ("Synthetic Chart", "Ada DJ", []),
+        )
+
+        selection = BeatportChartSource().consume(
+            "https://www.beatport.com/chart/synthetic-chart/60"
+        )
+
+        assert selection.name == "Ada DJ - Synthetic Chart"
+
+    @pytest.mark.parametrize("curator", ["", "Unknown"])
+    def test_missing_curator_falls_back_to_chart_name(self, monkeypatch, curator):
+        monkeypatch.setattr(
+            "djsupport.beatport.fetch_chart",
+            lambda url: ("Synthetic Chart", curator, []),
+        )
+
+        selection = BeatportChartSource().consume(
+            "https://www.beatport.com/chart/synthetic-chart/60"
+        )
+
+        assert selection.name == "Synthetic Chart"
+
+    def test_transfer_preserves_curator_first_name_in_preview(self, monkeypatch):
+        monkeypatch.setattr(
+            "djsupport.beatport.fetch_chart",
+            lambda url: ("Synthetic Chart", "Ada DJ", [self._track()]),
+        )
+        spotify = StatefulSpotify({
+            ("Ada DJ", "Signal"): _match(
+                "spotify:track:signal", "Signal", "Ada DJ",
+            ),
+        })
+
+        report = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=BeatportChartSource(), spotify=spotify,
+            matching_knowledge=InMemoryStorage(),
+        ).execute(TransferRequest(
+            source="https://www.beatport.com/chart/synthetic-chart/60",
+            preview=True,
+        ))
+
+        assert report.playlists[0].name == "Ada DJ - Synthetic Chart"
+
+    def test_transfer_preserves_curator_first_name_in_publication(self, monkeypatch):
+        monkeypatch.setattr(
+            "djsupport.beatport.fetch_chart",
+            lambda url: ("Synthetic Chart", "Ada DJ", [self._track()]),
+        )
+        spotify = StatefulSpotify({
+            ("Ada DJ", "Signal"): _match(
+                "spotify:track:signal", "Signal", "Ada DJ",
+            ),
+        })
+        storage = InMemoryStorage()
+
+        report = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=BeatportChartSource(), spotify=spotify,
+            matching_knowledge=storage, publication_storage=storage,
+        ).execute(TransferRequest(
+            source="https://www.beatport.com/chart/synthetic-chart/60",
+            playlist_prefix=None,
+        ))
+
+        playlist = report.playlists[0]
+        assert playlist.name.startswith("Ada DJ - Synthetic Chart — ")
+        assert spotify.playlists[playlist.spotify_playlist_id]["name"] == playlist.name
 
 
 class TestBeatportLabelSource:

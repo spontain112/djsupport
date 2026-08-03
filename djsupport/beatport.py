@@ -27,7 +27,7 @@ class InvalidBeatportURL(ValueError):
 def compose_chart_playlist_name(chart_name: str, curator: str | None) -> str:
     """Compose playlist name from chart name and curator."""
     if curator and curator != "Unknown":
-        return f"{chart_name} — {curator}"
+        return f"{curator} - {chart_name}"
     return chart_name
 
 
