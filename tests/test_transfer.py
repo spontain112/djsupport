@@ -3167,12 +3167,14 @@ class TestSpotifyApprovalAdapter:
             "items": list(playlists), "next": None,
         }
 
-        def create_playlist(name, public, description):
-            playlist = {"id": "mirror-1", "description": description}
+        def create_playlist(route, payload=None):
+            assert route == "me/playlists"
+            assert payload["public"] is False
+            playlist = {"id": "mirror-1", "description": payload["description"]}
             playlists.append(playlist)
             return playlist
 
-        client.current_user_playlist_create.side_effect = create_playlist
+        client._post.side_effect = create_playlist
 
         first_id = SpotifyMatcher(client).publish_provisional_snapshot(
             "Fixture Mirror", ["spotify:track:first"], "description", "stable-key",
@@ -3182,8 +3184,7 @@ class TestSpotifyApprovalAdapter:
         )
 
         assert first_id == second_id == "mirror-1"
-        assert client.current_user_playlist_create.call_count == 1
-        client.user_playlist_create.assert_not_called()
+        assert client._post.call_count == 1
         assert client.playlist_replace_items.call_args.args == (
             "mirror-1", ["spotify:track:second"],
         )

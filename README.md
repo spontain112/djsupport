@@ -93,7 +93,7 @@ Copy the example env file and fill in your credentials:
 cp .env.example .env
 ```
 
-You can obtain these values from the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) after creating an application. Make sure `http://localhost:8888/callback` is added as a Redirect URI in your app settings.
+You can obtain these values from the [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) after creating an application. Make sure `http://127.0.0.1:8888/callback` is added as a Redirect URI in your app settings. Spotify does not accept `localhost` aliases; an existing app can allowlist this loopback callback alongside callbacks for other DJ Support clients.
 
 ### 2. Rekordbox XML export
 

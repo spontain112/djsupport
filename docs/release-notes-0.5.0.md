@@ -30,7 +30,10 @@ Private publication data now writes schema 5 and durable Transfer data writes
 schema 2. Older supported schemas remain readable and backup-compatible. Back
 up local data before the first publication after upgrading.
 
-The default test suite is offline and synthetic. The separately gated live
-Spotify smoke test still requires explicit authorization, an allowlisted owner
-account, a disposable private playlist, and a fixed request budget; it is not
-run automatically.
+The default test suite is offline and synthetic. The separately authorized
+live Spotify release smoke test passed against an allowlisted owner account
+within its fixed eight-request budget. It covered identity, private playlist
+creation and discovery, head and ordered-item reads, publication mutation, and
+confirmed removal of the disposable playlist. No account, playlist, or item
+identifiers are retained in the repository. Live tests are not run
+automatically.

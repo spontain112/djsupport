@@ -980,9 +980,11 @@ class SpotifyMatcher:
         return profile.get("account_id") or profile["id"]
 
     def create_playlist(self, name: str, description: str) -> str:
-        playlist = self._client.current_user_playlist_create(
-            name, public=False, description=description,
-        )
+        playlist = self._client._post("me/playlists", payload={
+            "name": name,
+            "public": False,
+            "description": description,
+        })
         return playlist["id"]
 
     def find_recovery_playlist(self, publication_key: str) -> str | None:

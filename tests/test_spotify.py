@@ -153,19 +153,31 @@ def test_private_playlist_read_is_the_only_new_read_scope():
 
 
 def test_spotify_adapter_uses_current_account_and_playlist_contracts():
-    client = MagicMock()
-    client.current_user.return_value = {"id": "stable-account"}
-    client.current_user_playlist_create.return_value = {"id": "playlist-1"}
+    client = spotipy.Spotify(auth="synthetic-token")
+    client.current_user = MagicMock(return_value={"id": "stable-account"})
+    client._internal_call = MagicMock(return_value={"id": "playlist-1"})
 
     adapter = SpotifyMatcher(client)
     created = adapter.create_playlist("Name", "Description")
 
     assert adapter.account_id() == "stable-account"
     assert created == "playlist-1"
-    client.current_user_playlist_create.assert_called_once_with(
-        "Name", public=False, description="Description",
-    )
-    client.user_playlist_create.assert_not_called()
+    client._internal_call.assert_called_once_with("POST", "me/playlists", {
+        "name": "Name",
+        "public": False,
+        "description": "Description",
+    }, {})
+
+
+def test_spotify_playlist_creation_propagates_transport_failure():
+    client = spotipy.Spotify(auth="synthetic-token")
+    error = _make_429(60)
+    client._internal_call = MagicMock(side_effect=error)
+
+    with pytest.raises(spotipy.SpotifyException) as raised:
+        SpotifyMatcher(client).create_playlist("Name", "Description")
+
+    assert raised.value is error
 
 
 def test_ordered_playlist_facts_preserve_duplicates_and_unknown_shapes():
