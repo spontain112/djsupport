@@ -325,6 +325,57 @@ class TestBeatportChartSource:
         assert playlist.name.startswith("Ada DJ - Synthetic Chart — ")
         assert spotify.playlists[playlist.spotify_playlist_id]["name"] == playlist.name
 
+    def test_curator_first_name_survives_pause_reload_and_resume(
+        self, monkeypatch, tmp_path,
+    ):
+        fixture_selection = FixtureBeatportSource(FIXTURE).consume("fixture")
+        intake_calls = []
+
+        def fetch_chart(url):
+            intake_calls.append(url)
+            return "Synthetic Chart", "Ada DJ", fixture_selection.tracks
+
+        monkeypatch.setattr("djsupport.beatport.fetch_chart", fetch_chart)
+        spotify = StatefulSpotify({
+            ("Known Artist", "Known Track"): _match(
+                "spotify:track:known", "Known Track", "Known Artist",
+            ),
+            ("New Artist", "New Track"): _match(
+                "spotify:track:new", "New Track", "New Artist",
+            ),
+        })
+        knowledge = InMemoryStorage()
+        publications = InMemoryStorage()
+        state_path = tmp_path / "transfers.json"
+        request = TransferRequest(
+            source="https://www.beatport.com/chart/synthetic-chart/60",
+            playlist_prefix=None,
+        )
+        first = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=BeatportChartSource(), spotify=spotify,
+            matching_knowledge=knowledge, publication_storage=publications,
+            transfer_storage=FileTransferStorage(state_path),
+        )
+        first.pause()
+
+        paused = first.execute(request)
+        resumed = Transfer(
+            publishing_guards=TEST_PUBLISHING_GUARDS,
+            source=BeatportChartSource(), spotify=spotify,
+            matching_knowledge=knowledge, publication_storage=publications,
+            transfer_storage=FileTransferStorage(state_path),
+        ).execute(TransferRequest(
+            source=request.source, transfer_id=paused.transfer_id,
+        ))
+
+        playlist = resumed.playlists[0]
+        assert paused.status == "paused"
+        assert resumed.status == "completed"
+        assert playlist.name.startswith("Ada DJ - Synthetic Chart — ")
+        assert spotify.playlists[playlist.spotify_playlist_id]["name"] == playlist.name
+        assert intake_calls == [request.source]
+
 
 class TestBeatportLabelSource:
     def test_production_intake_parses_fixture_order_and_deduplicates(self, monkeypatch):
