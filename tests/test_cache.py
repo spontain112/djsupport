@@ -42,12 +42,15 @@ class TestMatchCacheLoad:
         c.load()
         assert len(c.entries) == 0
 
-    def test_load_wrong_version_is_noop(self, tmp_path):
+    def test_load_wrong_version_is_rejected_before_private_data_can_be_overwritten(
+        self, tmp_path,
+    ):
         p = tmp_path / "cache.json"
         p.write_text(json.dumps({"version": 999, "entries": {}}))
         c = MatchCache(path=str(p))
-        c.load()
-        assert len(c.entries) == 0
+        with pytest.raises(ValueError, match="Unsupported matching-knowledge schema"):
+            c.load()
+        assert json.loads(p.read_text())["version"] == 999
 
     def test_roundtrip_save_and_load(self, tmp_path):
         path = str(tmp_path / "cache.json")

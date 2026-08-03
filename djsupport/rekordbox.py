@@ -30,7 +30,9 @@ class Playlist:
     track_ids: list[str] = field(default_factory=list)
 
 
-def parse_xml(xml_path: str | Path) -> tuple[dict[str, Track], list[Playlist]]:
+def parse_xml(
+    xml_path: str | Path, *, include_locations: bool = False,
+) -> tuple[dict[str, Track], list[Playlist]]:
     """Parse a Rekordbox XML export file.
 
     Returns:
@@ -56,7 +58,7 @@ def parse_xml(xml_path: str | Path) -> tuple[dict[str, Track], list[Playlist]]:
                 genre=track_el.get("Genre", ""),
                 date_added=track_el.get("DateAdded", ""),
                 duration=int(total_time) if total_time.isdigit() else 0,
-                location=track_el.get("Location", ""),
+                location=(track_el.get("Location", "") if include_locations else ""),
             )
 
     # Parse playlist tree

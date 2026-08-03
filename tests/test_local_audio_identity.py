@@ -7,6 +7,7 @@ import pytest
 import requests
 
 from djsupport.cache import MatchCache
+from djsupport.local_audio import LocalAudioCapability
 from djsupport.rekordbox import Track
 from djsupport.report import save_report
 from djsupport.transfer import (
@@ -67,6 +68,13 @@ class FixedLocalAudio:
             duration=360,
         )
 
+    def capability(self) -> LocalAudioCapability:
+        return LocalAudioCapability(
+            available=True,
+            algorithm="chromaprint",
+            algorithm_version="1.6.0",
+        )
+
 
 class SpotifyBoundary:
     def __init__(self, account_id="spotify-account-one") -> None:
@@ -102,6 +110,27 @@ class SpotifyBoundary:
 
     def spotify_track(self, uri):
         return {"uri": uri, "is_playable": True}
+
+
+def test_ordinary_transfer_does_not_persist_private_audio_location(tmp_path):
+    state_path = tmp_path / "transfers.json"
+    Transfer(
+        source=SelectedSource(_track(
+            track_id="rb-original", artist="Known Artist", title="Known Recording",
+        )),
+        spotify=SpotifyBoundary(),
+        matching_knowledge=MatchCacheKnowledge(MatchCache(
+            tmp_path / "matching-knowledge.json",
+        )),
+        publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
+        transfer_storage=FileTransferStorage(state_path),
+    ).execute(TransferRequest(
+        source="Selected", preview=True, transfer_id="ordinary-transfer",
+    ))
+
+    rendered = state_path.read_text()
+    assert "selected-track.wav" not in rendered
+    assert '"location"' not in rendered
 
 
 def test_approved_local_identity_recovers_damaged_metadata_without_spotify(tmp_path):
@@ -200,6 +229,40 @@ def test_batch_preflight_counts_local_work_without_calculating_fingerprints(tmp_
     assert plan.local_audio_pending == 1
     assert plan.local_audio_unavailable == 0
     assert local_audio.observed == []
+
+
+def test_batch_preflight_only_counts_compatible_fingerprint_evidence_as_indexed(
+    tmp_path,
+):
+    track = _track(
+        track_id="rb-original", artist="Known Artist", title="Known Recording",
+    )
+    local_audio = FixedLocalAudio()
+    local_audio.preflight = lambda candidate: "eligible"
+    cache = MatchCache(tmp_path / "matching-knowledge.json")
+    cache.retain_fingerprint_observation(
+        algorithm="chromaprint",
+        algorithm_version="1.5.0",
+        fingerprint="older-version-evidence",
+        audio_duration=track.duration,
+        source_track_id=track.track_id,
+    )
+    transfer = Transfer(
+        source=SelectedSource(track),
+        spotify=SpotifyBoundary(),
+        matching_knowledge=MatchCacheKnowledge(cache),
+        publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
+        local_audio=local_audio,
+    )
+
+    plan = transfer.plan_batch(BatchPlanRequest(
+        playlist_references=("Selected",),
+        preview=True,
+        local_audio_identity=True,
+    ))
+
+    assert plan.local_audio_indexed == 0
+    assert plan.local_audio_pending == 1
 
 
 def test_completed_local_observation_is_not_recalculated_after_spotify_timeout(
@@ -413,3 +476,74 @@ def test_revocation_is_scoped_to_the_approving_spotify_account(tmp_path):
 
     assert account_b_result.playlists[0].local_audio_reused == 1
     assert spotify_b.searches == [("Account B Artist", "Account B Recording", 80)]
+
+
+def test_conflicting_fingerprint_approvals_suspend_automatic_reuse(tmp_path):
+    class ConflictingSpotify(SpotifyBoundary):
+        def __init__(self):
+            super().__init__()
+            self.next_playlist = 0
+
+        def match(self, track, threshold):
+            self.searches.append((track.artist, track.name, threshold))
+            suffix = "a" if track.artist == "Artist A" else "b"
+            return {
+                "uri": f"spotify:track:{suffix}",
+                "name": f"Recording {suffix.upper()}",
+                "artist": track.artist,
+                "score": 97.0,
+                "match_type": "exact",
+            }
+
+        def publish_provisional_snapshot(
+            self, name, track_uris, description, publication_key,
+        ):
+            self.next_playlist += 1
+            playlist_id = f"provisional-{self.next_playlist}"
+            self.playlists[playlist_id] = list(track_uris)
+            return playlist_id
+
+    spotify = ConflictingSpotify()
+    cache = MatchCache(tmp_path / "matching-knowledge.json")
+    knowledge = MatchCacheKnowledge(cache)
+    publications = FilePublicationStorage(tmp_path / "publications.json")
+    local_audio = FixedLocalAudio()
+
+    def publish(reference, artist):
+        transfer = Transfer(
+            source=SelectedSource(_track(
+                track_id=f"rb-{artist}", artist=artist, title="Recording",
+            )),
+            spotify=spotify,
+            matching_knowledge=knowledge,
+            publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
+            publication_storage=publications,
+            local_audio=local_audio,
+        )
+        report = transfer.execute(TransferRequest(
+            source=reference, local_audio_identity=True,
+        ))
+        return transfer, report.playlists[0].spotify_playlist_id
+
+    first, playlist_a = publish("Selection A", "Artist A")
+    second, playlist_b = publish("Selection B", "Artist B")
+    first.approve(playlist_a)
+
+    conflict = second.approve(playlist_b)
+
+    assert conflict.status.value == "needs review"
+    assert len(conflict.conflicts) == 1
+    searches_before = len(spotify.searches)
+    after_conflict = Transfer(
+        source=SelectedSource(_track(
+            track_id="rb-damaged", artist="", title="Damaged Metadata",
+        )),
+        spotify=spotify,
+        matching_knowledge=knowledge,
+        publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
+        local_audio=local_audio,
+    ).execute(TransferRequest(
+        source="Damaged", preview=True, local_audio_identity=True,
+    ))
+    assert after_conflict.playlists[0].local_audio_reused == 0
+    assert len(spotify.searches) == searches_before + 1

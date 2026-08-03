@@ -27,6 +27,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   evidence counts so resumed and repeated agent outcomes remain stable.
 - Rekordbox XML intake retains each selected track's private `Location` solely
   for opted-in local calculation; reports and machine output omit it.
+- Batch identity now binds the exact selected source content and effect scope;
+  ambiguous legacy Batches must restart instead of resuming stale source data.
+- The web API accepts the same explicit local-audio opt-in and reports the same
+  aggregate local-evidence counters as other Transfer clients.
+
+### Security
+
+- Unsupported matching-knowledge schemas fail closed without rewriting private
+  state, and changed Preview/publication scope cannot resume an earlier Batch.
 
 ### Fixed
 

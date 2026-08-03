@@ -42,7 +42,7 @@ def capabilities(as_json: bool) -> None:
     from djsupport.agent import capability_document
     from djsupport.local_audio import ChromaprintLocalAudio
 
-    document = capability_document(ChromaprintLocalAudio())
+    document = capability_document(ChromaprintLocalAudio().capability())
     if as_json:
         click.echo(json.dumps(document, sort_keys=True))
         return
@@ -59,7 +59,10 @@ def capabilities(as_json: bool) -> None:
 def _resolve_xml_path(explicit_xml_path: str | None) -> str:
     """Resolve Rekordbox XML path from explicit arg or saved local config."""
     if explicit_xml_path:
-        return explicit_xml_path
+        explicit = Path(explicit_xml_path).expanduser()
+        if not explicit.exists() or not explicit.is_file():
+            raise click.ClickException("Rekordbox XML path is missing or invalid.")
+        return str(explicit)
 
     cfg = ConfigManager()
     cfg.load()
@@ -237,7 +240,7 @@ def migrate_0_5(legacy_account_id: str, account_id: str) -> None:
 
 
 @cli.command()
-@click.argument("xml_path", required=False, type=click.Path(exists=True, dir_okay=False))
+@click.argument("xml_path", required=False, type=click.Path(dir_okay=False))
 @click.option(
     "--playlist", "-p", multiple=True,
     help="Select a playlist by exact name or path; repeat for a Batch.",
@@ -300,30 +303,6 @@ def sync(
 
     XML_PATH is the path to your Rekordbox XML library export (optional if configured via `library set`).
     """
-    if agent_json and not authorize_private_source:
-        click.echo(json.dumps({
-            "contract_version": 1,
-            "phase": "plan",
-            "status": "authorization_required",
-            "required_authorizations": ["private_source"],
-            "next_actions": ["authorize_private_source"],
-        }, sort_keys=True))
-        raise click.exceptions.Exit(2)
-    if agent_json and not dry_run and not authorize_spotify_write:
-        click.echo(json.dumps({
-            "contract_version": 1,
-            "phase": "execute",
-            "status": "authorization_required",
-            "required_authorizations": ["spotify_write"],
-            "next_actions": ["authorize_spotify_write"],
-        }, sort_keys=True))
-        raise click.exceptions.Exit(2)
-    if local_audio_identity and no_cache:
-        raise click.UsageError(
-            "Local audio identity requires durable matching knowledge; "
-            "remove --no-cache"
-        )
-    xml_path = _resolve_xml_path(xml_path)
     if not playlist and not whole_library:
         raise click.UsageError(
             "Select at least one playlist with --playlist or opt into "
@@ -344,15 +323,84 @@ def sync(
         RekordboxPlaylistSource,
         SpotifyMatcher,
         Transfer,
+        TransferAuthorization,
     )
     from djsupport.local_audio import ChromaprintLocalAudio
 
+    request = BatchPlanRequest(
+        playlist_references=playlist,
+        whole_library=whole_library,
+        threshold=threshold,
+        preview=dry_run,
+        retry=retry,
+        retry_days=retry_days,
+        playlist_prefix=None if no_prefix else prefix,
+        confirm_expensive=confirm_expensive,
+        local_audio_identity=local_audio_identity,
+    )
+    authorization = TransferAuthorization(
+        private_source=authorize_private_source,
+        spotify_write=authorize_spotify_write,
+    )
+    if agent_json:
+        from djsupport.agent import authorization_required_document
+
+        required = Transfer.authorization_requirement(
+            request, authorization, phase="plan",
+        )
+        if required:
+            click.echo(json.dumps(
+                authorization_required_document("plan", required), sort_keys=True,
+            ))
+            raise click.exceptions.Exit(2)
+    if local_audio_identity and no_cache:
+        if agent_json:
+            from djsupport.agent import error_document
+
+            click.echo(json.dumps(
+                error_document("plan", "durable_knowledge_required"), sort_keys=True,
+            ))
+            raise click.exceptions.Exit(2)
+        raise click.UsageError(
+            "Local audio identity requires durable matching knowledge; "
+            "remove --no-cache"
+        )
+    try:
+        xml_path = _resolve_xml_path(xml_path)
+    except (click.ClickException, OSError, ValueError) as exc:
+        if not agent_json:
+            raise
+        from djsupport.agent import error_document
+
+        click.echo(json.dumps(
+            error_document("plan", "private_source_unavailable"), sort_keys=True,
+        ))
+        raise click.exceptions.Exit(2) from exc
+
     cache = None if no_cache else MatchCache(cache_path)
-    if cache is not None:
-        cache.load()
+    try:
+        if cache is not None:
+            cache.load()
+    except (OSError, ValueError) as exc:
+        if not agent_json:
+            raise click.ClickException(str(exc)) from exc
+        from djsupport.agent import error_document
+
+        click.echo(json.dumps(
+            error_document("plan", "matching_knowledge_unavailable"), sort_keys=True,
+        ))
+        raise click.exceptions.Exit(2) from exc
+    execute_authorized = Transfer.authorization_requirement(
+        request, authorization, phase="execute",
+    ) is None
     transfer = Transfer(
-        source=RekordboxPlaylistSource(xml_path),
-        spotify=SpotifyMatcher(get_client()),
+        source=RekordboxPlaylistSource(
+            xml_path, include_locations=local_audio_identity,
+        ),
+        spotify=(
+            SpotifyMatcher(get_client())
+            if execute_authorized else object()
+        ),
         publishing_guards=AccountPublishingGuards(),
         matching_knowledge=(
             EphemeralMatchingKnowledge() if cache is None
@@ -366,31 +414,27 @@ def sync(
         ),
         local_audio=(ChromaprintLocalAudio() if local_audio_identity else None),
     )
-    request = BatchPlanRequest(
-        playlist_references=playlist,
-        whole_library=whole_library,
-        threshold=threshold,
-        preview=dry_run,
-        retry=retry,
-        retry_days=retry_days,
-        playlist_prefix=None if no_prefix else prefix,
-        confirm_expensive=confirm_expensive,
-        local_audio_identity=local_audio_identity,
-    )
     if agent_json:
-        from djsupport.agent import AgentAuthorization, AgentTransferContract
+        from djsupport.agent import AgentTransferContract
 
-        outcome = AgentTransferContract(transfer).execute_batch(
-            request,
-            AgentAuthorization(
-                private_source=authorize_private_source,
-                spotify_write=authorize_spotify_write,
-            ),
-        )
+        contract = AgentTransferContract(transfer)
+        try:
+            outcome = (
+                contract.execute_batch(request, authorization)
+                if execute_authorized
+                else contract.plan_batch(request, authorization)
+            )
+        except Exception:
+            from djsupport.agent import error_document
+
+            outcome = error_document(
+                "execute" if execute_authorized else "plan",
+                "transfer_failed",
+            )
         click.echo(json.dumps(outcome, sort_keys=True))
         if outcome["status"] in {
-            "authorization_required", "confirmation_required",
-        }:
+            "authorization_required", "confirmation_required", "error",
+        } or outcome.get("required_authorizations"):
             raise click.exceptions.Exit(2)
         return
     plan = transfer.plan_batch(request)

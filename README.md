@@ -258,6 +258,11 @@ djsupport sync -p "Deep House" --json \
   --local-audio-identity
 ```
 
+Run the command first without `--authorize-spotify-write` to receive the
+privacy-safe bounded plan and Batch ID. After reviewing it, repeat the same
+request with write authorization. A changed source selection or execution
+scope produces a different Batch ID and cannot resume the earlier plan.
+
 Whole-library or expensive work additionally requires
 `--confirm-expensive`. JSON mode never prompts or infers authority from the
 conversation. Its versioned response contains only aggregate counts, stable

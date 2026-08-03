@@ -56,6 +56,7 @@ class SyncRequest(BaseModel):
     retry: bool = False
     retry_days: int = 7
     no_cache: bool = False
+    local_audio_identity: bool = False
 
 
 def _auth_manager() -> SpotifyOAuth:
@@ -84,6 +85,7 @@ def _url_error() -> str:
 
 def _default_transfer_factory(url_type: str, request: SyncRequest) -> Transfer:
     from djsupport.cache import MatchCache
+    from djsupport.local_audio import ChromaprintLocalAudio
     from djsupport.spotify import get_client
 
     cache = None if request.no_cache else MatchCache(default_matching_knowledge_path())
@@ -102,6 +104,9 @@ def _default_transfer_factory(url_type: str, request: SyncRequest) -> Transfer:
         ),
         transfer_storage=FileTransferStorage(
             publication_path.with_suffix(".transfers.json")
+        ),
+        local_audio=(
+            ChromaprintLocalAudio() if request.local_audio_identity else None
         ),
     )
 
@@ -146,6 +151,7 @@ def create_app(
             request or SyncRequest(
                 url=progress.source,
                 no_cache=not progress.retain_matching_knowledge,
+                local_audio_identity=progress.local_audio_identity,
             ),
         ), progress
 
@@ -154,7 +160,7 @@ def create_app(
         from djsupport.agent import capability_document
         from djsupport.local_audio import ChromaprintLocalAudio
 
-        return capability_document(ChromaprintLocalAudio())
+        return capability_document(ChromaprintLocalAudio().capability())
 
     @web_app.get("/auth/status")
     def auth_status():
@@ -191,6 +197,11 @@ def create_app(
             url_type = _detect_url_type(request.url)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if request.local_audio_identity and request.no_cache:
+            raise HTTPException(
+                status_code=400,
+                detail="Local audio identity requires durable matching knowledge",
+            )
         require_authenticated()
         transfer_id = uuid4().hex
         transfer = make_transfer(url_type, request)
@@ -204,6 +215,7 @@ def create_app(
             playlist_prefix=request.prefix,
             transfer_id=transfer_id,
             retain_matching_knowledge=not request.no_cache,
+            local_audio_identity=request.local_audio_identity,
         )
         transfer.prepare(transfer_request)
         run_background(_run_transfer, (transfer, transfer_request))
@@ -242,6 +254,7 @@ def create_app(
                 source=progress.source,
                 transfer_id=transfer_id,
                 retain_matching_knowledge=progress.retain_matching_knowledge,
+                local_audio_identity=progress.local_audio_identity,
             )
             transfer.prepare(resume_request)
             run_background(
@@ -259,6 +272,7 @@ def create_app(
             raise HTTPException(status_code=202, detail="Transfer still in progress")
         report = transfer.execute(TransferRequest(
             source=progress.source, transfer_id=transfer_id,
+            local_audio_identity=progress.local_audio_identity,
         ))
         return _report_to_dict(report)
 
@@ -321,6 +335,18 @@ def _report_to_dict(report: SyncReport) -> dict[str, Any]:
         "total_matched": report.total_matched,
         "total_unmatched": report.total_unmatched,
         "overall_match_rate": report.overall_match_rate,
+        "local_audio_eligible": sum(
+            playlist.local_audio_eligible for playlist in report.playlists
+        ),
+        "local_audio_observed": sum(
+            playlist.local_audio_observed for playlist in report.playlists
+        ),
+        "local_audio_unavailable": sum(
+            playlist.local_audio_unavailable for playlist in report.playlists
+        ),
+        "local_audio_reused": sum(
+            playlist.local_audio_reused for playlist in report.playlists
+        ),
     }
 
 

@@ -18,10 +18,29 @@ from djsupport.transfer import (
     Transfer,
     TransferProgress,
 )
-from djsupport.web import app, create_app
+from djsupport.web import _report_to_dict, app, create_app
 
 
 client = TestClient(app)
+
+
+def test_web_outcome_exposes_aggregate_local_audio_counts():
+    playlist = PlaylistReport(name="Synthetic", path="private", action="preview")
+    playlist.local_audio_eligible = 3
+    playlist.local_audio_observed = 2
+    playlist.local_audio_unavailable = 1
+    playlist.local_audio_reused = 1
+    report = SyncReport(
+        timestamp=datetime(2026, 8, 3), threshold=80, dry_run=True,
+        playlists=[playlist],
+    )
+
+    rendered = _report_to_dict(report)
+
+    assert rendered["local_audio_eligible"] == 3
+    assert rendered["local_audio_observed"] == 2
+    assert rendered["local_audio_unavailable"] == 1
+    assert rendered["local_audio_reused"] == 1
 
 
 def test_capabilities_are_available_without_spotify_or_private_source(monkeypatch):
@@ -222,13 +241,27 @@ class TestSyncEndpoints:
             background_runner=lambda target, args: target(*args),
         )
         res = TestClient(label_app).post(
-            "/sync", json={"url": "https://www.beatport.com/label/test/1"},
+            "/sync", json={
+                "url": "https://www.beatport.com/label/test/1",
+                "local_audio_identity": True,
+            },
         )
         assert res.status_code == 200
         assert res.json()["url_type"] == "label"
         request = transfer.execute.call_args.args[0]
         assert request.source == "https://www.beatport.com/label/test/1"
         assert request.mode.value == "snapshot"
+        assert request.local_audio_identity is True
+
+    def test_local_audio_identity_requires_durable_web_knowledge(self):
+        res = client.post("/sync", json={
+            "url": "https://www.beatport.com/chart/test/123",
+            "local_audio_identity": True,
+            "no_cache": True,
+        })
+
+        assert res.status_code == 400
+        assert "durable matching knowledge" in res.json()["detail"]
 
     def test_failed_outcome_reloads_after_restart(self, tmp_path):
         class FailingSource:

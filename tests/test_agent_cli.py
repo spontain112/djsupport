@@ -53,6 +53,49 @@ def test_sync_json_requires_explicit_private_source_authorization(monkeypatch):
     }
 
 
+def test_authorized_publish_returns_bounded_plan_before_spotify_write_authority(
+    monkeypatch, tmp_path,
+):
+    monkeypatch.setattr(
+        "djsupport.cli.get_client",
+        lambda: (_ for _ in ()).throw(AssertionError("Spotify must stay untouched")),
+    )
+
+    result = CliRunner().invoke(cli, [
+        "sync", "tests/fixtures/library.xml",
+        "--playlist", "My Playlists/Peak Time",
+        "--json", "--authorize-private-source",
+        "--cache-path", str(tmp_path / "knowledge.json"),
+        "--state-path", str(tmp_path / "publications.json"),
+    ])
+
+    assert result.exit_code == 2
+    plan = json.loads(result.output)
+    assert plan["phase"] == "plan"
+    assert plan["status"] == "ready"
+    assert plan["required_authorizations"] == ["spotify_write"]
+    assert len(plan["batch_id"]) == 64
+
+
+def test_json_source_error_is_structured_and_does_not_echo_private_path(tmp_path):
+    private_path = tmp_path / "private-library-name.xml"
+
+    result = CliRunner().invoke(cli, [
+        "sync", str(private_path), "--playlist", "Selected",
+        "--dry-run", "--json", "--authorize-private-source",
+    ])
+
+    assert result.exit_code == 2
+    assert json.loads(result.output) == {
+        "contract_version": 1,
+        "phase": "plan",
+        "status": "error",
+        "error": {"code": "private_source_unavailable"},
+        "next_actions": ["inspect_private_source"],
+    }
+    assert "private-library-name" not in result.output
+
+
 def test_authorized_sync_json_returns_only_structured_outcome(
     monkeypatch, tmp_path,
 ):

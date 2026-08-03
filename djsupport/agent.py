@@ -2,24 +2,20 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
-from dataclasses import asdict, dataclass
-
-from djsupport.transfer import BatchPlanRequest, Transfer
+from djsupport.transfer import (
+    BatchPlanRequest,
+    Transfer,
+    TransferAuthorization,
+)
 
 
 AGENT_CONTRACT_VERSION = 1
 
 
-@dataclass(frozen=True)
-class AgentAuthorization:
-    private_source: bool = False
-    spotify_write: bool = False
+AgentAuthorization = TransferAuthorization
 
 
-def capability_document(local_audio) -> dict:
-    capability_value = local_audio.capability()
+def capability_document(capability_value) -> dict:
     capability = {
         "available": capability_value.available,
         "algorithm": capability_value.algorithm,
@@ -36,6 +32,27 @@ def capability_document(local_audio) -> dict:
     }
 
 
+def authorization_required_document(phase: str, required: str) -> dict:
+    return {
+        "contract_version": AGENT_CONTRACT_VERSION,
+        "phase": phase,
+        "status": "authorization_required",
+        "required_authorizations": [required],
+        "next_actions": [f"authorize_{required}"],
+    }
+
+
+def error_document(phase: str, code: str) -> dict:
+    """Render a privacy-safe machine error without source-derived details."""
+    return {
+        "contract_version": AGENT_CONTRACT_VERSION,
+        "phase": phase,
+        "status": "error",
+        "error": {"code": code},
+        "next_actions": ["inspect_private_source"],
+    }
+
+
 class AgentTransferContract:
     """Render public Transfer behavior for AI and automation clients."""
 
@@ -43,35 +60,22 @@ class AgentTransferContract:
         self._transfer = transfer
 
     def capabilities(self) -> dict:
-        class CapabilityAdapter:
-            def __init__(self, value):
-                self._value = value
-
-            def capability(self):
-                return self._value
-
-        return capability_document(CapabilityAdapter(
-            self._transfer.local_audio_capability()
-        ))
+        return capability_document(self._transfer.local_audio_capability())
 
     def plan_batch(
         self, request: BatchPlanRequest, authorization: AgentAuthorization,
     ) -> dict:
-        if not authorization.private_source:
-            return {
-                "contract_version": AGENT_CONTRACT_VERSION,
-                "phase": "plan",
-                "status": "authorization_required",
-                "required_authorizations": ["private_source"],
-                "next_actions": ["authorize_private_source"],
-            }
-        plan = self._transfer.plan_batch(request)
-        identity = asdict(request)
-        identity.pop("confirm_expensive", None)
-        plan_material = json.dumps(
-            identity, sort_keys=True, separators=(",", ":"),
+        required = self._transfer.authorization_requirement(
+            request, authorization, phase="plan",
         )
-        batch_id = hashlib.sha256(plan_material.encode()).hexdigest()
+        if required:
+            return authorization_required_document("plan", required)
+        plan = self._transfer.plan_batch(request)
+        return self._plan_document(request, authorization, plan)
+
+    @staticmethod
+    def _plan_document(request, authorization, plan) -> dict:
+        batch_id = plan.batch_id
         required = (
             [] if request.preview or authorization.spotify_write
             else ["spotify_write"]
@@ -109,25 +113,21 @@ class AgentTransferContract:
         self, request: BatchPlanRequest, authorization: AgentAuthorization,
         *, transfer_id: str | None = None,
     ) -> dict:
-        if not authorization.private_source:
-            return {
-                "contract_version": AGENT_CONTRACT_VERSION,
-                "phase": "execute",
-                "status": "authorization_required",
-                "required_authorizations": ["private_source"],
-                "next_actions": ["authorize_private_source"],
-            }
-        plan_result = self.plan_batch(request, authorization)
-        if not request.preview and not authorization.spotify_write:
-            return {
-                "contract_version": AGENT_CONTRACT_VERSION,
-                "phase": "execute",
-                "status": "authorization_required",
-                "batch_id": plan_result["batch_id"],
-                "required_authorizations": ["spotify_write"],
-                "next_actions": ["authorize_spotify_write"],
-            }
+        required = self._transfer.authorization_requirement(
+            request, authorization, phase="plan",
+        )
+        if required:
+            return authorization_required_document("execute", required)
         plan = self._transfer.plan_batch(request)
+        plan_result = self._plan_document(request, authorization, plan)
+        required = self._transfer.authorization_requirement(
+            request, authorization, phase="execute",
+        )
+        if required:
+            return {
+                **authorization_required_document("execute", required),
+                "batch_id": plan_result["batch_id"],
+            }
         if not plan.ready:
             return {
                 "contract_version": AGENT_CONTRACT_VERSION,
@@ -175,14 +175,11 @@ class AgentTransferContract:
     def progress(
         self, transfer_id: str, authorization: AgentAuthorization,
     ) -> dict:
-        if not authorization.private_source:
-            return {
-                "contract_version": AGENT_CONTRACT_VERSION,
-                "phase": "progress",
-                "status": "authorization_required",
-                "required_authorizations": ["private_source"],
-                "next_actions": ["authorize_private_source"],
-            }
+        required = self._transfer.private_source_authorization_requirement(
+            authorization,
+        )
+        if required:
+            return authorization_required_document("progress", required)
         progress = self._transfer.batch_progress(transfer_id)
         status = progress.status.value.replace(" ", "_")
         return {

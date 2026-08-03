@@ -30,6 +30,13 @@ and permitted next actions. They do not expose source paths, playlist or track
 contents, raw XML metadata, fingerprints, subprocess output, credentials, or
 Spotify account identifiers.
 
+Transfer derives the Batch identifier from the exact selected source content
+and requested effect scope, then hashes that private material before returning
+the identifier. Confirmation does not alter identity. A changed source,
+Preview/publication mode, matching policy, or local-audio opt-in cannot resume
+an earlier Batch. Legacy checkpoints without this bounded identity remain
+readable for inspection but must be restarted rather than resumed ambiguously.
+
 Opt-in local audio identity is the first end-to-end proof of this decision. An
 agent can detect Chromaprint support, plan one selected Rekordbox Batch, obtain
 separate authority, and run or resume the Transfer through the same policy used

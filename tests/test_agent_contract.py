@@ -2,12 +2,15 @@
 
 import json
 
+import pytest
+
 from djsupport.agent import AgentAuthorization, AgentTransferContract
 from djsupport.local_audio import LocalAudioCapability
 from djsupport.rekordbox import Track
 from djsupport.transfer import (
     AccountPublishingGuards,
     BatchPlanRequest,
+    FilePublicationStorage,
     FileTransferStorage,
     SourceSelection,
     Transfer,
@@ -78,10 +81,14 @@ def test_capability_inspection_is_versioned_and_side_effect_free(tmp_path):
 
 
 class BoundedSource(UntouchedSource):
+    def __init__(self):
+        super().__init__()
+        self.title = "Invented Signal"
+
     def selection(self, reference):
         return SourceSelection("Private Playlist", reference, [Track(
             track_id="synthetic-1",
-            name="Invented Signal",
+            name=self.title,
             artist="Invented Artist",
             album="",
             remixer="",
@@ -196,6 +203,24 @@ def test_expensive_confirmation_does_not_change_batch_identity(tmp_path):
     assert before["batch_id"] == confirmed["batch_id"]
 
 
+def test_source_content_change_creates_a_new_bounded_batch_identity(tmp_path):
+    source = BoundedSource()
+    contract = AgentTransferContract(Transfer(
+        source=source,
+        spotify=UntouchedSpotify(),
+        matching_knowledge=EmptyKnowledge(),
+        publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
+    ))
+    request = BatchPlanRequest(playlist_references=("Private/Selection",))
+    authorization = AgentAuthorization(private_source=True)
+
+    before = contract.plan_batch(request, authorization)
+    source.title = "Changed Source Content"
+    after = contract.plan_batch(request, authorization)
+
+    assert before["batch_id"] != after["batch_id"]
+
+
 def test_private_read_authorization_does_not_authorize_spotify_mutation(tmp_path):
     source = BoundedSource()
     spotify = UntouchedSpotify()
@@ -288,3 +313,25 @@ def test_authorized_preview_executes_non_interactively_and_is_idempotent(tmp_pat
     rendered = json.dumps(first)
     assert "Private" not in rendered
     assert "Invented" not in rendered
+
+
+def test_resume_rejects_a_request_that_changes_the_original_effect_scope(tmp_path):
+    storage = FileTransferStorage(tmp_path / "transfers.json")
+    transfer = Transfer(
+        source=BoundedSource(),
+        spotify=PreviewSpotify(),
+        matching_knowledge=EmptyKnowledge(),
+        publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
+        publication_storage=FilePublicationStorage(tmp_path / "publications.json"),
+        transfer_storage=storage,
+    )
+    preview = transfer.plan_batch(BatchPlanRequest(
+        playlist_references=("Private/Selection",), preview=True,
+    ))
+    completed = transfer.execute_batch(preview, transfer_id=preview.batch_id)
+    publishing = transfer.plan_batch(BatchPlanRequest(
+        playlist_references=("Private/Selection",), preview=False,
+    ))
+
+    with pytest.raises(ValueError, match="original plan"):
+        transfer.execute_batch(publishing, transfer_id=completed.transfer_id)

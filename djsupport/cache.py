@@ -51,7 +51,10 @@ class MatchCache:
         except (json.JSONDecodeError, OSError):
             return
         if data.get("version") not in (1, CACHE_VERSION):
-            return
+            raise ValueError(
+                "Unsupported matching-knowledge schema; upgrade djsupport "
+                "before using this file"
+            )
         for key, entry in data.get("entries", {}).items():
             self.entries[key] = CacheEntry(**entry)
         self.local_regressions = data.get("local_regressions", [])
@@ -236,13 +239,18 @@ class MatchCache:
         account_id: str,
     ) -> dict | None:
         """Return one exact account-scoped Approved Match, never a guess."""
-        candidates = [
+        matching = [
             item for item in self.fingerprint_associations
             if item["algorithm"] == algorithm
             and item["algorithm_version"] == algorithm_version
             and item["fingerprint"] == fingerprint
             and item["account_id"] == account_id
-            and item.get("authority_status") == "approved"
+        ]
+        if any(item.get("authority_status") == "conflict" for item in matching):
+            return None
+        candidates = [
+            item for item in matching
+            if item.get("authority_status") == "approved"
         ]
         uris = {item["spotify_uri"] for item in candidates}
         if len(uris) != 1:
@@ -274,14 +282,6 @@ class MatchCache:
             and item.get("authority_status") == "approved"
         ]
         approved_uris = {item["spotify_uri"] for item in same_identity}
-        if approved_uris and approved_uris != {result["uri"]}:
-            return {
-                "source_artist": source_artist,
-                "source_title": source_title,
-                "source_duration": source_duration,
-                "approved_spotify_uri": sorted(approved_uris)[0],
-                "proposed_spotify_uri": result["uri"],
-            }
         association = {
             **observation,
             "account_id": account_id,
@@ -297,6 +297,33 @@ class MatchCache:
             "authority_status": "approved",
             "approved_at": datetime.now().isoformat(),
         }
+        if approved_uris and approved_uris != {result["uri"]}:
+            conflict = {
+                "source_artist": source_artist,
+                "source_title": source_title,
+                "source_duration": source_duration,
+                "approved_spotify_uri": sorted(approved_uris)[0],
+                "proposed_spotify_uri": result["uri"],
+            }
+            conflict_association = {
+                **association, "authority_status": "conflict",
+            }
+            if not any(item == conflict_association for item in self.fingerprint_associations):
+                self.fingerprint_associations.append(conflict_association)
+            if conflict not in self.approval_conflicts:
+                self.approval_conflicts.append(conflict)
+            self._dirty_count += 1
+            return conflict
+        self.fingerprint_associations = [
+            item for item in self.fingerprint_associations
+            if not (
+                item["algorithm"] == observation["algorithm"]
+                and item["algorithm_version"] == observation["algorithm_version"]
+                and item["fingerprint"] == observation["fingerprint"]
+                and item["account_id"] == account_id
+                and item.get("authority_status") == "conflict"
+            )
+        ]
         if not any(
             item["algorithm"] == association["algorithm"]
             and item["algorithm_version"] == association["algorithm_version"]
