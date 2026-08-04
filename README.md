@@ -17,12 +17,17 @@ Transfer curated Rekordbox and Beatport selections to Spotify through reviewable
 - **Explicit Batches** — select one or more Rekordbox playlists, or opt into the whole library with cost preflight
 - **Graceful rate limiting** — aborts with a clear message, saves cache, and exits non-zero instead of hanging; resume later to continue where you left off
 - **Local-data backup and restore** — creates versioned archives without OAuth credentials and validates, previews, and conflict-checks restores before changing data
+- **Opt-in local audio identity** — reuses an exact, previously Approved Match
+  from locally calculated Chromaprint evidence when Rekordbox metadata changes
+- **Agent-native contract** — gives Codex and other harnesses versioned,
+  privacy-redacted capability, plan, authorization, resume, and outcome records
 
 ## Prerequisites
 
 - Python 3.10+
 - A [Spotify Developer](https://developer.spotify.com/dashboard) application (for API credentials)
 - A Rekordbox XML library export
+- Optional: `fpcalc` from Chromaprint for local audio identity
 
 ## Installation
 
@@ -203,6 +208,73 @@ manifests:
 ```bash
 djsupport sync -p "Deep House" --dry-run
 ```
+
+### Recover Approved Matches from local audio
+
+Inspect the optional capability without reading XML, audio, or Spotify:
+
+```bash
+djsupport capabilities
+```
+
+Opt into local audio identity for only the selected Batch:
+
+```bash
+djsupport sync -p "Deep House" --dry-run --local-audio-identity
+```
+
+DJ Support runs the installed `fpcalc` locally and never uploads audio or
+fingerprints. It does not scan directories, modify files or tags, or infer an
+Approval. After the user approves a Provisional Playlist, exact compatible
+evidence can reuse that account-scoped Approved Match without Spotify search.
+Missing or unreadable audio falls back to normal metadata matching. Similar but
+non-identical fingerprints never authorize reuse. `--local-audio-identity` is
+incompatible with `--no-cache` because authority must be durable.
+
+Matching knowledge schema 2 stores observations and Approved Match associations
+only in private application data. Backup, restore, and migration preserve them;
+reports expose aggregate counts but never paths, filenames, or fingerprints.
+
+### Use DJ Support from Codex or another AI harness
+
+Capability inspection is machine-readable and side-effect free:
+
+```bash
+djsupport capabilities --json
+```
+
+Preview one explicitly selected Batch non-interactively:
+
+```bash
+djsupport sync -p "Deep House" --dry-run --json \
+  --authorize-private-source --local-audio-identity
+```
+
+Publishing requires a separate Spotify-write authorization:
+
+```bash
+djsupport sync -p "Deep House" --json \
+  --authorize-private-source --authorize-spotify-write \
+  --local-audio-identity
+```
+
+Run the command first without `--authorize-spotify-write` to receive the
+privacy-safe bounded plan and Batch ID. After reviewing it, repeat the same
+request with write authorization. A changed source selection or execution
+scope produces a different Batch ID and cannot resume the earlier plan.
+
+Whole-library or expensive work additionally requires
+`--confirm-expensive`. JSON mode never prompts or infers authority from the
+conversation. Its versioned response contains only aggregate counts, stable
+identifiers, lifecycle status, and permitted next actions. See
+[ADR-0002](docs/adr/0002-make-transfer-agent-native.md).
+
+The local web API exposes the same Rekordbox-only contract at
+`POST /rekordbox/batches/plan` and `POST /rekordbox/batches/execute`. Requests
+name an explicit XML path and playlist selection plus the separate authority
+flags; responses omit that private material and return the same versioned plan
+or aggregate outcome. The existing `/sync` web route remains Beatport-only and
+does not accept local-audio identity.
 
 ### Tuning match quality
 

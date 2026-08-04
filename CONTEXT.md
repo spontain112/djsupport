@@ -63,3 +63,11 @@ _Avoid_: Deleted source, stale playlist
 **Preview**:
 A complete matching and reporting attempt for a Transfer that may retain matching knowledge but never modifies Spotify playlists or playlist state.
 _Avoid_: Dry run, test run
+
+**Local Audio Identity**:
+Opt-in, local-only Chromaprint evidence calculated for audio referenced by an explicitly selected Rekordbox Batch. It can recover an existing account-scoped Approved Match by exact equality but can never create Approval or identify an unknown recording from a catalog.
+_Avoid_: Automatic identification, fingerprint approval, library scan
+
+**Agent Client**:
+An AI harness or automation client that uses the same public Transfer policy as CLI and web through capability, bounded plan, explicit authorization, execute or resume, and structured outcome phases. Conversation is never authorization.
+_Avoid_: Autonomous authority, agent workflow engine

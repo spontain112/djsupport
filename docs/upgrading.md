@@ -1,5 +1,17 @@
 # Upgrading DJ Support
 
+## Matching knowledge and Transfer state
+
+The first write after installing the local-audio identity release upgrades
+matching knowledge to schema 2 and Transfer state to schema 3. Matching schema
+1 and Transfer schemas 1–2 remain readable. Create a local-data backup first if
+you want a recovery point. The upgrade retains Approved Matches, Corrections,
+publication history, and current resumable work; a legacy Batch without a
+content-bound plan identity must be restarted so changed private source content
+cannot resume stale work. New fingerprint evidence remains in private
+application data and is never added to Git or generated reports. Unsupported
+matching-knowledge schemas are rejected without rewriting the private file.
+
 ## From 0.3.0
 
 DJ Support does not migrate working-directory data automatically. Keep the old

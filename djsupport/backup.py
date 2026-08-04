@@ -17,9 +17,9 @@ from typing import Callable
 
 BACKUP_VERSION = 1
 SUPPORTED_SCHEMAS = {
-    "matching-knowledge.json": (1,),
-    "transfers.json": (1, 2),
-    "publication-manifests.transfers.json": (1, 2),
+    "matching-knowledge.json": (1, 2),
+    "transfers.json": (1, 2, 3),
+    "publication-manifests.transfers.json": (1, 2, 3),
     "publication-manifests.json": (1, 2, 3, 4, 5),
     "playlist-state.json": (1, 2),
     "legacy-migration.json": (1,),
@@ -255,6 +255,9 @@ class LocalDataBackup:
     def _merge_json(self, path, current, incoming, changes, conflicts, resolutions):
         combined = json.loads(json.dumps(current))
         if path == "matching-knowledge.json":
+            combined["version"] = max(
+                current.get("version", 1), incoming.get("version", 1),
+            )
             combined.setdefault("entries", {})
             for key, value in incoming.get("entries", {}).items():
                 existing = combined["entries"].get(key)
@@ -274,6 +277,51 @@ class LocalDataBackup:
                 for item in incoming.get(field, []):
                     if item not in combined[field]:
                         combined[field].append(item)
+            combined.setdefault("fingerprint_observations", {})
+            for evidence_id, item in incoming.get(
+                "fingerprint_observations", {}
+            ).items():
+                existing = combined["fingerprint_observations"].get(evidence_id)
+                if existing is None:
+                    combined["fingerprint_observations"][evidence_id] = item
+                    changes.append("add local audio observation")
+                elif existing != item:
+                    safe_identity = hashlib.sha256(
+                        evidence_id.encode()
+                    ).hexdigest()[:12]
+                    self._resolve_conflict(
+                        combined["fingerprint_observations"], evidence_id, item,
+                        "identity", path, conflicts, resolutions,
+                        label=f"local-audio:{safe_identity}",
+                    )
+            combined.setdefault("fingerprint_associations", [])
+            for item in incoming.get("fingerprint_associations", []):
+                identity = (
+                    item.get("algorithm"), item.get("algorithm_version"),
+                    item.get("fingerprint"), item.get("account_id"),
+                )
+                existing = next((
+                    value for value in combined["fingerprint_associations"]
+                    if (
+                        value.get("algorithm"),
+                        value.get("algorithm_version"),
+                        value.get("fingerprint"),
+                        value.get("account_id"),
+                    ) == identity
+                ), None)
+                if existing is None:
+                    combined["fingerprint_associations"].append(item)
+                    changes.append("add local audio Approved Match")
+                elif existing != item:
+                    safe_identity = hashlib.sha256(
+                        repr(identity).encode()
+                    ).hexdigest()[:12]
+                    self._resolve_conflict(
+                        combined["fingerprint_associations"],
+                        combined["fingerprint_associations"].index(existing),
+                        item, "approval", path, conflicts, resolutions,
+                        label=f"local-audio:{safe_identity}",
+                    )
         elif path in ("transfers.json", "publication-manifests.transfers.json"):
             for field in ("transfers", "batches"):
                 combined.setdefault(field, {})

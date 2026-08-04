@@ -8,7 +8,10 @@ Cross-file patterns that appear in 3+ modules. Reference this doc when adding ne
 `FileTransferStorage` use versioned JSON persistence:
 
 1. Class wraps a `Path` to a JSON file
-2. `load()` is a no-op if file is missing or has wrong version — silent degradation
+2. `load()` is a no-op if the file is missing. Configuration may silently
+   ignore an unknown version, but matching knowledge and authoritative state
+   reject unsupported schemas so a later save cannot overwrite newer private
+   data.
 3. `save()` writes a `{"version": N, ...}` envelope via `json.dumps(data, indent=2)`
 4. Version constant at module top (`CONFIG_VERSION`, `CACHE_VERSION`, `STATE_VERSION`)
 
@@ -55,9 +58,9 @@ Files:
 
 Four patterns used consistently:
 
-1. **Safe file loads** — compatible configuration/matching-knowledge loads
-   degrade safely; authoritative Transfer/publication writes are atomic and
-   validated.
+1. **Safe file loads** — missing configuration/matching-knowledge files degrade
+   safely; unsupported matching-knowledge and authoritative state schemas fail
+   closed; Transfer/publication writes are atomic and validated.
 2. **`(bool, str | None)` tuple returns** — Validation functions return success/error tuples (e.g., `validate_rekordbox_xml`).
 3. **`click.ClickException`** — User-facing errors in CLI code use Click's exception for clean terminal output.
 4. **`RateLimitError` for unsafe waits** — Transfer checkpoints and pauses on

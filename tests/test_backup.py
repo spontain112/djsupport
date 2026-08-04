@@ -193,6 +193,43 @@ class TestRestore:
             "incoming": {"spotify_uri": "new"},
         }
 
+    def test_merges_private_local_audio_identity_knowledge(self, tmp_path):
+        source = tmp_path / "source"
+        target = tmp_path / "target"
+        incoming_observation = {
+            "algorithm": "chromaprint",
+            "algorithm_version": "1.6.1",
+            "fingerprint": "invented-incoming-evidence",
+        }
+        incoming_association = {
+            **incoming_observation,
+            "account_id": "spotify-account-one",
+            "spotify_uri": "spotify:track:incoming",
+            "authority_status": "approved",
+        }
+        _write_json(source / "matching-knowledge.json", {
+            "version": 2,
+            "entries": {},
+            "fingerprint_observations": {"incoming-id": incoming_observation},
+            "fingerprint_associations": [incoming_association],
+        })
+        _write_json(target / "matching-knowledge.json", {
+            "version": 2,
+            "entries": {},
+            "fingerprint_observations": {},
+            "fingerprint_associations": [],
+        })
+        archive = LocalDataBackup(source).create(tmp_path / "backups")
+
+        result = LocalDataBackup(target).restore(archive)
+
+        assert result.restored is True
+        stored = json.loads((target / "matching-knowledge.json").read_text())
+        assert stored["fingerprint_observations"] == {
+            "incoming-id": incoming_observation,
+        }
+        assert stored["fingerprint_associations"] == [incoming_association]
+
     @pytest.mark.parametrize("kind", ["approval", "playlist-state"])
     def test_conflicts_require_resolution_and_leave_current_data_intact(self, tmp_path, kind):
         source = tmp_path / "source"

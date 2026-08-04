@@ -9,6 +9,23 @@ from djsupport.rekordbox import Track, Playlist, parse_xml
 
 
 class TestParseXml:
+    def test_location_is_only_read_after_explicit_opt_in(self, tmp_path):
+        xml = tmp_path / "location.xml"
+        xml.write_text(textwrap.dedent("""\
+            <DJ_PLAYLISTS>
+              <COLLECTION Entries="1">
+                <TRACK TrackID="1" Name="Track" Artist="Artist"
+                       Location="file://localhost/private/audio.wav"/>
+              </COLLECTION>
+            </DJ_PLAYLISTS>
+        """))
+
+        ordinary, _ = parse_xml(xml)
+        opted_in, _ = parse_xml(xml, include_locations=True)
+
+        assert ordinary["1"].location == ""
+        assert opted_in["1"].location == "file://localhost/private/audio.wav"
+
     def test_parses_correct_number_of_tracks(self, library_xml):
         tracks, _ = parse_xml(library_xml)
         assert len(tracks) == 3

@@ -24,7 +24,7 @@ LEGACY_STATE_FILES = (
     ".djsupport_beatport_playlists.json",
 )
 MIGRATION_VERSION = 1
-MATCHING_KNOWLEDGE_VERSION = 1
+MATCHING_KNOWLEDGE_VERSION = 2
 SUPPORTED_PUBLICATION_VERSIONS = (1, 2, 3, 4, 5)
 SPOTIFY_TRACK_URI = re.compile(r"^spotify:track:[A-Za-z0-9]{22}$")
 CACHE_FIELDS = {
@@ -325,13 +325,20 @@ class LegacyMigration:
                 "version": MATCHING_KNOWLEDGE_VERSION, "entries": {},
                 "local_regressions": [],
                 "approval_conflicts": [],
+                "fingerprint_observations": {},
+                "fingerprint_associations": [],
             }
         data = json.loads(path.read_text())
         if (
-            data.get("version") != MATCHING_KNOWLEDGE_VERSION
+            data.get("version") not in (1, MATCHING_KNOWLEDGE_VERSION)
             or not isinstance(data.get("entries"), dict)
         ):
             raise ValueError("Current matching knowledge is unsupported or malformed")
+        data["version"] = MATCHING_KNOWLEDGE_VERSION
+        data.setdefault("local_regressions", [])
+        data.setdefault("approval_conflicts", [])
+        data.setdefault("fingerprint_observations", {})
+        data.setdefault("fingerprint_associations", [])
         return data
 
     def _read_migration_records(self) -> dict:
