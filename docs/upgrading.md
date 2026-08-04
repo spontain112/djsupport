@@ -1,6 +1,35 @@
 # Upgrading DJ Support
 
-## Matching knowledge and Transfer state
+Create a local-data backup before an upgrade that changes retained schemas:
+
+```bash
+djsupport backup
+```
+
+## To 0.5.0
+
+Spotify authorization now includes `playlist-read-private` so DJ Support can
+inspect private Provisional Playlists during Approval. Sign in again when
+prompted. Denying that permission leaves private-playlist inspection
+unavailable; DJ Support does not broaden permissions automatically.
+
+Publication schema versions 1–4 and Transfer schema version 1 remain readable.
+The next durable write upgrades them to publication schema 5 and Transfer
+schema 2 while retaining account ownership, resumable work, ordered chunk
+evidence, Mirrors, and Approval history.
+
+If retained state uses a previous Spotify profile identity, run the explicit,
+backup-first ownership migration with both account identities:
+
+```bash
+djsupport migrate-0-5 --legacy-account-id <old> --account-id <stable>
+```
+
+The migration stops on conflicting ownership, reports aggregate counts only,
+and is safe to repeat. See the [0.5.0 release notes](release-notes-0.5.0.md) for
+the Spotify boundary changes and known limitations.
+
+## To the local-audio identity release
 
 The first write after installing the local-audio identity release upgrades
 matching knowledge to schema 2 and Transfer state to schema 3. Matching schema
