@@ -93,3 +93,12 @@ def test_docs_keep_domain_concepts_separate_from_serialized_schemas() -> None:
     assert "conceptual domain model" in storage
     assert "serialized storage model" in storage
     assert "Never copy private application data" in storage
+
+
+def test_lifecycle_document_covers_cancellation_and_bounded_retry() -> None:
+    lifecycles = _read("docs/lifecycles.md")
+
+    assert "User cancellation is persisted as `Paused`" in lifecycles
+    assert "## Retry policy" in lifecycles
+    assert "previously unsuccessful match" in lifecycles
+    assert "transient Spotify operation" in lifecycles

@@ -48,6 +48,10 @@ stateDiagram-v2
 `Retaining publication` is an intentional recovery state: Spotify may already
 contain the playlist while local publication facts are not yet durable. Resume
 repairs the ordering idempotently instead of publishing a second playlist.
+User cancellation is persisted as `Paused` before the interrupt is returned,
+so already completed matching work can resume. Cancellation is not
+Abandonment: only the separate explicit abandon operation makes unfinished work
+terminal and non-resumable.
 
 ```mermaid
 stateDiagram-v2
@@ -146,6 +150,22 @@ never authorizes deletion, relinking, or continued management by inference.
 | Retaining publication | Spotify effect completed before its local manifest/outcome | Resume local retention idempotently; never create a replacement playlist |
 | Completed | Preview or durable publication outcome finished | Report outcome; begin new changed work under a new identity |
 | Abandoned | Explicit abandonment of unfinished work | No resume or inferred authority |
+
+## Retry policy
+
+DJ Support distinguishes retrying a transient Spotify operation from searching
+again for a previously unsuccessful match:
+
+- One transient Spotify operation is retried within a bounded policy: at most
+  three attempts for connection/time-out failures, Spotify 5xx responses, and
+  short rate limits. Backoff is bounded; quota exhaustion or a rate-limit wait
+  beyond the configured maximum checkpoints and pauses the Transfer.
+- A previously unsuccessful match is not searched again by age or inference.
+  It remains retained until the user explicitly requests retry for the bounded
+  Transfer. Approved and successful retained matches continue to be reused.
+- Resume continues the same compatible durable Transfer. A changed source
+  selection or effect scope creates different work rather than broadening what
+  retry is allowed to do.
 
 ### Qualification
 
