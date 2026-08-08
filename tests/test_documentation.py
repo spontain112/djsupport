@@ -210,3 +210,43 @@ def test_client_and_abandonment_docs_follow_canonical_behavior() -> None:
     assert "does not infer playlist deletion or Approval" in " ".join(
         lifecycles.split()
     )
+
+
+def test_domain_relationships_preserve_mode_and_identity_direction() -> None:
+    domain_model = _read("docs/domain-model.md")
+
+    assert "TRANSFER ||--o| SNAPSHOT : may_publish" in domain_model
+    assert "APPROVAL ||--o| MIRROR : establishes" in domain_model
+    assert "SNAPSHOT ||--|| PROVISIONAL_PLAYLIST" not in domain_model
+    assert (
+        "LOCAL_AUDIO_IDENTITY }o--|| APPROVED_MATCH : recovers"
+        in domain_model
+    )
+
+
+def test_architecture_links_every_named_production_adapter() -> None:
+    architecture = _read("docs/architecture.md")
+
+    for source_path in (
+        "../djsupport/cli.py",
+        "../djsupport/web.py",
+        "../djsupport/agent.py",
+        "../djsupport/rekordbox.py",
+        "../djsupport/beatport.py",
+        "../djsupport/label.py",
+        "../djsupport/spotify.py",
+        "../djsupport/cache.py",
+        "../djsupport/local_audio.py",
+        "../djsupport/local_audition.py",
+    ):
+        assert f"]({source_path})" in architecture
+
+
+def test_glossary_matches_batch_and_account_scoping_in_code() -> None:
+    context = _read("CONTEXT.md")
+    domain_model = _read("docs/domain-model.md")
+    normalized_context = " ".join(context.split())
+
+    assert "one durable Transfer per selected playlist" in normalized_context
+    assert "does not scope ordinary metadata-based Approved Matches" in normalized_context
+    assert "SPOTIFY_ACCOUNT ||--o{ APPROVED_MATCH : owns" not in domain_model

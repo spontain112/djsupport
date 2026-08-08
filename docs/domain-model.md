@@ -27,9 +27,7 @@ erDiagram
     APPROVAL ||--o{ CORRECTION : accepts
     APPROVAL ||--o| MIRROR : establishes
     TRANSFER ||--o| SNAPSHOT : may_publish
-    SNAPSHOT ||--|| PROVISIONAL_PLAYLIST : begins_as
-    APPROVED_MATCH ||--o{ LOCAL_AUDIO_IDENTITY : may_recover
-    SPOTIFY_ACCOUNT ||--o{ APPROVED_MATCH : owns
+    LOCAL_AUDIO_IDENTITY }o--|| APPROVED_MATCH : recovers
     SPOTIFY_ACCOUNT ||--o{ MIRROR : owns
     MIRROR ||--o{ PLAYLIST_DRIFT : may_report
 ```
@@ -43,7 +41,7 @@ explicitly selected Rekordbox playlist work coordinated by a Batch.
 
 | Entity | Relationship and cardinality | Authority or identity rule |
 | --- | --- | --- |
-| Spotify account | Scopes Transfers, Approved Matches, local-audio associations, publication history, and Mirrors | Knowledge from one account cannot authorize publication or reuse for another |
+| Spotify Account | Scopes durable Transfer execution, publication history, Mirrors, and Local Audio Identity reuse | Metadata-based Approved Matches and Corrections remain installation-local; Spotify effects and fingerprint associations retain account scope |
 | Batch | Contains one or more explicitly selected Rekordbox playlist entries, each referencing a durable Transfer | Whole-library work is never inferred; changing selected content or effect scope changes Batch identity |
 | Transfer | Consumes one Source Selection and publishes either a Mirror or Snapshot outcome | Transfer owns policy; a client cannot bypass its authorization and ordering rules |
 | Source Selection | Names one ordered source selection consumed by a Transfer | The reference identifies the selected source; its ordered content participates in bounded identity |
@@ -53,7 +51,7 @@ explicitly selected Rekordbox playlist work coordinated by a Batch.
 | Publication Item | Connects one source occurrence to a proposed Spotify representation or unresolved outcome | A proposal can be high-scoring without being authoritative |
 | Qualification Draft | Belongs to one Rekordbox Transfer, selection, account, manifest, and playlist head | Decisions are private and revisable; a draft can explicitly supersede another |
 | Approval | Compares one playlist with its manifest and classifies its reviewed proposals | Approval is playlist-scoped and is the sole authority transition into retained matching knowledge |
-| Approved Match | Binds a sufficiently specific source-track identity to an accepted Spotify track | Reused across source types only when identity and account scope remain compatible |
+| Approved Match | Binds a sufficiently specific source-track identity to an accepted Spotify track | Metadata-based knowledge is reusable across source types in the local installation; Local Audio Identity reuse adds Spotify Account scope |
 | Rejected Match | Records that a proposal removed during review must not become authoritative | It does not prove that the source recording is absent from Spotify |
 | Correction | Supplies a user-selected Spotify track for a wrong or missing proposal | It becomes an Approved Match only through playlist-scoped Approval |
 | Mirror | Links one approved source playlist to one managed Spotify playlist | Later Transfers maintain it; manual Spotify changes become Playlist Drift requiring a decision |
@@ -122,8 +120,11 @@ and storage details; it shows only how a proposal can gain authority.
 - Preview never mutates Spotify playlists or playlist state.
 - Qualification, Correction Search, and Agent Clients remain subordinate to
   playlist-scoped Approval.
-- Private state belongs to a local user and Spotify account, not the repository
-  or package.
+- All private state belongs to the local installation, not the repository or
+  package. Durable Transfer execution, publication state, Mirrors, and Local
+  Audio Identity associations additionally retain Spotify Account scope;
+  ordinary metadata-based Approved Matches and Corrections do not currently do
+  so.
 
 ## Concrete edge cases
 

@@ -124,6 +124,18 @@ same policy pays back across three clients and synthetic high-level tests.
 This diagram intentionally omits individual methods, state fields, and report
 rendering.
 
+### Production source map
+
+| Role | Owning source |
+| --- | --- |
+| Client adapters | [`cli.py`](../djsupport/cli.py), [`web.py`](../djsupport/web.py), and [`agent.py`](../djsupport/agent.py) |
+| Rekordbox intake | [`rekordbox.py`](../djsupport/rekordbox.py) |
+| Beatport intake | [`beatport.py`](../djsupport/beatport.py) and [`label.py`](../djsupport/label.py) |
+| Spotify effects | [`spotify.py`](../djsupport/spotify.py) |
+| Candidate matching and knowledge | [`matcher.py`](../djsupport/matcher.py) and [`cache.py`](../djsupport/cache.py) |
+| Local Audio Identity and Local Audition | [`local_audio.py`](../djsupport/local_audio.py) and [`local_audition.py`](../djsupport/local_audition.py) |
+| Transfer and file-backed persistence adapters | [`transfer.py`](../djsupport/transfer.py) |
+
 ### Plain-text module map
 
 ```text
