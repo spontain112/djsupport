@@ -385,7 +385,7 @@ def _search_candidates(sp, track: Track, threshold: int) -> list[dict]:
     if not all_results:
         search(track.artist, track.name, plain=True)
     extension_match = re.search(
-        r"\.(?:mp3|aiff|wav|flac)$", track.name, re.IGNORECASE,
+        r"\.(?:mp3|aiff?|wav|flac)$", track.name, re.IGNORECASE,
     )
     if (
         track.artist.strip()
