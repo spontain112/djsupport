@@ -88,6 +88,18 @@ _Avoid_: Dry run, test run
 Opt-in, local-only Chromaprint evidence calculated for audio referenced by an explicitly selected Rekordbox Batch. It can recover an existing account-scoped Approved Match by exact equality but can never create Approval or identify an unknown recording from a catalog.
 _Avoid_: Automatic identification, fingerprint approval, library scan
 
+**Qualification Workspace**:
+The Rekordbox-only, attention-led comparison surface for one selected playlist. It presents retained source and Spotify proposal facts, optionally auditions the exact authorized local source, and collects one explicit Qualification Draft outcome at a time. Browser-origin selections remain reviewed in Spotify.
+_Avoid_: Approval screen, generic review UI, match confirmation
+
+**Qualification Draft**:
+Private, versioned, resumable working state bound to one Rekordbox playlist Transfer, publication manifest, Spotify account, and playlist head. Its keep, Correction, deferred, exclusion, and rejection choices carry no matching or playlist authority; applying it and approving the resulting playlist remain separate explicit operations.
+_Avoid_: Approval, matching knowledge, draft playlist
+
+**Local Audition**:
+Opt-in playback of one exact local source occurrence from an explicitly authorized Rekordbox Batch through a short-lived, process-local handle. It does not calculate a fingerprint, require retained matching knowledge, expose a path, or authorize Spotify writes.
+_Avoid_: Local audio identity, directory playback, file server
+
 **Agent Client**:
 An AI harness or automation client that uses the same public Transfer policy as CLI and web through capability, bounded plan, explicit authorization, execute or resume, and structured outcome phases. Conversation is never authorization.
 _Avoid_: Autonomous authority, agent workflow engine

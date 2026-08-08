@@ -29,13 +29,19 @@ class ReviewTrack:
     source_name: str
     source_artist: str = ""
     source_title: str = ""
+    source_release: str = ""
+    source_label: str = ""
+    source_version: str = ""
     source_duration: int = 0
     spotify_uri: str = ""
     spotify_name: str = ""
     spotify_artist: str = ""
+    spotify_release: str = ""
+    spotify_duration: int = 0
     score: float = 0.0
     match_type: str = "unmatched"
     score_reasons: tuple[str, ...] = ()
+    authority_status: str = "proposal"
 
 
 @dataclass(frozen=True)
@@ -421,7 +427,8 @@ def save_review_csv(report: SyncReport, path: str) -> None:
         writer.writerow([
             "source_track_id", "source_track", "spotify_url", "spotify_track",
             "score", "match_type", "score_reasons", "source_artist", "source_title",
-            "source_duration",
+            "source_release", "source_label", "source_version", "source_duration",
+            "spotify_release", "spotify_duration", "authority_status",
         ])
         for playlist in report.playlists:
             review_items = (
@@ -446,7 +453,13 @@ def save_review_csv(report: SyncReport, path: str) -> None:
                         "; ".join(item.score_reasons),
                         item.source_artist,
                         item.source_title,
+                        item.source_release,
+                        item.source_label,
+                        item.source_version,
                         item.source_duration,
+                        item.spotify_release,
+                        item.spotify_duration,
+                        item.authority_status,
                     ])
                 continue
             for match in playlist.matched:
@@ -458,6 +471,12 @@ def save_review_csv(report: SyncReport, path: str) -> None:
                     f"{match.score:.1f}",
                     match.match_type,
                     "; ".join(match.score_reasons),
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
                     "",
                     "",
                     "",

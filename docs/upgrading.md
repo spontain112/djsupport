@@ -41,6 +41,19 @@ cannot resume stale work. New fingerprint evidence remains in private
 application data and is never added to Git or generated reports. Unsupported
 matching-knowledge schemas are rejected without rewriting the private file.
 
+## To the Qualification Workspace release
+
+The next durable writes upgrade Transfer state to schema 4, matching knowledge
+to schema 3, and publication manifests to schema 6. Earlier supported schemas
+remain readable. Transfer schema 4 adds a `qualifications` collection; matching
+schema 3 and publication schema 6 retain rich Spotify release, duration, and
+truthful availability context for later Approved Match reuse. Qualification
+Drafts are additive private state: they do not become matching knowledge or
+Approval during upgrade. Backup/restore merges distinct drafts and requires an
+explicit current/archive choice when the same draft differs, so neither state
+wins silently. Audition handles, audio bytes, paths, filenames, and fingerprints
+are not stored in a draft.
+
 ## From 0.3.0
 
 DJ Support does not migrate working-directory data automatically. Keep the old

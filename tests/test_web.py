@@ -1,6 +1,7 @@
 """Tests for the FastAPI web backend."""
 
 import json
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -10,15 +11,25 @@ from fastapi.testclient import TestClient
 
 from djsupport.report import PlaylistReport, SyncReport
 from djsupport.rekordbox import Track
+from djsupport.local_audition import LocalSourceAudition
 from djsupport.transfer import (
     AccountPublishingGuards,
     BatchPlan,
+    BatchPlanRequest,
+    EphemeralMatchingKnowledge,
     FilePublicationStorage,
     FileTransferStorage,
     PlaylistPreflight,
+    QualificationDecision,
+    QualificationItem,
+    QualificationRequest,
+    QualificationStatus,
+    QualificationView,
     SourceSelection,
     Transfer,
+    TransferAuthorization,
     TransferProgress,
+    TransferMode,
 )
 from djsupport.web import _report_to_dict, app, create_app
 
@@ -158,7 +169,7 @@ def test_rekordbox_web_execute_preserves_execute_phase_authorization_contract():
     })
 
     assert response.json() == {
-        "contract_version": 1,
+        "contract_version": 2,
         "phase": "execute",
         "status": "authorization_required",
         "required_authorizations": ["private_source"],
@@ -220,7 +231,7 @@ def test_rekordbox_web_execute_renders_spotify_login_as_versioned_error():
 
     assert response.status_code == 401
     assert response.json() == {
-        "contract_version": 1,
+        "contract_version": 2,
         "phase": "execute",
         "status": "error",
         "error": {"code": "spotify_authentication_required"},
@@ -234,14 +245,405 @@ def test_capabilities_are_available_without_spotify_or_private_source(monkeypatc
     response = TestClient(create_app()).get("/capabilities")
 
     assert response.status_code == 200
-    assert response.json()["contract_version"] == 1
+    assert response.json()["contract_version"] == 2
     assert response.json()["phase"] == "capability"
     assert response.json()["capabilities"]["local_audio_identity"] == {
         "available": False,
         "algorithm": "chromaprint",
         "algorithm_version": None,
         "reason": "binary_unavailable",
+        "default_enabled": False,
+        "authority": "approved_match_reuse_only",
+        "first_run_discovery": "none_until_explicit_approval",
+        "execution_order": "after_retained_knowledge_before_spotify_search",
     }
+    assert response.json()["capabilities"]["local_audio_audition"] == {
+        "available": True,
+        "default_enabled": False,
+        "authority": "none",
+        "requires_local_audio_identity": False,
+        "requires_durable_matching_knowledge": False,
+    }
+
+
+def _qualification_view() -> QualificationView:
+    return QualificationView(
+        draft_id="draft-opaque-1",
+        transfer_id="transfer-opaque-1",
+        source_reference="Private/Selection",
+        spotify_playlist_id="playlist-opaque-1",
+        status=QualificationStatus.DRAFT,
+        items=(QualificationItem(
+            item_id="item-opaque-1",
+            source_index=0,
+            source_track_id="source-opaque-1",
+            source_artist="Source Artist",
+            source_title="Source Title",
+            source_release="Source Release",
+            source_label="Source Label",
+            source_version="Extended Mix",
+            source_duration=380,
+            spotify_uri="spotify:track:0123456789012345678901",
+            spotify_name="Spotify Title",
+            spotify_artist="Spotify Artist",
+            spotify_release="Spotify Release",
+            spotify_duration=250,
+            score=86.0,
+            match_type="shorter_version",
+            score_reasons=("title", "artist"),
+            attention_reasons=("new_proposal", "duration_conflict"),
+            audition_status="available",
+            permitted_actions=(
+                QualificationDecision.KEEP_PROPOSAL,
+                QualificationDecision.CORRECTION,
+                QualificationDecision.DEFERRED,
+                QualificationDecision.REJECT_PROPOSAL,
+            ),
+        ),),
+    )
+
+
+def _authenticated_manager():
+    manager = MagicMock()
+    manager.get_cached_token.return_value = {"access_token": "synthetic"}
+    manager.is_token_expired.return_value = False
+    return manager
+
+
+def test_rekordbox_qualification_routes_render_rich_path_free_review_facts():
+    transfer = MagicMock()
+    transfer.obtain_qualification.return_value = _qualification_view()
+    transfer.qualification.return_value = _qualification_view()
+    web = create_app(
+        rekordbox_transfer_factory=lambda request, authorized: transfer,
+        auth_manager=_authenticated_manager,
+    )
+
+    response = TestClient(web).post("/rekordbox/qualification/drafts", json={
+        "xml_path": "/private/owner-library.xml",
+        "transfer_id": "batch-opaque-1",
+        "playlist_reference": "Private/Selection",
+        "local_audio_audition": True,
+        "authorize_private_source": True,
+    })
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["draft_id"] == "draft-opaque-1"
+    assert body["authority"] == "none"
+    assert body["counts"] == {"items": 1, "pending": 1, "deferred": 0}
+    assert body["current_item_id"] == "item-opaque-1"
+    assert body["items"][0] == {
+        "item_id": "item-opaque-1",
+        "source": {
+            "artist": "Source Artist",
+            "title": "Source Title",
+            "release": "Source Release",
+            "label": "Source Label",
+            "version": "Extended Mix",
+            "duration": 380,
+        },
+        "spotify": {
+            "uri": "spotify:track:0123456789012345678901",
+            "name": "Spotify Title",
+            "artist": "Spotify Artist",
+            "release": "Spotify Release",
+            "duration": 250,
+            "embed_url": "https://open.spotify.com/embed/track/0123456789012345678901",
+            "open_url": "https://open.spotify.com/track/0123456789012345678901",
+        },
+        "proposal": {
+            "score": 86.0,
+            "match_type": "shorter_version",
+            "score_reasons": ["title", "artist"],
+            "authority_status": "proposal",
+            "attention_reasons": ["new_proposal", "duration_conflict"],
+            "availability_status": "unknown",
+            "availability_reason": "not_checked",
+            "availability_checked_at": None,
+            "availability_source": None,
+        },
+        "permitted_actions": [
+            "keep_proposal", "correction", "deferred", "reject_proposal",
+        ],
+        "audition_status": "available",
+        "audition_reason": None,
+        "decision": None,
+        "correction_uri": None,
+        "deferred_reason": None,
+        "excluded": False,
+    }
+    assert "owner-library" not in response.text
+    transfer.obtain_qualification.assert_called_once()
+
+
+def test_qualification_decision_delegates_to_transfer_without_approval():
+    transfer = MagicMock()
+    transfer.obtain_qualification.return_value = _qualification_view()
+    decided = _qualification_view()
+    transfer.record_qualification.return_value = decided
+    web = create_app(
+        rekordbox_transfer_factory=lambda request, authorized: transfer,
+        auth_manager=_authenticated_manager,
+    )
+    client = TestClient(web)
+    created = client.post("/rekordbox/qualification/drafts", json={
+        "xml_path": "/private/owner-library.xml",
+        "transfer_id": "batch-opaque-1",
+        "playlist_reference": "Private/Selection",
+        "authorize_private_source": True,
+    })
+
+    response = client.post(
+        f"/rekordbox/qualification/drafts/{created.json()['draft_id']}/decisions",
+        json={
+            "item_id": "item-opaque-1",
+            "decision": "keep_proposal",
+            "authorize_private_source": True,
+        },
+    )
+
+    assert response.status_code == 200
+    transfer.record_qualification.assert_called_once_with(
+        "draft-opaque-1",
+        "item-opaque-1",
+        QualificationDecision.KEEP_PROPOSAL,
+        TransferAuthorization(private_source=True),
+        spotify_reference=None,
+        reason=None,
+        exclude=False,
+    )
+    assert not transfer.approve.called
+
+
+def test_workspace_can_explicitly_include_all_proposals_through_transfer():
+    transfer = MagicMock()
+    initial = _qualification_view()
+    included = replace(initial, include_all=True)
+    transfer.obtain_qualification.side_effect = [initial, included]
+    web = create_app(
+        rekordbox_transfer_factory=lambda request, authorized: transfer,
+        auth_manager=_authenticated_manager,
+    )
+    client = TestClient(web)
+    created = client.post("/rekordbox/qualification/drafts", json={
+        "xml_path": "/private/owner-library.xml",
+        "transfer_id": "batch-opaque-1",
+        "playlist_reference": "Private/Selection",
+        "authorize_private_source": True,
+    })
+
+    response = client.post(
+        f"/rekordbox/qualification/drafts/{created.json()['draft_id']}"
+        "/include-all",
+        json={"authorize_private_source": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["include_all"] is True
+    request = transfer.obtain_qualification.call_args_list[-1].args[0]
+    assert request.transfer_id == "batch-opaque-1"
+    assert request.playlist_reference == "Private/Selection"
+    assert request.include_all is True
+
+
+def test_web_qualification_approval_is_explicit_without_spotify_write_flag():
+    transfer = MagicMock()
+    transfer.obtain_qualification.return_value = _qualification_view()
+    transfer.approve_qualification.return_value = MagicMock(
+        status=MagicMock(value="approved"),
+        approved=(), rejected=(), collisions=(), corrections=(),
+    )
+    web = create_app(
+        rekordbox_transfer_factory=lambda request, authorized: transfer,
+        auth_manager=_authenticated_manager,
+    )
+    client = TestClient(web)
+    created = client.post("/rekordbox/qualification/drafts", json={
+        "xml_path": "/private/owner-library.xml",
+        "transfer_id": "batch-opaque-1",
+        "playlist_reference": "Private/Selection",
+        "authorize_private_source": True,
+    })
+
+    response = client.post(
+        f"/rekordbox/qualification/drafts/{created.json()['draft_id']}/approve",
+        json={"authorize_private_source": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["authority"] == "playlist_approval"
+    transfer.approve_qualification.assert_called_once_with(
+        "draft-opaque-1", TransferAuthorization(private_source=True),
+    )
+
+
+def test_qualification_audition_requires_exact_authorization_and_returns_url():
+    transfer = MagicMock()
+    transfer.obtain_qualification.return_value = _qualification_view()
+    transfer.audition_qualification.return_value = MagicMock(
+        status="available", handle="opaque-media-handle", media_type="audio/mpeg",
+        content_length=8, expires_in=600, reason=None,
+    )
+    web = create_app(
+        rekordbox_transfer_factory=lambda request, authorized: transfer,
+        auth_manager=_authenticated_manager,
+    )
+    client = TestClient(web)
+    created = client.post("/rekordbox/qualification/drafts", json={
+        "xml_path": "/private/owner-library.xml",
+        "transfer_id": "batch-opaque-1",
+        "playlist_reference": "Private/Selection",
+        "local_audio_audition": True,
+        "authorize_private_source": True,
+    })
+    url = (
+        f"/rekordbox/qualification/drafts/{created.json()['draft_id']}"
+        "/audition/item-opaque-1"
+    )
+
+    denied = client.post(url, json={"authorize_private_source": False})
+    allowed = client.post(url, json={"authorize_private_source": True})
+
+    assert denied.status_code == 403
+    assert allowed.status_code == 200
+    assert allowed.json() == {
+        "status": "available",
+        "media_type": "audio/mpeg",
+        "content_length": 8,
+        "expires_in": 600,
+        "media_url": "/rekordbox/qualification/media/opaque-media-handle",
+    }
+    assert "/private/" not in allowed.text
+    transfer.audition_qualification.assert_called_once()
+
+
+def test_local_media_route_supports_bounded_ranges_without_filename(tmp_path):
+    media = tmp_path / "private-owner-name.mp3"
+    media.write_bytes(b"0123456789")
+    audition = LocalSourceAudition(max_range_bytes=4)
+    opened = audition.open("transfer-1", "item-1", Track(
+        track_id="1", name="Synthetic", artist="Artist", album="", remixer="",
+        label="", genre="", date_added="", location=media.as_uri(),
+    ))
+    web = create_app(local_audition=audition)
+    client = TestClient(web)
+    url = f"/rekordbox/qualification/media/{opened.handle}"
+
+    response = client.get(url, headers={"Range": "bytes=2-5"})
+    excessive = client.get(url, headers={"Range": "bytes=0-8"})
+    missing = client.get("/rekordbox/qualification/media/not-a-handle")
+
+    assert response.status_code == 206
+    assert response.content == b"2345"
+    assert response.headers["content-range"] == "bytes 2-5/10"
+    assert response.headers["accept-ranges"] == "bytes"
+    assert response.headers["cache-control"] == "private, no-store"
+    assert response.headers["content-security-policy"] == "default-src 'none'; media-src 'self'"
+    assert "content-disposition" not in response.headers
+    assert "private-owner-name" not in str(response.headers)
+    assert excessive.status_code == 416
+    assert excessive.headers["content-range"] == "bytes */10"
+    assert missing.status_code == 404
+    for denied in (excessive, missing):
+        assert denied.headers["cache-control"] == "private, no-store"
+        assert denied.headers["content-security-policy"] == (
+            "default-src 'none'; media-src 'self'"
+        )
+        assert denied.headers["x-content-type-options"] == "nosniff"
+        assert "private-owner-name" not in str(denied.headers)
+
+
+def test_qualification_routes_reject_remote_peer_rebinding_host_and_origin():
+    web = create_app()
+    remote = TestClient(
+        web,
+        base_url="http://127.0.0.1",
+        client=("203.0.113.20", 50000),
+    )
+    local = TestClient(web)
+
+    assert remote.get("/qualification/opaque-draft").status_code == 403
+    assert local.get(
+        "/qualification/opaque-draft",
+        headers={"Host": "attacker.example"},
+    ).status_code == 403
+    assert local.post(
+        "/rekordbox/qualification/drafts",
+        headers={"Origin": "https://attacker.example"},
+        json={},
+    ).status_code == 403
+
+
+def test_durable_draft_with_missing_source_is_review_required_not_missing(
+    tmp_path, monkeypatch,
+):
+    class SelectedSource:
+        source_label = "Rekordbox"
+        default_mode = TransferMode.MIRROR
+
+        def consume(self, reference):
+            return SourceSelection("Selected", reference, [Track(
+                track_id="synthetic", name="Synthetic", artist="Artist",
+                album="Release", remixer="", label="Label", genre="",
+                date_added="", duration=180,
+            )])
+
+        def consume_batch(self, references, whole_library):
+            return tuple(self.consume(reference) for reference in references)
+
+    class PreviewSpotify:
+        def account_id(self):
+            return "spotify-account-one"
+
+        def match(self, track, threshold):
+            return {
+                "uri": "spotify:track:0123456789012345678901",
+                "name": "Synthetic", "artist": "Artist", "score": 96.0,
+                "match_type": "exact",
+            }
+
+    publication_path = tmp_path / "publication-manifests.json"
+    transfer = Transfer(
+        source=SelectedSource(),
+        spotify=PreviewSpotify(),
+        matching_knowledge=EphemeralMatchingKnowledge(),
+        publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
+        transfer_storage=FileTransferStorage(
+            publication_path.with_suffix(".transfers.json")
+        ),
+    )
+    plan = transfer.plan_batch(BatchPlanRequest(
+        playlist_references=("Folder/Selected",), preview=True,
+    ))
+    report = transfer.execute_batch(plan, transfer_id=plan.batch_id)
+    draft = transfer.obtain_qualification(
+        QualificationRequest(
+            transfer_id=report.transfer_id,
+            playlist_reference="Folder/Selected",
+        ),
+        TransferAuthorization(private_source=True),
+    )
+    monkeypatch.setattr(
+        "djsupport.web.default_publication_manifest_path",
+        lambda: publication_path,
+    )
+    monkeypatch.setattr(
+        "djsupport.config.ConfigManager.get_rekordbox_xml_path",
+        lambda self: str(tmp_path / "missing-source.xml"),
+    )
+    web = create_app(auth_manager=_authenticated_manager)
+
+    response = TestClient(web).get(
+        f"/rekordbox/qualification/drafts/{draft.draft_id}",
+        params={"authorize_private_source": "true"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "Qualification source evidence is unavailable; review required"
+    )
+    assert "missing-source" not in response.text
 
 
 class TestAuthEndpoints:
@@ -509,3 +911,22 @@ class TestIndexPage:
         assert "djsupport" in res.text
         assert "djsupport.activeTransfer" in res.text
         assert "text/html" in res.headers["content-type"]
+
+    def test_qualification_workspace_is_public_responsive_and_one_action_at_a_time(self):
+        res = client.get("/qualification/synthetic-draft")
+
+        assert res.status_code == 200
+        assert "classification: public" in res.text
+        assert 'id="qualification-section"' in res.text
+        assert 'class="qualification-grid"' in res.text
+        assert 'id="local-player"' in res.text
+        assert 'id="spotify-player"' in res.text
+        assert "OPEN IN SPOTIFY" in res.text
+        assert ">CORRECT<" in res.text
+        assert "WRONG — FIND ANOTHER" in res.text
+        assert "CANNOT VERIFY" in res.text
+        assert "NOT MY SOURCE" in res.text
+        assert "@media (max-width: 980px)" in res.text
+        assert "grid-auto-flow: column" in res.text
+        assert "authorization mode" not in res.text.casefold()
+        assert "test scenario" not in res.text.casefold()

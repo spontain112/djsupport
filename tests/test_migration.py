@@ -175,7 +175,7 @@ class TestLegacyMigration:
 
         assert result.applied is True
         stored = json.loads((app_data / "matching-knowledge.json").read_text())
-        assert stored["version"] == 2
+        assert stored["version"] == 3
         assert stored["fingerprint_associations"] == [association]
         assert "new||track" in stored["entries"]
 
@@ -480,16 +480,32 @@ def test_foundation_migration_is_backup_first_and_idempotent(tmp_path):
         "approvals": [],
         "mirrors": [{"spotify_user_id": "legacy-profile"}],
     })
+    _write_json(app_data / "transfers.json", {
+        "version": 4,
+        "transfers": {},
+        "batches": {},
+        "qualifications": {
+            "draft-opaque": {
+                "draft_id": "draft-opaque",
+                "account_id": "legacy-profile",
+                "decisions": {},
+            },
+        },
+    })
 
     migration = FoundationMigration(app_data)
     first = migration.apply("legacy-profile", "stable-account")
     second = migration.apply("legacy-profile", "stable-account")
 
     stored = json.loads((app_data / "publication-manifests.json").read_text())
-    assert first.applied and first.backup_created and first.changed_records == 2
+    transfer_state = json.loads((app_data / "transfers.json").read_text())
+    assert first.applied and first.backup_created and first.changed_records == 3
     assert not second.applied and not second.backup_created
     assert stored["manifests"][0]["account_id"] == "stable-account"
     assert stored["mirrors"][0]["account_id"] == "stable-account"
+    assert transfer_state["qualifications"]["draft-opaque"]["account_id"] == (
+        "stable-account"
+    )
     archive = next((app_data / "backups").glob("*.zip"))
     assert LocalDataBackup(app_data).preview(archive).valid
 

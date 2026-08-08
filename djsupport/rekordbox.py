@@ -17,6 +17,7 @@ class Track:
     date_added: str  # e.g. "2024-03-15"
     duration: int = 0  # seconds, from TotalTime attribute
     location: str = ""  # private Rekordbox audio reference; never report this value
+    version: str = ""  # retained Rekordbox Mix/version metadata when available
 
     @property
     def display(self) -> str:
@@ -59,6 +60,7 @@ def parse_xml(
                 date_added=track_el.get("DateAdded", ""),
                 duration=int(total_time) if total_time.isdigit() else 0,
                 location=(track_el.get("Location", "") if include_locations else ""),
+                version=track_el.get("Mix", ""),
             )
 
     # Parse playlist tree

@@ -148,6 +148,29 @@ class TestRestorePreview:
         assert preview.valid is True
         assert preview.contents == ("publication-manifests.json",)
 
+    def test_accepts_version_four_transfer_state_with_qualification_drafts(
+        self, tmp_path,
+    ):
+        source = tmp_path / "source"
+        _write_json(source / "transfers.json", {
+            "version": 4,
+            "transfers": {},
+            "batches": {},
+            "qualifications": {
+                "draft-opaque": {
+                    "draft_id": "draft-opaque",
+                    "status": "draft",
+                    "decisions": {},
+                },
+            },
+        })
+        archive = LocalDataBackup(source).create(tmp_path / "backups")
+
+        preview = LocalDataBackup(tmp_path / "target").preview(archive)
+
+        assert preview.valid is True
+        assert preview.contents == ("transfers.json",)
+
     @pytest.mark.parametrize("damage", ["corrupt", "unsupported-backup", "unsupported-data"])
     def test_rejects_corrupt_or_unsupported_archive(self, tmp_path, damage):
         source = tmp_path / "source"
@@ -324,3 +347,61 @@ class TestRestore:
         assert preview.conflicts[0].kind == "report"
         assert result.restored is False
         assert (target / "reports" / "transfer.md").read_text() == "current report"
+
+    def test_merges_qualification_drafts_idempotently(self, tmp_path):
+        source = tmp_path / "source"
+        target = tmp_path / "target"
+        for root, draft in ((source, "incoming"), (target, "current")):
+            _write_json(root / "transfers.json", {
+                "version": 4,
+                "transfers": {},
+                "batches": {},
+                "qualifications": {
+                    draft: {
+                        "draft_id": draft,
+                        "status": "draft",
+                        "decisions": {},
+                    },
+                },
+            })
+        archive = LocalDataBackup(source).create(tmp_path / "backups")
+        service = LocalDataBackup(target)
+
+        first = service.restore(archive)
+        first_bytes = (target / "transfers.json").read_bytes()
+        second = service.restore(archive)
+
+        assert first.restored and second.restored
+        assert json.loads(first_bytes)["qualifications"].keys() == {
+            "current", "incoming",
+        }
+        assert (target / "transfers.json").read_bytes() == first_bytes
+
+    def test_changed_qualification_draft_requires_explicit_resolution(
+        self, tmp_path,
+    ):
+        source = tmp_path / "source"
+        target = tmp_path / "target"
+        for root, outcome in ((source, "deferred"), (target, "keep_proposal")):
+            _write_json(root / "transfers.json", {
+                "version": 4,
+                "transfers": {},
+                "batches": {},
+                "qualifications": {
+                    "draft-opaque": {
+                        "draft_id": "draft-opaque",
+                        "status": "draft",
+                        "decisions": {"item-opaque": {"decision": outcome}},
+                    },
+                },
+            })
+        archive = LocalDataBackup(source).create(tmp_path / "backups")
+        before = (target / "transfers.json").read_bytes()
+        service = LocalDataBackup(target)
+
+        preview = service.preview(archive)
+        result = service.restore(archive)
+
+        assert preview.conflicts[0].kind == "qualification-draft"
+        assert result.restored is False
+        assert (target / "transfers.json").read_bytes() == before

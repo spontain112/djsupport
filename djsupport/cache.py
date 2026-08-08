@@ -8,7 +8,7 @@ from pathlib import Path
 
 from djsupport.matcher import _normalize
 
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 DEFAULT_CACHE_PATH = ".djsupport_cache.json"
 DEFAULT_RETRY_DAYS = 7
 CHECKPOINT_INTERVAL = 50
@@ -27,6 +27,12 @@ class CacheEntry:
     approval_status: str | None = None
     source_duration: int = 0
     score_reasons: tuple[str, ...] = ()
+    spotify_release: str = ""
+    spotify_duration: int = 0
+    availability_status: str = "unknown"
+    availability_reason: str | None = "not_checked"
+    availability_checked_at: str | None = None
+    availability_source: str | None = None
 
     def __post_init__(self) -> None:
         self.score_reasons = tuple(self.score_reasons)
@@ -41,6 +47,7 @@ class MatchCache:
         self.fingerprint_observations: dict[str, dict] = {}
         self.fingerprint_associations: list[dict] = []
         self._dirty_count: int = 0
+        self._durable_seen = False
 
     def load(self) -> None:
         """Load cache from disk. No-op if file doesn't exist."""
@@ -50,17 +57,47 @@ class MatchCache:
             data = json.loads(self.path.read_text())
         except (json.JSONDecodeError, OSError):
             return
-        if data.get("version") not in (1, CACHE_VERSION):
+        self._replace_from_data(data)
+        self._durable_seen = True
+
+    def reload_strict(self) -> None:
+        """Replace in-memory facts from durable state or fail closed."""
+        if not self.path.exists():
+            if self._durable_seen:
+                raise ValueError(
+                    "Matching knowledge is unavailable; restore it before use"
+                )
+            return
+        try:
+            data = json.loads(self.path.read_text())
+            self._replace_from_data(data)
+            self._durable_seen = True
+        except (
+            AttributeError, json.JSONDecodeError, OSError, KeyError, TypeError,
+        ) as exc:
+            raise ValueError(
+                "Matching knowledge is malformed; restore it before use"
+            ) from exc
+
+    def _replace_from_data(self, data: dict) -> None:
+        if data.get("version") not in (1, 2, CACHE_VERSION):
             raise ValueError(
                 "Unsupported matching-knowledge schema; upgrade djsupport "
                 "before using this file"
             )
-        for key, entry in data.get("entries", {}).items():
-            self.entries[key] = CacheEntry(**entry)
-        self.local_regressions = data.get("local_regressions", [])
-        self.approval_conflicts = data.get("approval_conflicts", [])
-        self.fingerprint_observations = data.get("fingerprint_observations", {})
-        self.fingerprint_associations = data.get("fingerprint_associations", [])
+        entries = {
+            key: CacheEntry(**entry)
+            for key, entry in data.get("entries", {}).items()
+        }
+        self.entries = entries
+        self.local_regressions = list(data.get("local_regressions", []))
+        self.approval_conflicts = list(data.get("approval_conflicts", []))
+        self.fingerprint_observations = dict(
+            data.get("fingerprint_observations", {})
+        )
+        self.fingerprint_associations = list(
+            data.get("fingerprint_associations", [])
+        )
 
     def save(self) -> None:
         """Write cache to disk."""
@@ -75,6 +112,7 @@ class MatchCache:
         }
         self.path.write_text(json.dumps(data, indent=2))
         self._dirty_count = 0
+        self._durable_seen = True
 
     def cache_key(self, artist: str, title: str, source_duration: int = 0) -> str:
         identity = f"{_normalize(artist)}||{_normalize(title)}"
@@ -128,6 +166,18 @@ class MatchCache:
                 score=result["score"],
                 match_type=result.get("match_type"),
                 score_reasons=tuple(result.get("score_reasons", ())),
+                spotify_release=result.get("album", ""),
+                spotify_duration=int(result.get("duration_ms", 0)) // 1000,
+                availability_status=result.get(
+                    "availability_status", "unknown",
+                ),
+                availability_reason=result.get(
+                    "availability_reason", "not_checked",
+                ),
+                availability_checked_at=result.get(
+                    "availability_checked_at"
+                ),
+                availability_source=result.get("availability_source"),
                 matched=True,
                 timestamp=datetime.now().isoformat(),
                 threshold=threshold,
@@ -184,7 +234,24 @@ class MatchCache:
                 threshold=0,
                 match_type=result.get("match_type"),
                 score_reasons=tuple(result.get("score_reasons", ())),
+                spotify_release=result.get("spotify_release", result.get("album", "")),
+                spotify_duration=int(
+                    result.get(
+                        "spotify_duration",
+                        int(result.get("duration_ms", 0)) // 1000,
+                    )
+                ),
                 source_duration=source_duration,
+                availability_status=result.get(
+                    "availability_status", "unknown",
+                ),
+                availability_reason=result.get(
+                    "availability_reason", "not_checked",
+                ),
+                availability_checked_at=result.get(
+                    "availability_checked_at"
+                ),
+                availability_source=result.get("availability_source"),
             )
             self.entries[key] = entry
         entry.approval_status = status
@@ -262,7 +329,22 @@ class MatchCache:
             "artist": item["spotify_artist"],
             "score": item["score"],
             "match_type": "approved_local_audio",
-            "score_reasons": ["Approved Match reused from local audio identity"],
+            "score_reasons": [
+                "Approved Match reused from local audio identity",
+                *item.get("score_reasons", ()),
+            ],
+            "album": item.get("spotify_release", ""),
+            "duration_ms": int(item.get("spotify_duration", 0)) * 1000,
+            "availability_status": item.get(
+                "availability_status", "unknown",
+            ),
+            "availability_reason": item.get(
+                "availability_reason", "not_checked",
+            ),
+            "availability_checked_at": item.get(
+                "availability_checked_at"
+            ),
+            "availability_source": item.get("availability_source"),
             "authoritative": True,
         }
 
@@ -294,6 +376,18 @@ class MatchCache:
             "score": result["score"],
             "match_type": result.get("match_type", "exact"),
             "score_reasons": list(result.get("score_reasons", ())),
+            "spotify_release": result.get("spotify_release", ""),
+            "spotify_duration": int(result.get("spotify_duration", 0)),
+            "availability_status": result.get(
+                "availability_status", "unknown",
+            ),
+            "availability_reason": result.get(
+                "availability_reason", "not_checked",
+            ),
+            "availability_checked_at": result.get(
+                "availability_checked_at"
+            ),
+            "availability_source": result.get("availability_source"),
             "authority_status": "approved",
             "approved_at": datetime.now().isoformat(),
         }
@@ -324,17 +418,50 @@ class MatchCache:
                 and item.get("authority_status") == "conflict"
             )
         ]
-        if not any(
-            item["algorithm"] == association["algorithm"]
+        existing_index = next((
+            index
+            for index, item in enumerate(self.fingerprint_associations)
+            if item["algorithm"] == association["algorithm"]
             and item["algorithm_version"] == association["algorithm_version"]
             and item["fingerprint"] == association["fingerprint"]
             and item["account_id"] == association["account_id"]
             and item["spotify_uri"] == association["spotify_uri"]
-            for item in self.fingerprint_associations
-        ):
+        ), None)
+        if existing_index is None:
             self.fingerprint_associations.append(association)
             self._dirty_count += 1
+        elif self.fingerprint_associations[existing_index] != association:
+            self.fingerprint_associations[existing_index] = association
+            self._dirty_count += 1
         return None
+
+    def fingerprint_approval_conflict(
+        self, *, evidence_id: str, account_id: str, spotify_uri: str,
+        source_artist: str, source_title: str, source_duration: int,
+    ) -> dict | None:
+        """Inspect exact-identity authority without mutating retained facts."""
+        observation = self.fingerprint_observations.get(evidence_id)
+        if observation is None:
+            return None
+        approved_uris = {
+            item["spotify_uri"]
+            for item in self.fingerprint_associations
+            if item.get("algorithm") == observation.get("algorithm")
+            and item.get("algorithm_version")
+            == observation.get("algorithm_version")
+            and item.get("fingerprint") == observation.get("fingerprint")
+            and item.get("account_id") == account_id
+            and item.get("authority_status") == "approved"
+        }
+        if not approved_uris or approved_uris == {spotify_uri}:
+            return None
+        return {
+            "source_artist": source_artist,
+            "source_title": source_title,
+            "source_duration": source_duration,
+            "approved_spotify_uri": sorted(approved_uris)[0],
+            "proposed_spotify_uri": spotify_uri,
+        }
 
     def revoke_fingerprints(
         self, *, source_artist: str, source_title: str, source_duration: int,
