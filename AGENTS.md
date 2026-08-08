@@ -10,14 +10,14 @@ status: active
 
 ## Start here
 
-DJ Support transfers Rekordbox and Beatport selections to Spotify through the durable Transfer domain. Read this card first, then `CONTEXT.md` for domain language, `agent.md` for the detailed engineering guide, and `README.md` for supported user workflows.
+DJ Support transfers Rekordbox and Beatport selections to Spotify through the durable Transfer domain. Read this card first, then `CONTEXT.md` for domain language, `CONTRIBUTING.md` for the engineering guide, and `README.md` for supported user workflows.
 
 ## What goes where
 
 - `CONTEXT.md` and `docs/adr/` — CANONICAL domain language and architecture decisions
 - `djsupport/transfer.py` — CANONICAL Transfer policy and workflow seam
 - `pyproject.toml` — CANONICAL package metadata, version, dependencies, and wheel package data
-- `agent.md` — detailed project map, commands, and engineering conventions
+- `CONTRIBUTING.md` — development setup, project map, tests, and engineering conventions
 - `README.md` and `docs/` — user guidance, upgrade/release notes, plans, research, and solutions
 - `tests/` — offline behavior, adapter, migration, privacy, and packaging verification
 - GitHub Issues — work specifications, decisions, and backlog state
@@ -34,7 +34,7 @@ Generated reports, review CSVs, matching knowledge, playlist state, credentials,
 ## Capabilities
 
 - Python 3.10+ package with Click CLI and optional FastAPI web adapter.
-- Use `pytest` for the fully offline default suite; detailed install, test, and command guidance lives in `agent.md`.
+- Use `pytest` for the fully offline default suite; detailed install, test, and command guidance lives in `CONTRIBUTING.md`.
 - Use the public Transfer interface for high-level behavior. CLI and web remain thin adapters; user-specific state stays in versioned platform application-data storage under ADR-0001.
 
 ## Routes
