@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<!--
+classification: concept
+PROTOTYPE — synthetic, read-only, no real audio, no persistence, no authority.
+-->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DJ Support — Source Audition Logic Prototype</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@700;800&display=swap" rel="stylesheet">
+    <style>
+        * { box-sizing: border-box; }
+        :root {
+            --bg:#111; --surface:#18181b; --raised:#202024; --border:#303036;
+            --accent:#c4f82a; --text:#e8e4de; --muted:#a1a1aa; --dim:#71717a;
+            --warn:#fbbf24; --error:#f87171; --info:#7dd3fc;
+        }
+        body { margin:0; background:var(--bg); color:var(--text); font-family:"IBM Plex Mono",monospace; }
+        button { font:inherit; color:inherit; }
+        button:focus-visible { outline:2px solid var(--accent); outline-offset:3px; }
+        header { border-bottom:1px solid var(--border); padding:22px max(20px,calc((100vw - 1180px)/2)); }
+        .brand { font:800 16px Inter,sans-serif; letter-spacing:2px; }
+        .brand span { color:var(--accent); }
+        main { width:min(1180px,calc(100% - 36px)); margin:0 auto; padding:42px 0 70px; }
+        .eyebrow { color:var(--accent); font-size:10px; font-weight:700; letter-spacing:2px; text-transform:uppercase; }
+        h1,h2,h3 { font-family:Inter,sans-serif; }
+        h1 { font-size:clamp(30px,5vw,52px); line-height:1.02; max-width:900px; margin:12px 0 16px; }
+        h2 { font-size:18px; margin:0 0 16px; }
+        h3 { font-size:13px; margin:0 0 8px; }
+        p { color:var(--muted); font-size:12px; line-height:1.7; }
+        .question { max-width:850px; margin-bottom:32px; }
+        .question strong { color:var(--text); }
+        .layout { display:grid; grid-template-columns:minmax(0,1.15fr) minmax(300px,.85fr); gap:18px; }
+        .panel { background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:22px; }
+        .state-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1px; background:var(--border); border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+        .state-cell { background:var(--surface); padding:14px; min-height:78px; }
+        .state-label { display:block; color:var(--dim); font-size:9px; letter-spacing:1.3px; text-transform:uppercase; margin-bottom:8px; }
+        .state-value { display:block; font-size:12px; line-height:1.5; }
+        .state-value.good { color:var(--accent); }
+        .state-value.warn { color:var(--warn); }
+        .state-value.bad { color:var(--error); }
+        .event { margin-top:14px; padding:14px 16px; border-left:2px solid var(--info); background:rgba(125,211,252,.06); font-size:11px; line-height:1.6; color:var(--muted); }
+        .event.bad { border-color:var(--error); background:rgba(248,113,113,.06); color:#fca5a5; }
+        .guardrail { margin-top:14px; font-size:10px; color:var(--dim); }
+        .actions { display:grid; gap:16px; }
+        .action-group { border-bottom:1px solid var(--border); padding-bottom:16px; }
+        .action-group:last-child { border:0; padding:0; }
+        .button-row { display:flex; flex-wrap:wrap; gap:8px; }
+        .action { background:var(--raised); border:1px solid var(--border); border-radius:7px; padding:10px 12px; cursor:pointer; font-size:10px; }
+        .action:hover { border-color:var(--muted); }
+        .action.primary { background:var(--accent); color:#111; border-color:var(--accent); font-weight:700; }
+        .action.challenge { color:#fca5a5; border-color:rgba(248,113,113,.45); }
+        .action.reset { color:var(--dim); }
+        .walkthroughs { margin-top:20px; }
+        .tabs { display:flex; gap:6px; overflow:auto; padding-bottom:10px; }
+        .tab { white-space:nowrap; border:1px solid var(--border); background:transparent; border-radius:999px; padding:9px 12px; font-size:10px; cursor:pointer; }
+        .tab.active { color:#111; background:var(--accent); border-color:var(--accent); font-weight:700; }
+        .scenario { margin-top:10px; }
+        .scenario-copy { display:flex; justify-content:space-between; gap:24px; align-items:start; }
+        .scenario-copy p { max-width:720px; margin-bottom:12px; }
+        .steps { display:grid; gap:8px; }
+        .step { display:grid; grid-template-columns:32px minmax(0,1fr) auto; align-items:center; gap:12px; padding:10px; border:1px solid var(--border); border-radius:8px; }
+        .step.done { opacity:.45; }
+        .step.current { border-color:rgba(196,248,42,.5); background:rgba(196,248,42,.05); }
+        .step-num { color:var(--dim); font-size:10px; text-align:center; }
+        .step-copy { font-size:11px; }
+        .step button { background:transparent; border:1px solid var(--border); border-radius:6px; padding:8px 10px; cursor:pointer; font-size:9px; }
+        .step.current button { color:var(--accent); border-color:rgba(196,248,42,.45); }
+        .legend { margin-top:20px; padding-top:16px; border-top:1px solid var(--border); color:var(--dim); font-size:9px; line-height:1.7; }
+        @media(max-width:850px) { .layout { grid-template-columns:1fr; } }
+        @media(max-width:560px) { .state-grid { grid-template-columns:1fr; } .scenario-copy { display:block; } .step { grid-template-columns:24px 1fr; } .step button { grid-column:2; justify-self:start; } }
+    </style>
+</head>
+<body>
+    <header><div class="brand">DJ<span>SUPPORT</span> · SOURCE AUDITION MODEL</div></header>
+    <main>
+        <div class="eyebrow">Logic prototype · no real media</div>
+        <h1>What can the human actually hear?</h1>
+        <p class="question"><strong>Question:</strong> Can one review shell adapt honestly to local audio, provider previews, external-only sources, and unavailable source audio—without pretending metadata is listening evidence or changing matching authority?</p>
+
+        <section class="layout">
+            <article class="panel">
+                <h2>Current review state</h2>
+                <div id="state" class="state-grid"></div>
+                <div id="event" class="event"></div>
+                <div class="guardrail">Conversation and playback never create a Correction, Approved Match, Rejected Match, or playlist write.</div>
+            </article>
+            <aside class="panel actions">
+                <div class="action-group">
+                    <h3>Choose source situation</h3>
+                    <div class="button-row">
+                        <button class="action" data-action="SET_CASE" data-value="local_available">Rekordbox · file available</button>
+                        <button class="action" data-action="SET_CASE" data-value="local_missing">Rekordbox · file missing</button>
+                        <button class="action" data-action="SET_CASE" data-value="provider_preview">Beatport · preview available</button>
+                        <button class="action" data-action="SET_CASE" data-value="metadata_only">Metadata only</button>
+                    </div>
+                </div>
+                <div class="action-group">
+                    <h3>Audition actions</h3>
+                    <div class="button-row">
+                        <button class="action" data-action="AUTHORIZE_SOURCE">Authorize selected local audio</button>
+                        <button class="action" data-action="AUDITION_SOURCE">Play source</button>
+                        <button class="action" data-action="AUDITION_SPOTIFY">Play Spotify proposal</button>
+                        <button class="action" data-action="OPEN_SOURCE">Open source externally</button>
+                    </div>
+                </div>
+                <div class="action-group">
+                    <h3>Human decision</h3>
+                    <div class="button-row">
+                        <button class="action primary" data-action="DECIDE" data-value="correct">Correct recording</button>
+                        <button class="action challenge" data-action="DECIDE" data-value="challenged">Challenge proposal</button>
+                        <button class="action" data-action="DECIDE" data-value="deferred">Defer</button>
+                    </div>
+                </div>
+                <button class="action reset" data-action="RESET">Reset state</button>
+            </aside>
+        </section>
+
+        <section class="panel walkthroughs">
+            <div class="eyebrow">Guided awkward cases</div>
+            <div id="tabs" class="tabs"></div>
+            <div id="scenario" class="scenario"></div>
+        </section>
+    </main>
+
+    <script>
+        // Portable prototype module: pure state + pure reducer.
+        const SourceAuditionModel = (() => {
+            const cases = {
+                local_available: {
+                    label:"Rekordbox · selected local file", sourceKind:"Local audio",
+                    capability:"Playable after explicit authorization", requiresAuthorization:true,
+                    sourceAvailable:true, externalAvailable:true
+                },
+                local_missing: {
+                    label:"Rekordbox · referenced file unavailable", sourceKind:"Local audio",
+                    capability:"File cannot be reached", requiresAuthorization:true,
+                    sourceAvailable:false, externalAvailable:true
+                },
+                provider_preview: {
+                    label:"Beatport · permitted provider preview", sourceKind:"Provider preview",
+                    capability:"Playable provider preview", requiresAuthorization:false,
+                    sourceAvailable:true, externalAvailable:true
+                },
+                metadata_only: {
+                    label:"External source · metadata retained", sourceKind:"Metadata only",
+                    capability:"No source audio available here", requiresAuthorization:false,
+                    sourceAvailable:false, externalAvailable:true
+                }
+            };
+            const initialState = () => ({
+                caseKey:"metadata_only", authorized:false, sourceAudition:"Not heard",
+                spotifyAudition:"Not heard", decision:"Undecided", confidenceBasis:"None recorded",
+                authorityChanged:false, lastEvent:"Choose a source situation or start a walkthrough.",
+                lastEventKind:"normal"
+            });
+            function reject(state,message) { return {...state,lastEvent:message,lastEventKind:"blocked"}; }
+            function reduce(state,action) {
+                if (action.type === "RESET") return initialState();
+                if (action.type === "SET_CASE") return {...initialState(),caseKey:action.value,lastEvent:`Loaded ${cases[action.value].label}.`};
+                const source = cases[state.caseKey];
+                if (action.type === "AUTHORIZE_SOURCE") {
+                    if (source.sourceKind !== "Local audio") return reject(state,"Local-audio authorization does not apply to this source.");
+                    if (!source.sourceAvailable) return reject(state,"Authorization cannot make a missing file available.");
+                    return {...state,authorized:true,lastEvent:"Authorized only this selected local source for audition.",lastEventKind:"normal"};
+                }
+                if (action.type === "AUDITION_SOURCE") {
+                    if (!source.sourceAvailable) return reject(state,"Source audio is unavailable here. Open the source externally, rely on prior knowledge, or defer.");
+                    if (source.requiresAuthorization && !state.authorized) return reject(state,"Explicit authorization is required before reading this selected local file.");
+                    return {...state,sourceAudition:"Heard in review",lastEvent:`Played ${source.sourceKind.toLowerCase()} without changing authority.`,lastEventKind:"normal"};
+                }
+                if (action.type === "AUDITION_SPOTIFY") return {...state,spotifyAudition:"Heard in review",lastEvent:"Played the Spotify proposal without changing authority.",lastEventKind:"normal"};
+                if (action.type === "OPEN_SOURCE") {
+                    if (!source.externalAvailable) return reject(state,"No external source destination is available.");
+                    return {...state,sourceAudition:"Opened externally",lastEvent:"The user leaves the integrated view to inspect the source. No result is inferred.",lastEventKind:"normal"};
+                }
+                if (action.type === "DECIDE") {
+                    const bothHeard = state.sourceAudition === "Heard in review" && state.spotifyAudition === "Heard in review";
+                    const basis = bothHeard ? "Source and Spotify auditioned" : state.sourceAudition === "Opened externally" ? "External source check" : "Prior knowledge and/or metadata";
+                    return {...state,decision:action.value,confidenceBasis:basis,authorityChanged:false,lastEvent:`Recorded human outcome: ${action.value}. Approval remains a separate act.`,lastEventKind:"normal"};
+                }
+                return state;
+            }
+            return { cases, initialState, reduce };
+        })();
+
+        const walkthroughs = [
+            { key:"local", name:"Local A/B", description:"A selected Rekordbox file exists. Watch authorization unlock source playback, then compare it with Spotify.", steps:[
+                ["Load selected Rekordbox track","SET_CASE","local_available"],
+                ["Authorize only this source audio","AUTHORIZE_SOURCE"],
+                ["Hear the local source","AUDITION_SOURCE"],
+                ["Hear the Spotify proposal","AUDITION_SPOTIFY"],
+                ["Record the human decision","DECIDE","correct"]
+            ]},
+            { key:"missing", name:"Missing file", description:"Rekordbox remembers the track but its file cannot be reached. Authorization must not pretend the audio exists.", steps:[
+                ["Load the missing-file case","SET_CASE","local_missing"],
+                ["Try to authorize it","AUTHORIZE_SOURCE"],
+                ["Try to hear the source","AUDITION_SOURCE"],
+                ["Open Rekordbox externally","OPEN_SOURCE"],
+                ["Defer without inference","DECIDE","deferred"]
+            ]},
+            { key:"provider", name:"Provider preview", description:"Beatport exposes a permitted preview. The same shell can compare it with Spotify without reading a local file.", steps:[
+                ["Load the Beatport case","SET_CASE","provider_preview"],
+                ["Hear the provider preview","AUDITION_SOURCE"],
+                ["Hear the Spotify proposal","AUDITION_SPOTIFY"],
+                ["Record the human decision","DECIDE","correct"]
+            ]},
+            { key:"metadata", name:"Metadata only", description:"No source audio is available inside the review. The surface must say so and allow external checking or deferral.", steps:[
+                ["Load metadata-only source","SET_CASE","metadata_only"],
+                ["Try to hear the source","AUDITION_SOURCE"],
+                ["Open the source externally","OPEN_SOURCE"],
+                ["Hear the Spotify proposal","AUDITION_SPOTIFY"],
+                ["Challenge without automatic Correction","DECIDE","challenged"]
+            ]}
+        ];
+
+        let state = SourceAuditionModel.initialState();
+        let activeWalkthrough = 0;
+        let walkthroughStep = 0;
+        function dispatch(type,value) { state = SourceAuditionModel.reduce(state,{type,value}); render(); }
+        function tone(value) { return /Heard|Playable|correct/i.test(value) ? "good" : /unavailable|missing|blocked|cannot/i.test(value) ? "bad" : /Not heard|Undecided|Metadata/i.test(value) ? "warn" : ""; }
+        function cell(label,value) { return `<div class="state-cell"><span class="state-label">${label}</span><span class="state-value ${tone(String(value))}">${value}</span></div>`; }
+        function renderState() {
+            const source = SourceAuditionModel.cases[state.caseKey];
+            document.getElementById("state").innerHTML = [
+                cell("Source situation",source.label), cell("Source capability",source.capability),
+                cell("Local authorization",source.requiresAuthorization ? (state.authorized ? "Granted for selected source" : "Required, not granted") : "Not applicable"),
+                cell("Source audition",state.sourceAudition), cell("Spotify audition",state.spotifyAudition),
+                cell("Human decision",state.decision), cell("Decision basis",state.confidenceBasis),
+                cell("Authority changed",state.authorityChanged ? "Yes" : "No — always")
+            ].join("");
+            const event = document.getElementById("event");
+            event.textContent = state.lastEvent;
+            event.className = `event ${state.lastEventKind === "blocked" ? "bad" : ""}`;
+        }
+        function renderWalkthrough() {
+            document.getElementById("tabs").innerHTML = walkthroughs.map((item,index) => `<button class="tab ${index===activeWalkthrough?"active":""}" data-tab="${index}">${item.name}</button>`).join("");
+            const item = walkthroughs[activeWalkthrough];
+            document.getElementById("scenario").innerHTML = `<div class="scenario-copy"><div><h2>${item.name}</h2><p>${item.description}</p></div><button class="action reset" data-start>Restart walkthrough</button></div><div class="steps">${item.steps.map((step,index) => `<div class="step ${index<walkthroughStep?"done":""} ${index===walkthroughStep?"current":""}"><span class="step-num">${index+1}</span><span class="step-copy">${step[0]}</span><button data-step="${index}">${index<walkthroughStep?"Done":index===walkthroughStep?"Do this":"Waiting"}</button></div>`).join("")}</div>`;
+            document.querySelectorAll("[data-tab]").forEach(button => button.addEventListener("click",()=>{ activeWalkthrough=Number(button.dataset.tab); walkthroughStep=0; state=SourceAuditionModel.initialState(); render(); }));
+            document.querySelector("[data-start]").addEventListener("click",()=>{ walkthroughStep=0; state=SourceAuditionModel.initialState(); render(); });
+            document.querySelectorAll("[data-step]").forEach(button => button.addEventListener("click",()=>{
+                const index=Number(button.dataset.step); if(index!==walkthroughStep) return;
+                const step=item.steps[index]; state=SourceAuditionModel.reduce(state,{type:step[1],value:step[2]}); walkthroughStep=Math.min(walkthroughStep+1,item.steps.length); render();
+            }));
+        }
+        function render() { renderState(); renderWalkthrough(); }
+        document.querySelectorAll("[data-action]").forEach(button => button.addEventListener("click",()=>dispatch(button.dataset.action,button.dataset.value)));
+        render();
+    </script>
+</body>
+</html>
