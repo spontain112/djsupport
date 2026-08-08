@@ -27,6 +27,8 @@ flowchart LR
 This is the recommended user journey, not a claim that merely observing one
 box authorizes the next. Preview may retain permitted matching knowledge and a
 checkpoint, but it never creates or updates Spotify playlist state.
+This diagram intentionally omits durable recovery states, retry details, and
+Mirror maintenance.
 
 ## Durable Transfer and Batch states
 
@@ -38,6 +40,7 @@ stateDiagram-v2
     Matching --> RetainingPublication: Spotify playlist exists; local facts pending
     RetainingPublication --> Paused: retention fails
     RetainingPublication --> Completed: manifest and outcome retained
+    RetainingPublication --> Abandoned: explicit abandonment
     Matching --> Completed: Preview or no publication required
     Matching --> Abandoned: explicit abandonment
     Paused --> Abandoned: explicit abandonment
@@ -52,6 +55,10 @@ User cancellation is persisted as `Paused` before the interrupt is returned,
 so already completed matching work can resume. Cancellation is not
 Abandonment: only the separate explicit abandon operation makes unfinished work
 terminal and non-resumable.
+Abandonment from `Retaining publication` terminates local recovery but does not
+infer playlist deletion or Approval; the Spotify playlist may already exist.
+This diagram intentionally omits Batch aggregation and the details of each
+Spotify mutation checkpoint.
 
 ```mermaid
 stateDiagram-v2
@@ -60,15 +67,20 @@ stateDiagram-v2
     BatchPaused --> BatchMatching: explicit resume
     BatchMatching --> BatchCompleted: every selected playlist completed
     BatchMatching --> PartialSuccess: completed work plus failed, skipped, or pending work
+    PartialSuccess --> BatchPaused: a pending playlist remains paused
     BatchMatching --> BatchFailed: no playlist completed and work failed or was skipped
     BatchCompleted --> [*]
-    PartialSuccess --> [*]
+    PartialSuccess --> [*]: only failed or skipped work remains
     BatchFailed --> [*]
 ```
 
 A Batch coordinates explicitly selected Rekordbox playlists. One playlist may
-fail without erasing completed playlist outcomes; the terminal Batch status
-reports that distinction.
+fail without erasing completed playlist outcomes. Mixed completed and
+non-completed work is reported as `Partial success`.
+When pending work belongs to a paused playlist, the durable Batch remains
+`Paused` and explicit resume returns it to `Matching`; only a partial result
+with no paused work is terminal. This diagram intentionally omits the
+per-playlist phase and outcome fields that determine that distinction.
 
 ## Qualification Draft states
 
@@ -97,6 +109,8 @@ stateDiagram-v2
 matching authority. Even an Applied draft still requires separate
 playlist-scoped Approval. A successor explicitly supersedes a discarded draft;
 history is not overwritten.
+This diagram intentionally omits individual item decisions and Spotify chunk
+checkpoints.
 
 ## Approval outcomes
 
@@ -115,6 +129,8 @@ Approval compares the current Provisional Playlist with its retained manifest.
 Surviving proposals and Corrections can become Approved Matches; removed
 proposals become Rejected Matches. Abandonment accepts none of the pending
 proposals.
+This diagram intentionally omits the individual accepted, corrected, rejected,
+colliding, and conflicting Publication Items in the Approval outcome.
 
 ## Mirror, Drift, and orphaning
 
@@ -138,6 +154,8 @@ flowchart TB
 Source change and Playlist Drift are different facts. The former can maintain
 an active Mirror; the latter requires restore or revocation. Source absence
 never authorizes deletion, relinking, or continued management by inference.
+This diagram intentionally omits ordinary source additions/removals and the
+ordered playlist comparison details used to identify Drift.
 
 ## Transition tables
 
@@ -147,7 +165,7 @@ never authorizes deletion, relinking, or continued management by inference.
 | --- | --- | --- |
 | Matching | New compatible execution or explicit resume | Continue, pause on recoverable failure, retain publication, complete, or explicitly abandon |
 | Paused | Recoverable failure, rate limit, changed playlist head, or review-required condition | Inspect reason; resume with compatible state or explicitly abandon |
-| Retaining publication | Spotify effect completed before its local manifest/outcome | Resume local retention idempotently; never create a replacement playlist |
+| Retaining publication | Spotify effect completed before its local manifest/outcome | Resume local retention idempotently without creating a replacement playlist, or explicitly abandon local recovery without inferring remote deletion or Approval |
 | Completed | Preview or durable publication outcome finished | Report outcome; begin new changed work under a new identity |
 | Abandoned | Explicit abandonment of unfinished work | No resume or inferred authority |
 

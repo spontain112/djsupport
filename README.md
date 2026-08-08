@@ -24,7 +24,7 @@ flowchart LR
     B["Beatport chart or label"] --> T
     C["CLI"] --> T["Transfer<br/>policy authority"]
     W["Local web interface"] --> T
-    A["AI agent"] --> T
+    A["Agent Client"] --> T
     T --> L["Private local state"]
     T --> S["Spotify"]
     S --> P["Provisional Playlist"]

@@ -16,15 +16,19 @@ erDiagram
     SOURCE_SELECTION ||--|{ SOURCE_OCCURRENCE : orders
     TRANSFER ||--o| PUBLICATION_MANIFEST : retains
     PUBLICATION_MANIFEST ||--|{ PUBLICATION_ITEM : orders
+    PUBLICATION_MANIFEST ||--|| PROVISIONAL_PLAYLIST : describes
     SOURCE_OCCURRENCE ||--o| PUBLICATION_ITEM : proposes
     TRANSFER ||--o{ QUALIFICATION_DRAFT : supports
-    QUALIFICATION_DRAFT ||--o{ QUALIFICATION_DECISION : records
+    QUALIFICATION_DRAFT }o--|| PROVISIONAL_PLAYLIST : revises
     PUBLICATION_MANIFEST ||--o| APPROVAL : reviewed_by
+    PROVISIONAL_PLAYLIST ||--o| APPROVAL : reviewed_by
     APPROVAL ||--o{ APPROVED_MATCH : creates
     APPROVAL ||--o{ REJECTED_MATCH : creates
     APPROVAL ||--o{ CORRECTION : accepts
     APPROVAL ||--o| MIRROR : establishes
-    APPROVED_MATCH ||--o{ LOCAL_AUDIO_ASSOCIATION : may_bind
+    TRANSFER ||--o| SNAPSHOT : may_publish
+    SNAPSHOT ||--|| PROVISIONAL_PLAYLIST : begins_as
+    APPROVED_MATCH ||--o{ LOCAL_AUDIO_IDENTITY : may_recover
     SPOTIFY_ACCOUNT ||--o{ APPROVED_MATCH : owns
     SPOTIFY_ACCOUNT ||--o{ MIRROR : owns
     MIRROR ||--o{ PLAYLIST_DRIFT : may_report
@@ -44,6 +48,7 @@ explicitly selected Rekordbox playlist work coordinated by a Batch.
 | Transfer | Consumes one Source Selection and publishes either a Mirror or Snapshot outcome | Transfer owns policy; a client cannot bypass its authorization and ordering rules |
 | Source Selection | Names one ordered source selection consumed by a Transfer | The reference identifies the selected source; its ordered content participates in bounded identity |
 | Source Occurrence | Represents one position of a source track in that selection | Repeated tracks remain distinct occurrences even when their metadata or recording identity is equal |
+| Provisional Playlist | Is described by one retained Publication Manifest and reviewed before authority is created | Publication is visible in Spotify but remains provisional until playlist-scoped Approval |
 | Publication Manifest | Retains the exact ordered proposal facts required to review one Provisional Playlist | It records what was proposed; it is not Approval or matching authority |
 | Publication Item | Connects one source occurrence to a proposed Spotify representation or unresolved outcome | A proposal can be high-scoring without being authoritative |
 | Qualification Draft | Belongs to one Rekordbox Transfer, selection, account, manifest, and playlist head | Decisions are private and revisable; a draft can explicitly supersede another |
@@ -53,7 +58,8 @@ explicitly selected Rekordbox playlist work coordinated by a Batch.
 | Correction | Supplies a user-selected Spotify track for a wrong or missing proposal | It becomes an Approved Match only through playlist-scoped Approval |
 | Mirror | Links one approved source playlist to one managed Spotify playlist | Later Transfers maintain it; manual Spotify changes become Playlist Drift requiring a decision |
 | Snapshot | Represents one completed publication without an ongoing source relationship | It is not silently converted into a Mirror |
-| Local Audio Association | Binds exact private fingerprint evidence to an existing account-scoped Approved Match | It can recover that Approved Match but never identify unknown audio or grant Approval |
+| Playlist Drift | Records an unexpected difference between a Mirror and retained Spotify state | Restore or revocation requires an explicit choice; source change is a different fact |
+| Local Audio Identity | Binds exact private fingerprint evidence to an existing account-scoped Approved Match | It can recover that Approved Match but never identify unknown audio or grant Approval |
 
 ## Identity layers
 
@@ -93,6 +99,8 @@ A search result, match score, Provisional Playlist, clean Preview, or completed
 Qualification Draft carries no matching authority. Applying a draft changes a
 playlist but still does not Approve it. Only the final explicit Approval step
 creates authoritative matching knowledge.
+This authority view intentionally omits Transfer recovery, Mirror maintenance,
+and storage details; it shows only how a proposal can gain authority.
 
 ## Core invariants
 

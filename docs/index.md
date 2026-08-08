@@ -12,6 +12,8 @@ answer.
 | Which states and authority transitions exist? | [Lifecycles](lifecycles.md) |
 | What private files exist and who owns their schemas? | [Private storage](storage.md) |
 | How do I develop and test it? | [Contributing](../CONTRIBUTING.md) |
+| How do Agent Clients inspect and execute bounded work? | [Agent use](../README.md#ai-agent-use) and [ADR-0002](adr/0002-make-transfer-agent-native.md) |
+| What must Release maintainers validate? | [Release checks](../CONTRIBUTING.md#release-checks), [upgrade guidance](upgrading.md), and [release notes](release-notes-0.5.0.md) |
 | How do I back up or upgrade retained data? | [Backup and restore](backup-and-restore.md) and [upgrades](upgrading.md) |
 | Why were durable architecture choices made? | [Architecture decisions](adr/) |
 

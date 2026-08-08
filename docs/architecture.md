@@ -51,9 +51,10 @@ flowchart TB
 ```
 
 The diagram shows information and control relationships, not automatic
-authority. A line to Spotify does not imply permission to write: Preview and
-capability inspection make no playlist or playlist-state mutation, and an
-Agent Client cannot turn conversation into authorization.
+authority. It intentionally omits lifecycle states and method-level calls. A
+line to Spotify does not imply permission to write: Preview and capability
+inspection make no playlist or playlist-state mutation, and an Agent Client
+cannot turn conversation into authorization.
 
 ## Module architecture
 
@@ -120,6 +121,8 @@ flowchart TB
 The boxes inside `transfer.py` are responsibilities hidden behind one public
 interface, not new public modules. They illustrate why Transfer is deep: the
 same policy pays back across three clients and synthetic high-level tests.
+This diagram intentionally omits individual methods, state fields, and report
+rendering.
 
 ### Plain-text module map
 
@@ -128,7 +131,7 @@ same policy pays back across three clients and synthetic high-level tests.
                                   │
                ┌──────────────────┼──────────────────┐
                │                  │                  │
-             CLI              Local web          AI agent
+             CLI              Local web       Agent Client
                │                  │                  │
                └──────────────────┼──────────────────┘
                                   ▼

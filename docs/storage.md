@@ -74,6 +74,8 @@ The arrows indicate which module reads or writes a category, not a foreign-key
 database. Files are independently versioned JSON documents and Transfer joins
 their facts through stable account, Transfer, source, playlist, manifest, and
 evidence identities.
+This diagram intentionally omits legacy migration members, credential storage,
+reports, and the internal fields of every versioned document.
 
 ## Supported backup and restore schemas
 
