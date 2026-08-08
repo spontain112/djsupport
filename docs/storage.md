@@ -33,7 +33,8 @@ Two current exceptions are important:
 Both are private and ignored by the repository, but the Rekordbox configuration
 location does not yet match ADR-0001's intended platform application-data
 placement. This document records the executable behavior; it does not silently
-relocate or migrate user state.
+relocate or migrate user state. The runtime correction and migration decision
+is tracked separately in [issue #110](https://github.com/spontain112/djsupport/issues/110).
 
 ## Current schema owners
 
