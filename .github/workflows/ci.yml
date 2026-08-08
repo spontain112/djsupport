@@ -52,6 +52,19 @@ jobs:
           python-version: "3.14"
       - name: Install development and web extras
         run: python -m pip install ".[dev,web]"
+      - name: Read canonical project version
+        run: |
+          python - <<'PY'
+          import os
+          import tomllib
+
+          with open("pyproject.toml", "rb") as pyproject_file:
+              project_version = tomllib.load(pyproject_file)["project"]["version"]
+          with open(
+              os.environ["GITHUB_ENV"], "a", encoding="utf-8"
+          ) as environment:
+              environment.write(f"DJ_SUPPORT_VERSION={project_version}\n")
+          PY
       - name: Build source and wheel distributions once
         run: python -m build
       - name: Inspect package archives and metadata
@@ -60,11 +73,12 @@ jobs:
           python -m zipfile -l dist/*.whl
           python - <<'PY'
           from pathlib import Path, PurePosixPath
+          import os
           import subprocess
           import tarfile
           import zipfile
 
-          expected_version = "0.6.0.dev0"
+          expected_version = os.environ["DJ_SUPPORT_VERSION"]
           tracked = set(
               subprocess.run(
                   ["git", "ls-files"],
@@ -122,6 +136,11 @@ jobs:
           python -m venv "$clean_install_dir/venv"
           source "$clean_install_dir/venv/bin/activate"
           python -m pip install dist/*.whl
-          python -c \
-            'from importlib.metadata import version; assert version("djsupport") == "0.6.0.dev0"; import djsupport'
+          python - <<'PY'
+          import os
+          from importlib.metadata import version
+
+          assert version("djsupport") == os.environ["DJ_SUPPORT_VERSION"]
+          import djsupport
+          PY
           djsupport --help

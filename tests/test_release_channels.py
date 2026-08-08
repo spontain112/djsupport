@@ -41,6 +41,12 @@ def test_manual_release_checklist_separates_validation_from_publication():
         "GitHub pre-release",
         "disposable environment",
         "final GitHub Release as Latest",
+        "authorization to create and push the annotated final tag",
+        (
+            "Separately obtain authorization to publish the final GitHub Release "
+            "as Latest"
+        ),
+        "green CI on the exact final commit",
         "next `.dev0` version",
         "separate gated operations",
     )
@@ -71,6 +77,8 @@ def test_ci_is_a_least_privilege_offline_release_gate():
         errors.append("concurrency must be scoped to the ref")
 
     jobs = workflow.get("jobs", {})
+    if any("permissions" in job for job in jobs.values()):
+        errors.append("jobs must not override the read-only workflow permissions")
     test_job = jobs.get("test", {})
     versions = test_job.get("strategy", {}).get("matrix", {}).get("python-version")
     if versions != ["3.10", "3.14"]:
@@ -102,6 +110,10 @@ def test_ci_is_a_least_privilege_offline_release_gate():
             errors.append(f"package validation is missing: {command}")
     if workflow_text.count("python -m build") != 1:
         errors.append("source and wheel distributions must be built exactly once")
+    if "0.6.0.dev0" in workflow_text:
+        errors.append("CI must read version truth from pyproject.toml")
+    if "pyproject.toml" not in package_commands:
+        errors.append("package validation must read the canonical project version")
 
     steps = [step for job in jobs.values() for step in job.get("steps", [])]
     uses = [step["uses"] for step in steps if "uses" in step]

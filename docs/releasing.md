@@ -124,8 +124,12 @@ authorize any tag, GitHub Release, or package publication.
 
 - [ ] Prepare the final `X.Y.Z` version and changelog in another dedicated PR,
       then rerun the complete validation on its exact commit.
-- [ ] With separate explicit authorization, create and push the annotated final
-      tag, then publish the final GitHub Release as Latest.
+- [ ] Require green CI on the exact final commit. Candidate CI or CI on another
+      SHA does not satisfy the final-release gate.
+- [ ] Obtain explicit authorization to create and push the annotated final tag
+      pointing at the validated final commit.
+- [ ] Separately obtain authorization to publish the final GitHub Release as
+      Latest.
 - [ ] Verify the release page and every downloadable artifact resolve to the
       intended final version. Package-index publication, if any, remains a
       separate explicitly authorized operation and requires its own verification.
