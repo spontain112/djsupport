@@ -250,3 +250,16 @@ def test_glossary_matches_batch_and_account_scoping_in_code() -> None:
     assert "one durable Transfer per selected playlist" in normalized_context
     assert "does not scope ordinary metadata-based Approved Matches" in normalized_context
     assert "SPOTIFY_ACCOUNT ||--o{ APPROVED_MATCH : owns" not in domain_model
+
+
+def test_architecture_distinguishes_spotify_adapter_from_client_helpers() -> None:
+    architecture = _read("docs/architecture.md")
+
+    assert (
+        "| Spotify adapter and effects | "
+        "[`SpotifyMatcher`](../djsupport/transfer.py) |"
+    ) in architecture
+    assert (
+        "| Spotify client, search, and rate-limit helpers | "
+        "[`spotify.py`](../djsupport/spotify.py) |"
+    ) in architecture
