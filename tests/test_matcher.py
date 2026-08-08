@@ -616,9 +616,12 @@ class TestMatchTrack:
 
 
 class TestTerminalAudioExtensionFallback:
-    def test_recovers_signal_without_changing_source_identity_or_version_intent(self):
+    @pytest.mark.parametrize("suffix", [".aif", ".aiff"])
+    def test_recovers_signal_without_changing_source_identity_or_version_intent(
+        self, suffix,
+    ):
         track = make_track(
-            "Signal (Original Mix).aiff", "Known Artist", duration=360,
+            f"Signal (Original Mix){suffix}", "Known Artist", duration=360,
         )
         original_track = Track(**vars(track))
         recovered = make_spotify_item(
@@ -643,13 +646,15 @@ class TestTerminalAudioExtensionFallback:
         assert track == original_track
         assert "(Original Mix)" in track.name
         assert [call.kwargs["q"] for call in sp.search.call_args_list] == [
-            "artist:Known Artist track:Signal (Original Mix).aiff",
-            "artist:Known Artist track:Signal.aiff",
-            "Known Artist Signal (Original Mix).aiff",
+            f"artist:Known Artist track:Signal (Original Mix){suffix}",
+            f"artist:Known Artist track:Signal{suffix}",
+            f"Known Artist Signal (Original Mix){suffix}",
             "artist:Known Artist track:Signal (Original Mix)",
         ]
 
-    @pytest.mark.parametrize("suffix", [".mp3", ".aiff", ".wav", ".flac"])
+    @pytest.mark.parametrize(
+        "suffix", [".mp3", ".aif", ".AiF", ".aiff", ".wav", ".flac"],
+    )
     def test_recognized_terminal_suffix_adds_at_most_one_search(self, suffix):
         sp = MagicMock()
         sp.search.return_value = {"tracks": {"items": []}}
@@ -687,8 +692,10 @@ class TestTerminalAudioExtensionFallback:
     @pytest.mark.parametrize(
         "title",
         [
+            "Signal.aif Archive",
             "Signal.aiff Archive",
             "Signal.ogg",
+            ".aif",
             ".aiff",
         ],
     )
@@ -729,6 +736,34 @@ class TestTerminalAudioExtensionFallback:
 
         assert result is None
         assert sp.search.call_count == 4
+
+    def test_aif_candidate_keeps_named_version_protection(self):
+        track = make_track(
+            "Signal (Night Dub).aif", "Known Artist", duration=360,
+        )
+        original_track = Track(**vars(track))
+        wrong_version = make_spotify_item(
+            "Signal.aif", "Known Artist", "spotify:track:wrong-version", 360000,
+        )
+        sp = MagicMock()
+        sp.search.side_effect = [
+            {"tracks": {"items": []}},
+            {"tracks": {"items": []}},
+            {"tracks": {"items": []}},
+            {"tracks": {"items": [wrong_version]}},
+        ]
+
+        result = match_track(sp, track, threshold=80)
+
+        assert result is not None
+        assert result["match_type"] == "fallback_version"
+        assert track == original_track
+        assert [call.kwargs["q"] for call in sp.search.call_args_list] == [
+            "artist:Known Artist track:Signal (Night Dub).aif",
+            "artist:Known Artist track:Signal.aif",
+            "Known Artist Signal (Night Dub).aif",
+            "artist:Known Artist track:Signal (Night Dub)",
+        ]
 
     def test_acceptable_earlier_result_skips_extension_fallback(self):
         exact = make_spotify_item(
