@@ -28,9 +28,29 @@ _Avoid_: Cached match, automatic match
 A proposed source-to-Spotify match removed from its Provisional Playlist before approval. A Rejected Match is never reused as authoritative matching knowledge.
 _Avoid_: Missing track, unmatched track
 
+**Unresolved Source Track**:
+A source track for which the current bounded work produced no user-accepted Spotify representation. It may retain a private user-supplied reason but does not prove permanent catalog absence; searching it again requires explicit retry.
+_Avoid_: Missing track, not on Spotify
+
 **Correction**:
 An explicit source-track-to-Spotify-track mapping supplied by a user as a Spotify URL or URI when a proposed match is wrong or absent. A Correction becomes an Approved Match and a matching regression case.
 _Avoid_: Manual match, cache override
+
+**Correction Search**:
+An explicitly requested, user-bounded search for candidate Spotify links when a source track is unmatched or its proposal is challenged. It does not change proposal state or create a Correction or Approval; a user-chosen link enters the existing Correction and playlist-scoped Approval workflow.
+_Avoid_: Browser matching, automatic correction
+
+**Correction Search Plan**:
+A user-confirmed envelope naming the selected source tracks, external search provider, metadata disclosure, query limit, and Correction Candidate limit for one Correction Search. An Agent Client may execute inside that envelope without further prompts but may not broaden it.
+_Avoid_: Browser permission, open-ended search
+
+**Correction Candidate**:
+A Spotify track reference surfaced by Correction Search for user audition. It carries no matching or playlist authority until the user selects it as a Correction and completes playlist-scoped Approval.
+_Avoid_: Browser match, automatic correction
+
+**Correction Search Outcome**:
+The terminal record of a Correction Search: a selected Correction Candidate, declined candidates, no candidate within the plan, or an unresolved track with a private user-supplied reason. Only a selected candidate may proceed to Correction, and no outcome proves permanent Spotify catalog absence.
+_Avoid_: Browser verdict, automatic rejection
 
 **Approval**:
 The playlist-scoped act that compares a Provisional Playlist with its publication manifest, records surviving and corrected mappings as Approved Matches, and records removed proposals as Rejected Matches.
