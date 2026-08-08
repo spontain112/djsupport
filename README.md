@@ -111,7 +111,8 @@ when creating the bounded Batch; this is independent of fingerprint identity
 and remains compatible with `--no-cache`:
 
 ```bash
-djsupport sync -p "Deep House" --local-audio-audition
+djsupport sync -p "Deep House" --local-audio-audition \
+  --authorize-private-source
 djsupport web
 ```
 
@@ -120,7 +121,7 @@ Transfer lifecycle:
 
 ```bash
 djsupport qualification <batch-or-transfer-id> \
-  --playlist "Deep House" --local-audio-audition \
+  --playlist "Deep House" \
   --authorize-private-source
 ```
 

@@ -17,10 +17,10 @@ from typing import Callable
 
 BACKUP_VERSION = 1
 SUPPORTED_SCHEMAS = {
-    "matching-knowledge.json": (1, 2),
+    "matching-knowledge.json": (1, 2, 3),
     "transfers.json": (1, 2, 3, 4),
     "publication-manifests.transfers.json": (1, 2, 3, 4),
-    "publication-manifests.json": (1, 2, 3, 4, 5),
+    "publication-manifests.json": (1, 2, 3, 4, 5, 6),
     "playlist-state.json": (1, 2),
     "legacy-migration.json": (1,),
     "foundation-migration.json": (1,),
@@ -350,6 +350,9 @@ class LocalDataBackup:
                         conflicts, resolutions,
                     )
         elif path == "publication-manifests.json":
+            combined["version"] = max(
+                current.get("version", 1), incoming.get("version", 1),
+            )
             for field in ("manifests", "mirrors"):
                 combined.setdefault(field, [])
                 for item in incoming.get(field, []):

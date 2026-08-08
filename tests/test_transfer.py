@@ -2034,6 +2034,23 @@ class TestRekordboxBatchExecution:
 
 
 class TestTransferPublicationLifecycle:
+    @pytest.mark.parametrize("stored", [
+        '{"version": 99, "transfers": {"private": {}}}',
+        '{"version": 4, "qualifications": {"private": {"draft_id": "x"}}}',
+        '{"version": 4, "transfers": ',
+    ])
+    def test_transfer_state_fails_closed_without_rewriting_unknown_data(
+        self, tmp_path, stored,
+    ):
+        state_path = tmp_path / "transfers.json"
+        state_path.write_text(stored)
+        original = state_path.read_bytes()
+
+        with pytest.raises(ValueError, match="Transfer state"):
+            FileTransferStorage(state_path)
+
+        assert state_path.read_bytes() == original
+
     def test_settled_playlist_copy_hides_recovery_key_and_retains_curator(self, tmp_path):
         class LifecycleSpotify(StatefulSpotify):
             def set_playlist_description(self, playlist_id, description):
@@ -2702,7 +2719,7 @@ class TestTransferPublicationLifecycle:
             approved_at=datetime(2026, 8, 1),
         ))
 
-        assert json.loads(path.read_text())["version"] == 5
+        assert json.loads(path.read_text())["version"] == 6
         assert len(FilePublicationStorage(path).mirrors_for_account(
             "spotify-user-1"
         )) == 1
@@ -3518,9 +3535,10 @@ class TestBeatportCliTransfer:
         assert "Transfer stop-me abandoned" in result.output
 
     @patch("djsupport.transfer.Transfer.approve")
+    @patch("djsupport.transfer.FileTransferStorage")
     @patch("djsupport.cli.get_client", return_value=MagicMock())
     def test_cli_approves_one_provisional_playlist(
-        self, mock_client, approve, tmp_path,
+        self, mock_client, transfer_storage, approve, tmp_path,
     ):
         approve.return_value = ApprovalOutcome(
             account_id="spotify-user-1",
@@ -3537,6 +3555,9 @@ class TestBeatportCliTransfer:
 
         assert result.exit_code == 0, result.output
         approve.assert_called_once_with("snapshot-1")
+        transfer_storage.assert_called_once_with(
+            str((tmp_path / "state.json").with_suffix(".transfers.json"))
+        )
         assert "1 approved" in result.output
         assert "2 rejected" in result.output
 

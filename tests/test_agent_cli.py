@@ -211,6 +211,26 @@ def test_audition_intent_is_independent_and_compatible_with_no_cache(
     assert document["local_audio"]["audition_requested"] is True
 
 
+def test_human_audition_intent_requires_private_source_authorization_before_intake(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "djsupport.cli._resolve_xml_path",
+        lambda path: (_ for _ in ()).throw(
+            AssertionError("private source intake must stay untouched")
+        ),
+    )
+
+    result = CliRunner().invoke(cli, [
+        "sync", "tests/fixtures/library.xml",
+        "--playlist", "My Playlists/Peak Time",
+        "--local-audio-audition",
+    ])
+
+    assert result.exit_code == 2
+    assert "--authorize-private-source" in result.output
+
+
 def test_qualification_cli_denies_private_intake_through_versioned_contract(
     tmp_path,
 ):
@@ -228,6 +248,35 @@ def test_qualification_cli_denies_private_intake_through_versioned_contract(
         "status": "authorization_required",
         "required_authorizations": ["private_source"],
         "next_actions": ["authorize_private_source"],
+    }
+    assert "owner-library-name" not in result.output
+
+
+def test_authorized_qualification_source_error_stays_structured_and_redacted(
+    monkeypatch, tmp_path,
+):
+    private_path = tmp_path / "owner-library-name.xml"
+    monkeypatch.setattr(
+        "djsupport.cli.get_client",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("Spotify must stay untouched")
+        ),
+    )
+
+    result = CliRunner().invoke(cli, [
+        "qualification", "batch-opaque-1", str(private_path),
+        "--playlist", "Private/Selection", "--json",
+        "--authorize-private-source",
+        "--state-path", str(tmp_path / "publications.json"),
+    ])
+
+    assert result.exit_code == 2
+    assert json.loads(result.output) == {
+        "contract_version": 2,
+        "phase": "qualification",
+        "status": "error",
+        "error": {"code": "private_source_unavailable"},
+        "next_actions": ["inspect_private_source"],
     }
     assert "owner-library-name" not in result.output
 

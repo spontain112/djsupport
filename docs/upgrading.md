@@ -43,8 +43,11 @@ matching-knowledge schemas are rejected without rewriting the private file.
 
 ## To the Qualification Workspace release
 
-The next Transfer-state write upgrades retained state to schema 4 and adds a
-`qualifications` collection. Transfer schemas 1–3 remain readable. Qualification
+The next durable writes upgrade Transfer state to schema 4, matching knowledge
+to schema 3, and publication manifests to schema 6. Earlier supported schemas
+remain readable. Transfer schema 4 adds a `qualifications` collection; matching
+schema 3 and publication schema 6 retain rich Spotify release, duration, and
+truthful availability context for later Approved Match reuse. Qualification
 Drafts are additive private state: they do not become matching knowledge or
 Approval during upgrade. Backup/restore merges distinct drafts and requires an
 explicit current/archive choice when the same draft differs, so neither state

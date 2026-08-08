@@ -1,6 +1,8 @@
 """Versioned, harness-neutral contract tests for AI agent clients."""
 
 import json
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -17,6 +19,7 @@ from djsupport.transfer import (
     BatchPlanRequest,
     FilePublicationStorage,
     FileTransferStorage,
+    QualificationRequest,
     SourceSelection,
     Transfer,
 )
@@ -46,6 +49,27 @@ def test_machine_error_next_actions_are_specific_to_the_failure():
     assert error_document(
         "execute", "spotify_authentication_required",
     )["next_actions"] == ["authenticate_spotify"]
+
+
+def test_qualification_approval_is_explicit_without_spotify_write_authority():
+    transfer = MagicMock()
+    transfer.private_source_authorization_requirement.side_effect = (
+        Transfer.private_source_authorization_requirement
+    )
+    transfer.approve_qualification.return_value = SimpleNamespace(
+        status=SimpleNamespace(value="approved"),
+        approved=(), rejected=(), collisions=(), corrections=(),
+    )
+    contract = AgentTransferContract(transfer)
+    authorization = AgentAuthorization(private_source=True)
+
+    document = contract.approve_qualification("opaque-draft", authorization)
+
+    assert document["status"] == "approved"
+    assert document["authority"] == "playlist_approval"
+    transfer.approve_qualification.assert_called_once_with(
+        "opaque-draft", authorization,
+    )
 
 
 class UntouchedSpotify:
@@ -183,6 +207,26 @@ def test_batch_plan_requires_explicit_private_source_authorization(tmp_path):
         "next_actions": ["authorize_private_source"],
     }
     assert source.calls == 0
+
+
+@pytest.mark.parametrize("origin", [
+    "https://review.example.test",
+    "http://127.0.0.1.example.test",
+    "http://user@127.0.0.1:8000",
+])
+def test_qualification_review_url_rejects_non_loopback_origins(origin):
+    transfer = MagicMock()
+    transfer.private_source_authorization_requirement.return_value = None
+    contract = AgentTransferContract(transfer)
+
+    with pytest.raises(ValueError, match="loopback"):
+        contract.qualification_draft(
+            QualificationRequest(transfer_id="opaque-transfer"),
+            AgentAuthorization(private_source=True),
+            review_origin=origin,
+        )
+
+    transfer.obtain_qualification.assert_not_called()
 
 
 def test_authorized_plan_is_stable_bounded_and_privacy_redacted(tmp_path):

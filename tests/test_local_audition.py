@@ -20,6 +20,7 @@ from djsupport.transfer import (
     LocalAuditionResult,
     QualificationRequest,
     SourceSelection,
+    SpotifyPlaylistReviewRequired,
     Transfer,
     TransferAuthorization,
     TransferMode,
@@ -144,6 +145,52 @@ def test_transfer_authorizes_only_the_selected_audition_occurrence(tmp_path):
     assert "fingerprint" not in persisted
 
 
+def test_audition_blocks_if_the_selected_occurrence_is_relinked_after_draft(
+    tmp_path,
+):
+    original = "file:///owner/private/original-selected.wav"
+    relinked = "file:///owner/private/different-selected.wav"
+    source = SelectedSource(_track(original))
+    audition = RecordingAudition()
+    storage_path = tmp_path / "transfers.json"
+    transfer = Transfer(
+        source=source,
+        spotify=PreviewSpotify(),
+        matching_knowledge=EphemeralMatchingKnowledge(),
+        publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
+        transfer_storage=FileTransferStorage(storage_path),
+        local_audition=audition,
+    )
+    plan = transfer.plan_batch(BatchPlanRequest(
+        playlist_references=("Folder/Selected",),
+        preview=True,
+        local_audio_audition=True,
+    ))
+    report = transfer.execute_batch(plan, transfer_id=plan.batch_id)
+    draft = transfer.obtain_qualification(
+        QualificationRequest(
+            transfer_id=report.transfer_id,
+            playlist_reference="Folder/Selected",
+        ),
+        TransferAuthorization(private_source=True),
+    )
+    source.track = _track(relinked)
+
+    with pytest.raises(
+        SpotifyPlaylistReviewRequired, match="source selection changed"
+    ):
+        transfer.audition_qualification(
+            draft.draft_id,
+            draft.items[0].item_id,
+            TransferAuthorization(private_source=True),
+        )
+
+    assert audition.opened == []
+    persisted = storage_path.read_text()
+    assert "original-selected" not in persisted
+    assert "different-selected" not in persisted
+
+
 def test_local_audition_streams_full_and_bounded_ranges_without_path_disclosure(
     tmp_path,
 ):
@@ -220,6 +267,133 @@ def test_regenerated_handle_invalidates_prior_handle_and_transfer_scope(tmp_path
     adapter.invalidate_transfer("transfer-one")
     with pytest.raises(AuditionHandleUnavailable):
         adapter.stream(second.handle)
+
+
+def test_discarded_qualification_invalidates_handle_and_requires_fresh_authorization(
+    tmp_path,
+):
+    media = tmp_path / "selected-private-source.wav"
+    media.write_bytes(b"synthetic audition")
+    source = SelectedSource(_track(media.as_uri()))
+    audition = LocalSourceAudition()
+    transfer = Transfer(
+        source=source,
+        spotify=PreviewSpotify(),
+        matching_knowledge=EphemeralMatchingKnowledge(),
+        publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
+        transfer_storage=FileTransferStorage(tmp_path / "transfers.json"),
+        local_audition=audition,
+    )
+    plan = transfer.plan_batch(BatchPlanRequest(
+        playlist_references=("Folder/Selected",),
+        preview=True,
+        local_audio_audition=True,
+    ))
+    report = transfer.execute_batch(plan, transfer_id=plan.batch_id)
+    draft = transfer.obtain_qualification(
+        QualificationRequest(
+            transfer_id=report.transfer_id,
+            playlist_reference="Folder/Selected",
+        ),
+        TransferAuthorization(private_source=True),
+    )
+    opened = transfer.audition_qualification(
+        draft.draft_id,
+        draft.items[0].item_id,
+        TransferAuthorization(private_source=True),
+    )
+
+    discarded = transfer.discard_qualification(
+        draft.draft_id, TransferAuthorization(private_source=True),
+    )
+
+    assert discarded.status.value == "discarded"
+    with pytest.raises(AuditionHandleUnavailable):
+        audition.stream(opened.handle)
+    with pytest.raises(ValueError, match="discarded"):
+        transfer.audition_qualification(
+            draft.draft_id,
+            draft.items[0].item_id,
+            TransferAuthorization(private_source=True),
+        )
+    resumed = transfer.obtain_qualification(
+        QualificationRequest(
+            transfer_id=report.transfer_id,
+            playlist_reference="Folder/Selected",
+        ),
+        TransferAuthorization(private_source=True),
+    )
+    assert resumed.status.value == "discarded"
+    fresh = transfer.supersede_qualification(
+        draft.draft_id, TransferAuthorization(private_source=True),
+    )
+    with pytest.raises(PermissionError, match="private_source"):
+        transfer.audition_qualification(
+            fresh.draft_id,
+            fresh.items[0].item_id,
+            TransferAuthorization(),
+        )
+    reopened = transfer.audition_qualification(
+        fresh.draft_id,
+        fresh.items[0].item_id,
+        TransferAuthorization(private_source=True),
+    )
+    assert reopened.handle != opened.handle
+    assert b"".join(audition.stream(reopened.handle).body) == b"synthetic audition"
+
+
+def test_stale_audition_reader_refreshes_before_opening_retired_draft(tmp_path):
+    private_location = "file:///invented/selected-source.wav"
+    source = SelectedSource(_track(private_location))
+    storage_path = tmp_path / "transfers.json"
+    primary = Transfer(
+        source=source,
+        spotify=PreviewSpotify(),
+        matching_knowledge=EphemeralMatchingKnowledge(),
+        publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
+        transfer_storage=FileTransferStorage(storage_path),
+        local_audition=RecordingAudition(),
+    )
+    plan = primary.plan_batch(BatchPlanRequest(
+        playlist_references=("Folder/Selected",),
+        preview=True,
+        local_audio_audition=True,
+    ))
+    report = primary.execute_batch(plan, transfer_id=plan.batch_id)
+    draft = primary.obtain_qualification(
+        QualificationRequest(
+            transfer_id=report.transfer_id,
+            playlist_reference="Folder/Selected",
+        ),
+        TransferAuthorization(private_source=True),
+    )
+    stale_audition = RecordingAudition()
+    stale = Transfer(
+        source=source,
+        spotify=PreviewSpotify(),
+        matching_knowledge=EphemeralMatchingKnowledge(),
+        publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
+        transfer_storage=FileTransferStorage(storage_path),
+        local_audition=stale_audition,
+    )
+    primary.discard_qualification(
+        draft.draft_id, TransferAuthorization(private_source=True),
+    )
+
+    with pytest.raises(ValueError, match="discarded"):
+        stale.audition_qualification(
+            draft.draft_id,
+            draft.items[0].item_id,
+            TransferAuthorization(private_source=True),
+        )
+
+    assert stale_audition.opened == []
+
+
+def test_windows_rekordbox_file_uri_uses_platform_path_conversion():
+    assert LocalSourceAudition._file_uri_path(
+        "/C:/Invented%20Library/Selected.wav", windows=True,
+    ) == "C:/Invented Library/Selected.wav"
 
 
 def test_empty_supported_media_has_truthful_zero_length_response(tmp_path):

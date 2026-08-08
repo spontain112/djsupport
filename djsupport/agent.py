@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
+import ipaddress
+from urllib.parse import urlsplit
+
 from djsupport.transfer import (
     BatchPlanRequest,
+    QualificationDecision,
     QualificationRequest,
     QualificationStatus,
+    SpotifyPlaylistChanged,
+    SpotifyPlaylistReviewRequired,
     Transfer,
     TransferAuthorization,
 )
@@ -15,6 +21,36 @@ AGENT_CONTRACT_VERSION = 2
 
 
 AgentAuthorization = TransferAuthorization
+
+
+def _loopback_review_origin(value: str) -> str:
+    """Accept only an origin that keeps the private review URL local."""
+    parsed = urlsplit(value)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("Qualification review origin must be loopback") from exc
+    del port
+    if (
+        parsed.scheme not in {"http", "https"}
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.hostname is None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise ValueError("Qualification review origin must be loopback")
+    hostname = parsed.hostname.casefold()
+    if hostname != "localhost":
+        try:
+            if not ipaddress.ip_address(hostname).is_loopback:
+                raise ValueError
+        except ValueError as exc:
+            raise ValueError(
+                "Qualification review origin must be loopback"
+            ) from exc
+    return f"{parsed.scheme}://{parsed.netloc}"
 
 
 def capability_document(capability_value, audition_value=None) -> dict:
@@ -82,6 +118,26 @@ def error_document(phase: str, code: str) -> dict:
         "error": {"code": code},
         "next_actions": [next_action],
     }
+
+
+def qualification_review_required_document(
+    phase: str,
+    code: str,
+    *,
+    draft_id: str | None = None,
+    next_actions: list[str] | None = None,
+) -> dict:
+    """Render an expected, privacy-safe Qualification stop condition."""
+    document = {
+        "contract_version": AGENT_CONTRACT_VERSION,
+        "phase": phase,
+        "status": "review_required",
+        "review": {"code": code},
+        "next_actions": next_actions or ["review"],
+    }
+    if draft_id is not None:
+        document["draft_id"] = draft_id
+    return document
 
 
 class AgentTransferContract:
@@ -189,7 +245,18 @@ class AgentTransferContract:
                 "next_actions": ["confirm_expensive"],
             }
         batch_id = transfer_id or plan_result["batch_id"]
-        report = self._transfer.execute_batch(plan, transfer_id=batch_id)
+        try:
+            report = self._transfer.execute_batch(plan, transfer_id=batch_id)
+        except SpotifyPlaylistReviewRequired:
+            return {
+                "contract_version": AGENT_CONTRACT_VERSION,
+                "phase": "execute",
+                "status": "review_required",
+                "batch_id": plan_result["batch_id"],
+                "review": {"code": "source_selection_changed"},
+                "required_authorizations": [],
+                "next_actions": ["replan"],
+            }
         status = report.status.replace(" ", "_")
         return {
             "contract_version": AGENT_CONTRACT_VERSION,
@@ -236,7 +303,19 @@ class AgentTransferContract:
         )
         if required:
             return authorization_required_document("qualification", required)
-        view = self._transfer.obtain_qualification(request, authorization)
+        review_origin = _loopback_review_origin(review_origin)
+        try:
+            view = self._transfer.obtain_qualification(request, authorization)
+        except SpotifyPlaylistChanged:
+            return qualification_review_required_document(
+                "qualification", "spotify_playlist_changed",
+            )
+        except SpotifyPlaylistReviewRequired as exc:
+            return qualification_review_required_document(
+                "qualification", "qualification_review_required",
+                draft_id=exc.draft_id,
+                next_actions=["review", "discard"],
+            )
         return self._qualification_document(view, review_origin)
 
     def qualification_progress(
@@ -251,17 +330,72 @@ class AgentTransferContract:
         )
         if required:
             return authorization_required_document("qualification", required)
-        view = self._transfer.qualification(draft_id)
+        review_origin = _loopback_review_origin(review_origin)
+        try:
+            view = self._transfer.qualification(draft_id, authorization)
+        except SpotifyPlaylistChanged:
+            return qualification_review_required_document(
+                "qualification", "spotify_playlist_changed",
+                draft_id=draft_id,
+                next_actions=["review", "discard"],
+            )
+        except SpotifyPlaylistReviewRequired:
+            return qualification_review_required_document(
+                "qualification", "qualification_review_required",
+                draft_id=draft_id,
+                next_actions=["review", "discard"],
+            )
+        return self._qualification_document(view, review_origin)
+
+    def record_qualification(
+        self,
+        draft_id: str,
+        item_id: str,
+        decision: QualificationDecision,
+        authorization: AgentAuthorization,
+        *,
+        spotify_reference: str | None = None,
+        reason: str | None = None,
+        exclude: bool = False,
+        review_origin: str = "http://127.0.0.1:8000",
+    ) -> dict:
+        """Stage one opaque draft outcome through the public Transfer seam."""
+        required = self._transfer.private_source_authorization_requirement(
+            authorization,
+        )
+        if required:
+            return authorization_required_document(
+                "qualification_decision", required,
+            )
+        review_origin = _loopback_review_origin(review_origin)
+        try:
+            view = self._transfer.record_qualification(
+                draft_id,
+                item_id,
+                decision,
+                authorization,
+                spotify_reference=spotify_reference,
+                reason=reason,
+                exclude=exclude,
+            )
+        except SpotifyPlaylistChanged:
+            return qualification_review_required_document(
+                "qualification_decision", "spotify_playlist_changed",
+                draft_id=draft_id,
+                next_actions=["review", "discard"],
+            )
+        except SpotifyPlaylistReviewRequired:
+            return qualification_review_required_document(
+                "qualification_decision", "qualification_review_required",
+                draft_id=draft_id,
+                next_actions=["review", "discard"],
+            )
         return self._qualification_document(view, review_origin)
 
     @staticmethod
     def _qualification_document(view, review_origin: str) -> dict:
+        review_origin = _loopback_review_origin(review_origin)
         status = view.status.value
-        next_actions = (
-            ["approve"] if status == QualificationStatus.APPLIED.value
-            else ["apply"] if view.complete
-            else ["review"]
-        )
         return {
             "contract_version": AGENT_CONTRACT_VERSION,
             "phase": "qualification",
@@ -274,11 +408,55 @@ class AgentTransferContract:
                 "deferred": view.deferred,
             },
             "authority": "none",
+            "current_item": (
+                {
+                    "item_id": view.current_item.item_id,
+                    "permitted_actions": [
+                        action.value
+                        for action in view.current_item.permitted_actions
+                    ],
+                }
+                if view.current_item is not None else None
+            ),
             "review_url": (
                 f"{review_origin.rstrip('/')}/qualification/{view.draft_id}"
             ),
-            "next_actions": next_actions,
+            "next_actions": list(view.next_actions),
         }
+
+    def link_qualification(
+        self,
+        draft_id: str,
+        publishing_transfer_id: str,
+        authorization: AgentAuthorization,
+        *,
+        review_origin: str = "http://127.0.0.1:8000",
+    ) -> dict:
+        required = self._transfer.private_source_authorization_requirement(
+            authorization,
+        )
+        if required:
+            return authorization_required_document(
+                "qualification_link", required,
+            )
+        review_origin = _loopback_review_origin(review_origin)
+        try:
+            view = self._transfer.link_qualification(
+                draft_id, publishing_transfer_id, authorization,
+            )
+        except SpotifyPlaylistChanged:
+            return qualification_review_required_document(
+                "qualification_link", "spotify_playlist_changed",
+                draft_id=draft_id,
+                next_actions=["review", "discard"],
+            )
+        except SpotifyPlaylistReviewRequired:
+            return qualification_review_required_document(
+                "qualification_link", "qualification_review_required",
+                draft_id=draft_id,
+                next_actions=["review", "discard"],
+            )
+        return self._qualification_document(view, review_origin)
 
     def apply_qualification(
         self, draft_id: str, authorization: AgentAuthorization,
@@ -292,7 +470,20 @@ class AgentTransferContract:
             return authorization_required_document(
                 "qualification_apply", "spotify_write",
             )
-        outcome = self._transfer.apply_qualification(draft_id, authorization)
+        try:
+            outcome = self._transfer.apply_qualification(draft_id, authorization)
+        except SpotifyPlaylistChanged:
+            return qualification_review_required_document(
+                "qualification_apply", "spotify_playlist_changed",
+                draft_id=draft_id,
+                next_actions=["review", "discard"],
+            )
+        except SpotifyPlaylistReviewRequired:
+            return qualification_review_required_document(
+                "qualification_apply", "qualification_review_required",
+                draft_id=draft_id,
+                next_actions=["review", "discard"],
+            )
         return {
             "contract_version": AGENT_CONTRACT_VERSION,
             "phase": "qualification_apply",
@@ -301,6 +492,97 @@ class AgentTransferContract:
             "counts": {"applied_items": outcome.applied_items},
             "authority": "none",
             "next_actions": list(outcome.next_actions),
+        }
+
+    def discard_qualification(
+        self, draft_id: str, authorization: AgentAuthorization,
+    ) -> dict:
+        required = self._transfer.private_source_authorization_requirement(
+            authorization,
+        )
+        if required:
+            return authorization_required_document(
+                "qualification_discard", required,
+            )
+        view = self._transfer.discard_qualification(draft_id, authorization)
+        return {
+            "contract_version": AGENT_CONTRACT_VERSION,
+            "phase": "qualification_discard",
+            "status": view.status.value,
+            "draft_id": view.draft_id,
+            "authority": "none",
+            "next_actions": list(view.next_actions),
+        }
+
+    def supersede_qualification(
+        self,
+        draft_id: str,
+        authorization: AgentAuthorization,
+        *,
+        review_origin: str = "http://127.0.0.1:8000",
+    ) -> dict:
+        required = self._transfer.private_source_authorization_requirement(
+            authorization,
+        )
+        if required:
+            return authorization_required_document(
+                "qualification_supersede", required,
+            )
+        review_origin = _loopback_review_origin(review_origin)
+        try:
+            view = self._transfer.supersede_qualification(
+                draft_id, authorization,
+            )
+        except SpotifyPlaylistReviewRequired:
+            return qualification_review_required_document(
+                "qualification_supersede", "qualification_review_required",
+                draft_id=draft_id,
+                next_actions=["review"],
+            )
+        return self._qualification_document(view, review_origin)
+
+    def approve_qualification(
+        self, draft_id: str, authorization: AgentAuthorization,
+    ) -> dict:
+        required = self._transfer.private_source_authorization_requirement(
+            authorization,
+        )
+        if required:
+            return authorization_required_document(
+                "qualification_approval", required,
+            )
+        try:
+            outcome = self._transfer.approve_qualification(
+                draft_id, authorization,
+            )
+        except SpotifyPlaylistChanged:
+            return qualification_review_required_document(
+                "qualification_approval", "spotify_playlist_changed",
+                draft_id=draft_id,
+            )
+        except SpotifyPlaylistReviewRequired:
+            return qualification_review_required_document(
+                "qualification_approval", "qualification_review_required",
+                draft_id=draft_id,
+            )
+        return {
+            "contract_version": AGENT_CONTRACT_VERSION,
+            "phase": "qualification_approval",
+            "status": outcome.status.value.replace(" ", "_"),
+            "draft_id": draft_id,
+            "counts": {
+                "approved": len(outcome.approved),
+                "rejected": len(outcome.rejected),
+                "collisions": len(outcome.collisions),
+                "corrections": len(outcome.corrections),
+            },
+            "authority": (
+                "playlist_approval"
+                if outcome.status.value == "approved" else "none"
+            ),
+            "next_actions": (
+                ["review"] if outcome.status.value == "needs review" else []
+            ),
         }
 
     def progress(

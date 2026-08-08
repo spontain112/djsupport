@@ -1,6 +1,7 @@
 """Tests for the FastAPI web backend."""
 
 import json
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -14,16 +15,21 @@ from djsupport.local_audition import LocalSourceAudition
 from djsupport.transfer import (
     AccountPublishingGuards,
     BatchPlan,
+    BatchPlanRequest,
+    EphemeralMatchingKnowledge,
     FilePublicationStorage,
     FileTransferStorage,
     PlaylistPreflight,
     QualificationDecision,
     QualificationItem,
+    QualificationRequest,
     QualificationStatus,
     QualificationView,
     SourceSelection,
     Transfer,
+    TransferAuthorization,
     TransferProgress,
+    TransferMode,
 )
 from djsupport.web import _report_to_dict, app, create_app
 
@@ -287,6 +293,12 @@ def _qualification_view() -> QualificationView:
             score_reasons=("title", "artist"),
             attention_reasons=("new_proposal", "duration_conflict"),
             audition_status="available",
+            permitted_actions=(
+                QualificationDecision.KEEP_PROPOSAL,
+                QualificationDecision.CORRECTION,
+                QualificationDecision.DEFERRED,
+                QualificationDecision.REJECT_PROPOSAL,
+            ),
         ),),
     )
 
@@ -320,6 +332,7 @@ def test_rekordbox_qualification_routes_render_rich_path_free_review_facts():
     assert body["draft_id"] == "draft-opaque-1"
     assert body["authority"] == "none"
     assert body["counts"] == {"items": 1, "pending": 1, "deferred": 0}
+    assert body["current_item_id"] == "item-opaque-1"
     assert body["items"][0] == {
         "item_id": "item-opaque-1",
         "source": {
@@ -345,7 +358,14 @@ def test_rekordbox_qualification_routes_render_rich_path_free_review_facts():
             "score_reasons": ["title", "artist"],
             "authority_status": "proposal",
             "attention_reasons": ["new_proposal", "duration_conflict"],
+            "availability_status": "unknown",
+            "availability_reason": "not_checked",
+            "availability_checked_at": None,
+            "availability_source": None,
         },
+        "permitted_actions": [
+            "keep_proposal", "correction", "deferred", "reject_proposal",
+        ],
         "audition_status": "available",
         "audition_reason": None,
         "decision": None,
@@ -388,11 +408,74 @@ def test_qualification_decision_delegates_to_transfer_without_approval():
         "draft-opaque-1",
         "item-opaque-1",
         QualificationDecision.KEEP_PROPOSAL,
+        TransferAuthorization(private_source=True),
         spotify_reference=None,
         reason=None,
         exclude=False,
     )
     assert not transfer.approve.called
+
+
+def test_workspace_can_explicitly_include_all_proposals_through_transfer():
+    transfer = MagicMock()
+    initial = _qualification_view()
+    included = replace(initial, include_all=True)
+    transfer.obtain_qualification.side_effect = [initial, included]
+    web = create_app(
+        rekordbox_transfer_factory=lambda request, authorized: transfer,
+        auth_manager=_authenticated_manager,
+    )
+    client = TestClient(web)
+    created = client.post("/rekordbox/qualification/drafts", json={
+        "xml_path": "/private/owner-library.xml",
+        "transfer_id": "batch-opaque-1",
+        "playlist_reference": "Private/Selection",
+        "authorize_private_source": True,
+    })
+
+    response = client.post(
+        f"/rekordbox/qualification/drafts/{created.json()['draft_id']}"
+        "/include-all",
+        json={"authorize_private_source": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["include_all"] is True
+    request = transfer.obtain_qualification.call_args_list[-1].args[0]
+    assert request.transfer_id == "batch-opaque-1"
+    assert request.playlist_reference == "Private/Selection"
+    assert request.include_all is True
+
+
+def test_web_qualification_approval_is_explicit_without_spotify_write_flag():
+    transfer = MagicMock()
+    transfer.obtain_qualification.return_value = _qualification_view()
+    transfer.approve_qualification.return_value = MagicMock(
+        status=MagicMock(value="approved"),
+        approved=(), rejected=(), collisions=(), corrections=(),
+    )
+    web = create_app(
+        rekordbox_transfer_factory=lambda request, authorized: transfer,
+        auth_manager=_authenticated_manager,
+    )
+    client = TestClient(web)
+    created = client.post("/rekordbox/qualification/drafts", json={
+        "xml_path": "/private/owner-library.xml",
+        "transfer_id": "batch-opaque-1",
+        "playlist_reference": "Private/Selection",
+        "authorize_private_source": True,
+    })
+
+    response = client.post(
+        f"/rekordbox/qualification/drafts/{created.json()['draft_id']}/approve",
+        json={"authorize_private_source": True},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["authority"] == "playlist_approval"
+    transfer.approve_qualification.assert_called_once_with(
+        "draft-opaque-1", TransferAuthorization(private_source=True),
+    )
 
 
 def test_qualification_audition_requires_exact_authorization_and_returns_url():
@@ -462,6 +545,105 @@ def test_local_media_route_supports_bounded_ranges_without_filename(tmp_path):
     assert excessive.status_code == 416
     assert excessive.headers["content-range"] == "bytes */10"
     assert missing.status_code == 404
+    for denied in (excessive, missing):
+        assert denied.headers["cache-control"] == "private, no-store"
+        assert denied.headers["content-security-policy"] == (
+            "default-src 'none'; media-src 'self'"
+        )
+        assert denied.headers["x-content-type-options"] == "nosniff"
+        assert "private-owner-name" not in str(denied.headers)
+
+
+def test_qualification_routes_reject_remote_peer_rebinding_host_and_origin():
+    web = create_app()
+    remote = TestClient(
+        web,
+        base_url="http://127.0.0.1",
+        client=("203.0.113.20", 50000),
+    )
+    local = TestClient(web)
+
+    assert remote.get("/qualification/opaque-draft").status_code == 403
+    assert local.get(
+        "/qualification/opaque-draft",
+        headers={"Host": "attacker.example"},
+    ).status_code == 403
+    assert local.post(
+        "/rekordbox/qualification/drafts",
+        headers={"Origin": "https://attacker.example"},
+        json={},
+    ).status_code == 403
+
+
+def test_durable_draft_with_missing_source_is_review_required_not_missing(
+    tmp_path, monkeypatch,
+):
+    class SelectedSource:
+        source_label = "Rekordbox"
+        default_mode = TransferMode.MIRROR
+
+        def consume(self, reference):
+            return SourceSelection("Selected", reference, [Track(
+                track_id="synthetic", name="Synthetic", artist="Artist",
+                album="Release", remixer="", label="Label", genre="",
+                date_added="", duration=180,
+            )])
+
+        def consume_batch(self, references, whole_library):
+            return tuple(self.consume(reference) for reference in references)
+
+    class PreviewSpotify:
+        def account_id(self):
+            return "spotify-account-one"
+
+        def match(self, track, threshold):
+            return {
+                "uri": "spotify:track:0123456789012345678901",
+                "name": "Synthetic", "artist": "Artist", "score": 96.0,
+                "match_type": "exact",
+            }
+
+    publication_path = tmp_path / "publication-manifests.json"
+    transfer = Transfer(
+        source=SelectedSource(),
+        spotify=PreviewSpotify(),
+        matching_knowledge=EphemeralMatchingKnowledge(),
+        publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
+        transfer_storage=FileTransferStorage(
+            publication_path.with_suffix(".transfers.json")
+        ),
+    )
+    plan = transfer.plan_batch(BatchPlanRequest(
+        playlist_references=("Folder/Selected",), preview=True,
+    ))
+    report = transfer.execute_batch(plan, transfer_id=plan.batch_id)
+    draft = transfer.obtain_qualification(
+        QualificationRequest(
+            transfer_id=report.transfer_id,
+            playlist_reference="Folder/Selected",
+        ),
+        TransferAuthorization(private_source=True),
+    )
+    monkeypatch.setattr(
+        "djsupport.web.default_publication_manifest_path",
+        lambda: publication_path,
+    )
+    monkeypatch.setattr(
+        "djsupport.config.ConfigManager.get_rekordbox_xml_path",
+        lambda self: str(tmp_path / "missing-source.xml"),
+    )
+    web = create_app(auth_manager=_authenticated_manager)
+
+    response = TestClient(web).get(
+        f"/rekordbox/qualification/drafts/{draft.draft_id}",
+        params={"authorize_private_source": "true"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == (
+        "Qualification source evidence is unavailable; review required"
+    )
+    assert "missing-source" not in response.text
 
 
 class TestAuthEndpoints:

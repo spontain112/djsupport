@@ -364,6 +364,10 @@ def sync(
                 authorization_required_document("plan", required), sort_keys=True,
             ))
             raise click.exceptions.Exit(2)
+    elif local_audio_audition and not authorization.private_source:
+        raise click.UsageError(
+            "Local audition requires --authorize-private-source."
+        )
     if local_audio_identity and no_cache:
         if agent_json:
             from djsupport.agent import error_document
@@ -447,6 +451,7 @@ def sync(
         click.echo(json.dumps(outcome, sort_keys=True))
         if outcome["status"] in {
             "authorization_required", "confirmation_required", "error",
+            "review_required",
         } or outcome.get("required_authorizations"):
             raise click.exceptions.Exit(2)
         return
@@ -487,9 +492,11 @@ def sync(
 
 
 @cli.command("qualification")
-@click.argument("transfer_id")
-@click.argument("xml_path", required=False, type=click.Path())
-@click.option("--playlist", required=True, help="Exact selected Rekordbox playlist reference.")
+@click.argument("transfer_id", required=False)
+@click.argument("xml_path_argument", required=False, type=click.Path())
+@click.option("--xml-path", default=None, type=click.Path(), help="Explicit Rekordbox XML path for a draft-scoped operation.")
+@click.option("--draft-id", default=None, help="Opaque Qualification Draft to resume.")
+@click.option("--playlist", default=None, help="Exact selected Rekordbox playlist reference when obtaining a draft.")
 @click.option("--include-all", is_flag=True, help="Include authoritative proposals for spot-checking.")
 @click.option("--item-id", default=None, help="Opaque queue item to revise.")
 @click.option(
@@ -504,18 +511,23 @@ def sync(
 @click.option("--reason", default=None, help="Optional private reason for a deferred item.")
 @click.option("--exclude", is_flag=True, help="Explicitly exclude one deferred item from apply.")
 @click.option("--apply", "apply_draft", is_flag=True, help="Apply a complete draft to its Provisional Playlist.")
+@click.option("--approve", "approve_draft", is_flag=True, help="Separately Approve an applied draft's stable playlist.")
+@click.option("--discard", "discard_draft", is_flag=True, help="Explicitly retire an unapplied draft without authority.")
+@click.option("--supersede", "supersede_draft", is_flag=True, help="Start fresh from an explicitly discarded draft.")
+@click.option("--link-transfer", default=None, help="Link a Preview draft to a distinct publishing Batch or Transfer.")
 @click.option("--no-cache", is_flag=True, help="Bypass retained matching knowledge.")
 @click.option("--cache-path", default=DEFAULT_MATCHING_KNOWLEDGE_PATH, show_default=True)
 @click.option("--state-path", default=DEFAULT_PUBLICATION_MANIFEST_PATH, show_default=True)
-@click.option("--local-audio-audition", is_flag=True, help="Enable authorized audition facts for this session.")
 @click.option("--authorize-private-source", is_flag=True, help="Authorize this bounded Rekordbox selection.")
 @click.option("--authorize-spotify-write", is_flag=True, help="Authorize explicit draft application.")
 @click.option("--review-origin", default="http://127.0.0.1:8000", show_default=True)
 @click.option("--json", "agent_json", is_flag=True, help="Emit the privacy-redacted agent contract.")
 def qualification_command(
-    transfer_id: str,
+    transfer_id: str | None,
+    xml_path_argument: str | None,
     xml_path: str | None,
-    playlist: str,
+    draft_id: str | None,
+    playlist: str | None,
     include_all: bool,
     item_id: str | None,
     decision: str | None,
@@ -523,16 +535,19 @@ def qualification_command(
     reason: str | None,
     exclude: bool,
     apply_draft: bool,
+    approve_draft: bool,
+    discard_draft: bool,
+    supersede_draft: bool,
+    link_transfer: str | None,
     no_cache: bool,
     cache_path: str,
     state_path: str,
-    local_audio_audition: bool,
     authorize_private_source: bool,
     authorize_spotify_write: bool,
     review_origin: str,
     agent_json: bool,
 ) -> None:
-    """Obtain, revise, or apply one Rekordbox Qualification Draft."""
+    """Obtain or perform one explicit operation on a Qualification Draft."""
     from djsupport.agent import (
         AgentTransferContract,
         authorization_required_document,
@@ -565,59 +580,145 @@ def qualification_command(
         raise click.UsageError(
             "Qualification requires --authorize-private-source."
         )
+    if xml_path is not None and xml_path_argument is not None:
+        raise click.UsageError("Use the XML positional argument or --xml-path, not both.")
+    selected_xml_path = xml_path or xml_path_argument
     if (item_id is None) != (decision is None):
         raise click.UsageError("Use --item-id and --decision together.")
-    xml_path = _resolve_xml_path(xml_path)
-    cache = None if no_cache else MatchCache(cache_path)
-    if cache is not None:
-        cache.load()
-    transfer = Transfer(
-        source=RekordboxPlaylistSource(
-            xml_path, include_locations=local_audio_audition,
-        ),
-        spotify=SpotifyMatcher(get_client()),
-        publishing_guards=AccountPublishingGuards(),
-        matching_knowledge=(
-            EphemeralMatchingKnowledge()
-            if cache is None else MatchCacheKnowledge(cache)
-        ),
-        publication_storage=FilePublicationStorage(state_path),
-        transfer_storage=FileTransferStorage(
-            str(Path(state_path).with_suffix(".transfers.json"))
-        ),
-        local_audition=(
-            LocalSourceAudition() if local_audio_audition else None
-        ),
-    )
+    operation_count = sum((
+        bool(item_id), apply_draft, approve_draft, discard_draft,
+        supersede_draft, link_transfer is not None,
+    ))
+    if operation_count > 1:
+        raise click.UsageError(
+            "Choose exactly one draft operation per invocation; Apply and "
+            "Approval are always separate."
+        )
+    if draft_id is None:
+        if operation_count:
+            raise click.UsageError("Draft operations require --draft-id.")
+        if transfer_id is None or playlist is None:
+            raise click.UsageError(
+                "Obtaining a draft requires TRANSFER_ID and --playlist."
+            )
+    elif transfer_id is not None or playlist is not None or include_all:
+        raise click.UsageError(
+            "Use --draft-id by itself for resumable draft-scoped operations."
+        )
+    try:
+        selected_xml_path = _resolve_xml_path(selected_xml_path)
+    except (click.ClickException, OSError, ValueError) as exc:
+        if not agent_json:
+            raise
+        click.echo(json.dumps(
+            error_document("qualification", "private_source_unavailable"),
+            sort_keys=True,
+        ))
+        raise click.exceptions.Exit(2) from exc
     authorization = TransferAuthorization(
         private_source=True,
         spotify_write=authorize_spotify_write,
     )
-    contract = AgentTransferContract(transfer)
-    request = QualificationRequest(
-        transfer_id=transfer_id,
-        playlist_reference=playlist,
-        include_all=include_all,
-    )
     try:
-        document = contract.qualification_draft(
-            request, authorization, review_origin=review_origin,
+        transfer_storage = FileTransferStorage(
+            str(Path(state_path).with_suffix(".transfers.json"))
         )
-        draft_id = document.get("draft_id")
-        if draft_id and item_id and decision:
-            transfer.record_qualification(
+        if draft_id is not None:
+            stored_draft = transfer_storage.load_qualification(draft_id)
+            stored_state = (
+                transfer_storage.load_transfer(stored_draft.transfer_id)
+                if stored_draft is not None else None
+            )
+            if stored_draft is None or stored_state is None:
+                raise ValueError("Qualification Draft is unavailable")
+            local_audio_audition = bool(
+                stored_state.request.get("local_audio_audition", False)
+            )
+            no_cache = not bool(
+                stored_state.request.get("retain_matching_knowledge", True)
+            )
+        else:
+            assert transfer_id is not None and playlist is not None
+            stored_batch = transfer_storage.load_batch(transfer_id)
+            stored_transfer_id = transfer_id
+            if stored_batch is not None:
+                selected = [
+                    item for item in stored_batch.playlists
+                    if item.reference == playlist
+                ]
+                if len(selected) != 1:
+                    raise ValueError("Qualification playlist is unavailable")
+                stored_transfer_id = selected[0].transfer_id
+            stored_state = transfer_storage.load_transfer(stored_transfer_id)
+            if stored_state is None:
+                raise ValueError("Qualification Transfer is unavailable")
+            local_audio_audition = bool(
+                stored_state.request.get("local_audio_audition", False)
+            )
+            no_cache = not bool(
+                stored_state.request.get("retain_matching_knowledge", True)
+            )
+        cache = None if no_cache else MatchCache(cache_path)
+        if cache is not None:
+            cache.load()
+        transfer = Transfer(
+            source=RekordboxPlaylistSource(
+                selected_xml_path, include_locations=local_audio_audition,
+            ),
+            spotify=SpotifyMatcher(get_client()),
+            publishing_guards=AccountPublishingGuards(),
+            matching_knowledge=(
+                EphemeralMatchingKnowledge()
+                if cache is None else MatchCacheKnowledge(cache)
+            ),
+            publication_storage=FilePublicationStorage(state_path),
+            transfer_storage=transfer_storage,
+            local_audition=(
+                LocalSourceAudition() if local_audio_audition else None
+            ),
+        )
+        contract = AgentTransferContract(transfer)
+        if draft_id is None:
+            assert transfer_id is not None and playlist is not None
+            document = contract.qualification_draft(
+                QualificationRequest(
+                    transfer_id=transfer_id,
+                    playlist_reference=playlist,
+                    include_all=include_all,
+                ),
+                authorization,
+                review_origin=review_origin,
+            )
+        elif item_id and decision:
+            document = contract.record_qualification(
                 draft_id,
                 item_id,
                 QualificationDecision(decision),
+                authorization,
                 spotify_reference=spotify_reference,
                 reason=reason,
                 exclude=exclude,
+                review_origin=review_origin,
             )
+        elif apply_draft:
+            document = contract.apply_qualification(draft_id, authorization)
+        elif approve_draft:
+            document = contract.approve_qualification(draft_id, authorization)
+        elif discard_draft:
+            document = contract.discard_qualification(draft_id, authorization)
+        elif supersede_draft:
+            document = contract.supersede_qualification(
+                draft_id, authorization, review_origin=review_origin,
+            )
+        elif link_transfer is not None:
+            document = contract.link_qualification(
+                draft_id, link_transfer, authorization,
+                review_origin=review_origin,
+            )
+        else:
             document = contract.qualification_progress(
                 draft_id, authorization, review_origin=review_origin,
             )
-        if draft_id and apply_draft:
-            document = contract.apply_qualification(draft_id, authorization)
     except (OSError, PermissionError, ValueError) as exc:
         if agent_json:
             click.echo(json.dumps(
@@ -628,10 +729,27 @@ def qualification_command(
         raise click.ClickException("Qualification operation is unavailable.") from exc
     if agent_json:
         click.echo(json.dumps(document, sort_keys=True))
-        if document["status"] in {"authorization_required", "error"}:
+        if document["status"] in {
+            "authorization_required", "error", "review_required",
+        }:
             raise click.exceptions.Exit(2)
         return
-    view = transfer.qualification(document["draft_id"])
+    if document["status"] in {"authorization_required", "error"}:
+        raise click.ClickException("Qualification operation is unavailable.")
+    if document["status"] == "review_required":
+        handle = document.get("draft_id", "the selected draft")
+        raise click.ClickException(
+            f"Qualification review required for {handle}; use --discard "
+            "before an explicit --supersede."
+        )
+    if document["phase"] == "qualification_approval":
+        click.echo(
+            f"Qualification Approval: {document['status']}; "
+            f"{document['counts']['approved']} approved, "
+            f"{document['counts']['rejected']} rejected."
+        )
+        return
+    view = transfer.qualification(document["draft_id"], authorization)
     click.echo(
         f"Qualification Draft {view.draft_id}: {view.status.value}; "
         f"{len(view.items)} items, {view.pending} pending, "
@@ -684,7 +802,10 @@ def approve(
     from djsupport.transfer import (
         BeatportChartSource,
         FilePublicationStorage,
+        FileTransferStorage,
         MatchCacheKnowledge,
+        SpotifyPlaylistChanged,
+        SpotifyPlaylistReviewRequired,
         SpotifyMatcher,
         Transfer,
     )
@@ -697,12 +818,19 @@ def approve(
         publishing_guards=AccountPublishingGuards(),
         matching_knowledge=MatchCacheKnowledge(cache),
         publication_storage=FilePublicationStorage(state_path),
+        transfer_storage=FileTransferStorage(
+            str(Path(state_path).with_suffix(".transfers.json"))
+        ),
     )
     try:
         if review_csv is None:
             review = transfer.approve(playlist_id)
         else:
             review = transfer.approve(playlist_id, corrections=review_csv)
+    except (SpotifyPlaylistChanged, SpotifyPlaylistReviewRequired) as exc:
+        raise click.ClickException(
+            "Playlist review is required before Approval."
+        ) from exc
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
     if review.status.value == "abandoned":

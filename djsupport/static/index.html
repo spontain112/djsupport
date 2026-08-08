@@ -780,13 +780,18 @@
                 <div class="qualification-panel-label">One outcome</div>
                 <p class="decision-copy">This draft has no matching or playlist authority. Choose only what you verified.</p>
                 <div id="decision-actions">
-                    <button class="decision-btn decision-btn--correct" type="button" onclick="submitQualification('keep_proposal')">CORRECT</button>
-                    <button class="decision-btn" type="button" onclick="submitQualification('correction')">WRONG — FIND ANOTHER</button>
-                    <button class="decision-btn" type="button" onclick="submitQualification('deferred')">CANNOT VERIFY</button>
-                    <button class="decision-btn decision-btn--danger" type="button" onclick="submitQualification('reject_proposal')">NOT MY SOURCE</button>
+                    <button data-decision="keep_proposal" class="decision-btn decision-btn--correct" type="button" onclick="submitQualification('keep_proposal')">CORRECT</button>
+                    <button data-decision="correction" class="decision-btn" type="button" onclick="submitQualification('correction')">WRONG — FIND ANOTHER</button>
+                    <button data-decision="deferred" class="decision-btn" type="button" onclick="submitQualification('deferred')">CANNOT VERIFY</button>
+                    <button data-decision="reject_proposal" class="decision-btn decision-btn--danger" type="button" onclick="submitQualification('reject_proposal')">NOT MY SOURCE</button>
                 </div>
                 <p class="draft-authority">Applying changes only the linked Provisional Playlist. Approval remains a later, separate operation.</p>
+                <button id="include-all-btn" class="btn btn--ghost apply-draft hidden" type="button" onclick="includeAllQualification()">INCLUDE ALL PROPOSALS</button>
                 <button id="apply-draft-btn" class="btn btn--disabled apply-draft" type="button" onclick="applyQualification()" disabled>APPLY DRAFT</button>
+                <button id="link-draft-btn" class="btn btn--ghost apply-draft hidden" type="button" onclick="linkQualification()">LINK PUBLISHED MIRROR</button>
+                <button id="approve-draft-btn" class="btn btn--accent apply-draft hidden" type="button" onclick="approveQualification()">APPROVE PLAYLIST</button>
+                <button id="discard-draft-btn" class="btn btn--ghost apply-draft hidden" type="button" onclick="discardQualification()">DISCARD DRAFT</button>
+                <button id="supersede-draft-btn" class="btn btn--ghost apply-draft hidden" type="button" onclick="supersedeQualification()">START FRESH REVIEW</button>
             </aside>
         </div>
     </main>
@@ -901,11 +906,34 @@
             return `<div class="evidence-row"><span class="evidence-key">${esc(key)}</span><span class="evidence-value">${esc(value || 'Not retained')}</span></div>`;
         }
 
+        function availabilityEvidence(proposal) {
+            const details = [proposal.availability_status || 'unknown'];
+            if (proposal.availability_reason) details.push(proposal.availability_reason.replace(/_/g, ' '));
+            details.push(proposal.availability_checked_at
+                ? `checked ${proposal.availability_checked_at}`
+                : 'not checked');
+            if (proposal.availability_source) details.push(proposal.availability_source.replace(/_/g, ' '));
+            return details.join(' · ');
+        }
+
         function renderQualification() {
             if (!qualificationData) return;
             const items = qualificationData.items || [];
             const decided = items.filter((item) => item.decision && !(item.decision === 'deferred' && !item.excluded)).length;
             document.getElementById('qualification-progress').textContent = `${decided}/${items.length} outcomes · ${qualificationData.status.replace(/_/g, ' ')}`;
+            const nextActions = new Set(qualificationData.next_actions || []);
+            const apply = document.getElementById('apply-draft-btn');
+            const canApply = nextActions.has('apply') || nextActions.has('resume');
+            apply.disabled = !canApply;
+            apply.textContent = nextActions.has('resume') ? 'RESUME APPLY' : 'APPLY DRAFT';
+            apply.className = canApply ? 'btn btn--accent apply-draft' : 'btn btn--disabled apply-draft';
+            document.getElementById('link-draft-btn').classList.toggle('hidden', !nextActions.has('publish_and_link'));
+            document.getElementById('approve-draft-btn').classList.toggle('hidden', !nextActions.has('approve'));
+            document.getElementById('discard-draft-btn').classList.toggle('hidden', !nextActions.has('discard'));
+            document.getElementById('supersede-draft-btn').classList.toggle('hidden', !nextActions.has('supersede'));
+            document.getElementById('include-all-btn').classList.toggle(
+                'hidden', qualificationData.include_all || !['draft', 'ready'].includes(qualificationData.status)
+            );
             const queue = document.getElementById('qualification-queue');
             queue.innerHTML = '<div class="qualification-panel-label">Needs attention</div>' + items.map((item, index) => {
                 const state = item.decision ? item.decision.replace(/_/g, ' ') : item.proposal.attention_reasons.join(' · ');
@@ -913,13 +941,14 @@
             }).join('');
             if (!items.length) {
                 document.getElementById('qualification-empty').textContent = 'No proposals currently need attention.';
-                const emptyApply = document.getElementById('apply-draft-btn');
-                emptyApply.disabled = false;
-                emptyApply.className = 'btn btn--accent apply-draft';
                 return;
             }
             qualificationIndex = Math.min(qualificationIndex, items.length - 1);
             const item = items[qualificationIndex];
+            const permitted = new Set(item.permitted_actions || []);
+            document.querySelectorAll('#decision-actions [data-decision]').forEach((button) => {
+                button.classList.toggle('hidden', !permitted.has(button.dataset.decision));
+            });
             document.getElementById('qualification-empty').classList.add('hidden');
             document.getElementById('qualification-item').classList.remove('hidden');
             document.getElementById('qualification-title').textContent = item.source.title;
@@ -934,7 +963,7 @@
             localPlayer.load();
             localPlayer.classList.add('hidden');
             const localButton = document.getElementById('local-play-btn');
-            const localAvailable = item.audition_status === 'available';
+            const localAvailable = ['available', 'available_on_request'].includes(item.audition_status);
             localButton.classList.toggle('hidden', !localAvailable);
             document.getElementById('local-player-copy').textContent = localAvailable
                 ? 'Open this exact selected occurrence after private-source authorization.'
@@ -960,13 +989,11 @@
                     ${evidenceRow('Spotify', `${item.spotify.artist} — ${item.spotify.name}`)}
                     ${evidenceRow('Release', item.spotify.release)}
                     ${evidenceRow('Duration', formatDuration(item.spotify.duration))}
+                    ${evidenceRow('Authority', item.proposal.authority_status)}
+                    ${evidenceRow('Availability', availabilityEvidence(item.proposal))}
                     ${evidenceRow('Match type', item.proposal.match_type.replace(/_/g, ' '))}
                     ${evidenceRow('Evidence', `${item.proposal.score.toFixed(0)} · ${item.proposal.score_reasons.join(', ')}`)}
                 </div>`;
-            const complete = qualificationData.counts.pending === 0 && qualificationData.counts.deferred === 0;
-            const apply = document.getElementById('apply-draft-btn');
-            apply.disabled = !complete;
-            apply.className = complete ? 'btn btn--accent apply-draft' : 'btn btn--disabled apply-draft';
         }
 
         function selectQualification(index) {
@@ -1000,12 +1027,16 @@
             const item = qualificationData.items[qualificationIndex];
             let spotifyReference = null;
             let reason = null;
+            let exclude = false;
             if (decision === 'correction') {
                 spotifyReference = window.prompt('Paste the explicitly selected Spotify track URL or URI:');
                 if (!spotifyReference) return;
             }
             if (decision === 'deferred') {
                 reason = window.prompt('Optional private note (leave blank for none):') || null;
+                exclude = window.confirm(
+                    'Explicitly exclude this unresolved proposal from draft application? Cancel keeps it deferred and blocks Apply.'
+                );
             }
             const response = await fetch(
                 `/rekordbox/qualification/drafts/${encodeURIComponent(qualificationData.draft_id)}/decisions`,
@@ -1017,6 +1048,7 @@
                         decision,
                         spotify_reference: spotifyReference,
                         reason,
+                        exclude,
                         authorize_private_source: true,
                     }),
                 },
@@ -1032,6 +1064,24 @@
             qualificationIndex = next >= 0 ? next : Math.max(0, qualificationData.items.findIndex(
                 (candidate) => !candidate.decision || (candidate.decision === 'deferred' && !candidate.excluded)
             ));
+            renderQualification();
+        }
+
+        async function includeAllQualification() {
+            const response = await fetch(
+                `/rekordbox/qualification/drafts/${encodeURIComponent(qualificationData.draft_id)}/include-all`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ authorize_private_source: true }),
+                },
+            );
+            if (!response.ok) {
+                const result = await response.json();
+                document.getElementById('qualification-progress').textContent = result.detail || 'Spot-check queue unavailable';
+                return;
+            }
+            qualificationData = await response.json();
             renderQualification();
         }
 
@@ -1052,6 +1102,86 @@
             document.getElementById('qualification-progress').textContent = response.ok
                 ? 'Draft applied · Approval remains separate'
                 : (result.detail || 'Draft application blocked');
+            if (response.ok) await loadQualification(qualificationData.draft_id);
+        }
+
+        async function linkQualification() {
+            const publishingTransferId = window.prompt('Paste the completed publishing Batch or Transfer ID:');
+            if (!publishingTransferId) return;
+            const response = await fetch(
+                `/rekordbox/qualification/drafts/${encodeURIComponent(qualificationData.draft_id)}/link`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        publishing_transfer_id: publishingTransferId,
+                        authorize_private_source: true,
+                    }),
+                },
+            );
+            const result = await response.json();
+            if (!response.ok) {
+                document.getElementById('qualification-progress').textContent = result.detail || 'Link blocked';
+                return;
+            }
+            qualificationData = result;
+            renderQualification();
+        }
+
+        async function discardQualification() {
+            if (!window.confirm('Discard this draft? It creates no authority and keeps Approval blocked until a fresh draft is applied.')) return;
+            const response = await fetch(
+                `/rekordbox/qualification/drafts/${encodeURIComponent(qualificationData.draft_id)}/discard`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ authorize_private_source: true }),
+                },
+            );
+            if (response.ok) {
+                qualificationData = await response.json();
+                renderQualification();
+            } else {
+                const result = await response.json();
+                document.getElementById('qualification-progress').textContent = result.detail || 'Discard blocked';
+            }
+        }
+
+        async function supersedeQualification() {
+            const response = await fetch(
+                `/rekordbox/qualification/drafts/${encodeURIComponent(qualificationData.draft_id)}/supersede`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ authorize_private_source: true }),
+                },
+            );
+            const result = await response.json();
+            if (!response.ok) {
+                document.getElementById('qualification-progress').textContent = result.detail || 'Fresh review blocked';
+                return;
+            }
+            qualificationData = result;
+            history.replaceState(null, '', `/qualification/${encodeURIComponent(result.draft_id)}`);
+            renderQualification();
+        }
+
+        async function approveQualification() {
+            if (!window.confirm('Approve the stable Provisional Playlist and record matching authority?')) return;
+            const response = await fetch(
+                `/rekordbox/qualification/drafts/${encodeURIComponent(qualificationData.draft_id)}/approve`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        authorize_private_source: true,
+                    }),
+                },
+            );
+            const result = await response.json();
+            document.getElementById('qualification-progress').textContent = response.ok
+                ? `Playlist ${result.status.replace(/_/g, ' ')}`
+                : (result.detail || 'Approval blocked');
         }
 
         // URL validation

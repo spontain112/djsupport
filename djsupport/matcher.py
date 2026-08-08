@@ -172,7 +172,16 @@ def _score_components(track: Track, result: dict) -> dict[str, float]:
 
 def _classify_version_match(track: Track, result: dict) -> str:
     """Classify version agreement as exact or fallback_version."""
-    track_mix = _extract_mix_descriptor(track.name)
+    retained_version = _normalize(track.version)
+    track_mix = (
+        retained_version
+        if retained_version and re.search(
+            r"\b(mix|remix|edit|version|dub|original|extended|radio|"
+            r"instrumental|interpretation|short)\b",
+            retained_version,
+        )
+        else _extract_mix_descriptor(track.name)
+    )
     result_mix = _extract_mix_descriptor(result["name"])
 
     track_named_variant = _is_named_variant(track_mix)

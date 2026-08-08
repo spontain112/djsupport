@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import secrets
 import time
@@ -9,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterator
 from urllib.parse import unquote, urlparse
+from urllib.request import url2pathname
 
 from djsupport.rekordbox import Track
 
@@ -183,7 +185,10 @@ class LocalSourceAudition:
             return LocalAuditionResult.unavailable("unsupported_location")
         if parsed.scheme == "file" and parsed.netloc not in ("", "localhost"):
             return LocalAuditionResult.unavailable("unsupported_location")
-        raw_path = unquote(parsed.path) if parsed.scheme else location
+        raw_path = (
+            self._file_uri_path(parsed.path)
+            if parsed.scheme else location
+        )
         if not raw_path:
             return LocalAuditionResult.unavailable("missing_location")
         if any(character in raw_path for character in ("*", "?", "[", "]")):
@@ -203,6 +208,15 @@ class LocalSourceAudition:
         except OSError:
             return LocalAuditionResult.unavailable("unreadable_media")
         return path, media_type, size
+
+    @staticmethod
+    def _file_uri_path(uri_path: str, *, windows: bool | None = None) -> str:
+        """Convert a local file-URI path using the host platform's rules."""
+        decoded = unquote(uri_path)
+        windows = os.name == "nt" if windows is None else windows
+        if windows and re.match(r"^/[A-Za-z]:[/\\]", decoded):
+            decoded = decoded[1:]
+        return url2pathname(decoded)
 
     def _range(
         self, header: str | None, total: int,

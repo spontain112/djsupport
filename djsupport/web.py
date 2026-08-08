@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import logging
 import threading
@@ -44,6 +45,7 @@ from djsupport.transfer import (
     QualificationRequest,
     QualificationView,
     RekordboxPlaylistSource,
+    SpotifyPlaylistChanged,
     SpotifyPlaylistReviewRequired,
     SpotifyMatcher,
     Transfer,
@@ -131,6 +133,26 @@ class QualificationDecisionRequest(BaseModel):
 class QualificationAuthorizationRequest(BaseModel):
     authorize_private_source: bool = False
     authorize_spotify_write: bool = False
+
+
+class QualificationLinkRequest(BaseModel):
+    publishing_transfer_id: str
+    authorize_private_source: bool = False
+
+
+QUALIFICATION_PRIVACY_HEADERS = {
+    "Cache-Control": "private, no-store",
+    "Content-Security-Policy": (
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; connect-src 'self'; "
+        "img-src 'self' data:; media-src 'self'; "
+        "frame-src https://open.spotify.com"
+    ),
+    "Cross-Origin-Resource-Policy": "same-origin",
+    "Referrer-Policy": "no-referrer",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+}
 
 
 def _auth_manager() -> SpotifyOAuth:
@@ -255,6 +277,35 @@ def create_app(
     run_background = background_runner or _thread_runner
     qualification_contexts: dict[str, QualificationDraftRequest] = {}
 
+    @web_app.middleware("http")
+    async def qualification_privacy(request: FastAPIRequest, call_next):
+        qualification_route = (
+            request.url.path.startswith("/rekordbox/qualification/")
+            or request.url.path.startswith("/qualification/")
+        )
+        if qualification_route:
+            try:
+                require_qualification_loopback(request)
+            except HTTPException as exc:
+                response = JSONResponse(
+                    status_code=exc.status_code,
+                    content={"detail": exc.detail},
+                )
+            else:
+                response = await call_next(request)
+            privacy_headers = dict(QUALIFICATION_PRIVACY_HEADERS)
+            if request.url.path.startswith(
+                "/rekordbox/qualification/media/"
+            ):
+                privacy_headers["Content-Security-Policy"] = (
+                    "default-src 'none'; media-src 'self'"
+                )
+            for name, value in privacy_headers.items():
+                response.headers[name] = value
+        else:
+            response = await call_next(request)
+        return response
+
     def oauth_manager():
         return auth_manager() if auth_manager is not None else _auth_manager()
 
@@ -263,6 +314,48 @@ def create_app(
         token = mgr.get_cached_token()
         if not token or mgr.is_token_expired(token):
             raise HTTPException(status_code=401, detail="Not authenticated with Spotify")
+
+    def require_qualification_loopback(request: FastAPIRequest) -> None:
+        peer = request.client.host if request.client else ""
+
+        def is_loopback(value: str, *, allow_test: bool = False) -> bool:
+            if value == "localhost" or (allow_test and value == "testserver"):
+                return True
+            try:
+                return ipaddress.ip_address(value).is_loopback
+            except ValueError:
+                return False
+
+        peer_is_test = peer == "testclient"
+        if not (peer_is_test or is_loopback(peer)):
+            raise HTTPException(
+                status_code=403,
+                detail="Qualification Workspace is available only on loopback",
+            )
+        host_header = request.headers.get("host", "")
+        try:
+            request_host = urlparse(f"//{host_header}").hostname or ""
+        except ValueError:
+            request_host = ""
+        if not is_loopback(request_host, allow_test=peer_is_test):
+            raise HTTPException(
+                status_code=403,
+                detail="Qualification Workspace requires a loopback Host",
+            )
+        if request.method not in {"GET", "HEAD", "OPTIONS"}:
+            origin = request.headers.get("origin")
+            if origin:
+                try:
+                    origin_host = urlparse(origin).hostname or ""
+                except ValueError:
+                    origin_host = ""
+                if not is_loopback(origin_host, allow_test=peer_is_test):
+                    raise HTTPException(
+                        status_code=403,
+                        detail=(
+                            "Qualification Workspace requires a loopback Origin"
+                        ),
+                    )
 
     def transfer_for(transfer_id: str, request: SyncRequest | None = None):
         probe_request = request or SyncRequest(
@@ -457,32 +550,86 @@ def create_app(
             authorize_private_source=True,
         )
 
+    def durable_qualification_context(
+        request: QualificationDraftRequest,
+    ) -> QualificationDraftRequest:
+        """Derive adapter wiring from durable Transfer intent, not web input."""
+        if not uses_default_rekordbox_wiring:
+            return request
+        publication_path = default_publication_manifest_path()
+        storage = FileTransferStorage(
+            publication_path.with_suffix(".transfers.json")
+        )
+        batch = storage.load_batch(request.transfer_id)
+        transfer_id = request.transfer_id
+        if batch is not None:
+            selected = [
+                item for item in batch.playlists
+                if item.reference == request.playlist_reference
+            ]
+            if len(selected) != 1:
+                return request
+            transfer_id = selected[0].transfer_id
+        state = storage.load_transfer(transfer_id)
+        if state is None:
+            return request
+        return request.copy(update={
+            "no_cache": not state.request.get(
+                "retain_matching_knowledge", True,
+            ),
+            "local_audio_identity": state.request.get(
+                "local_audio_identity", False,
+            ),
+            "local_audio_audition": state.request.get(
+                "local_audio_audition", False,
+            ),
+        })
+
     def qualification_transfer(draft_id: str) -> Transfer:
-        context = qualification_contexts.get(draft_id)
-        if context is None:
+        context = None
+        if uses_default_rekordbox_wiring:
             context = recover_qualification_context(draft_id)
             if context is not None:
                 qualification_contexts[draft_id] = context
+        else:
+            context = qualification_contexts.get(draft_id)
         if context is None:
+            if uses_default_rekordbox_wiring:
+                publication_path = default_publication_manifest_path()
+                storage = FileTransferStorage(
+                    publication_path.with_suffix(".transfers.json")
+                )
+                if storage.load_qualification(draft_id) is not None:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "Qualification source evidence is unavailable; "
+                            "review required"
+                        ),
+                    )
             raise HTTPException(
                 status_code=404, detail="Qualification Draft is unavailable",
             )
         return make_rekordbox_transfer(context.transfer_request(), True)
 
     @web_app.post("/rekordbox/qualification/drafts")
-    def create_qualification_draft(request: QualificationDraftRequest):
-        if not request.authorize_private_source:
+    def create_qualification_draft(
+        request: FastAPIRequest, payload: QualificationDraftRequest,
+    ):
+        require_qualification_loopback(request)
+        if not payload.authorize_private_source:
             raise HTTPException(
                 status_code=403, detail="Private source authorization required",
             )
         require_authenticated()
-        transfer = make_rekordbox_transfer(request.transfer_request(), True)
+        context = durable_qualification_context(payload)
+        transfer = make_rekordbox_transfer(context.transfer_request(), True)
         try:
             view = transfer.obtain_qualification(
                 QualificationRequest(
-                    transfer_id=request.transfer_id,
-                    playlist_reference=request.playlist_reference,
-                    include_all=request.include_all,
+                    transfer_id=payload.transfer_id,
+                    playlist_reference=payload.playlist_reference,
+                    include_all=payload.include_all,
                 ),
                 TransferAuthorization(private_source=True),
             )
@@ -494,13 +641,16 @@ def create_app(
             raise HTTPException(
                 status_code=400, detail="Qualification Draft is unavailable",
             ) from exc
-        qualification_contexts[view.draft_id] = request
+        qualification_contexts[view.draft_id] = context
         return _qualification_to_dict(view)
 
     @web_app.get("/rekordbox/qualification/drafts/{draft_id}")
     def get_qualification_draft(
-        draft_id: str, authorize_private_source: bool = False,
+        draft_id: str,
+        request: FastAPIRequest,
+        authorize_private_source: bool = False,
     ):
+        require_qualification_loopback(request)
         if not authorize_private_source:
             raise HTTPException(
                 status_code=403, detail="Private source authorization required",
@@ -508,7 +658,9 @@ def create_app(
         require_authenticated()
         try:
             return _qualification_to_dict(
-                qualification_transfer(draft_id).qualification(draft_id)
+                qualification_transfer(draft_id).qualification(
+                    draft_id, TransferAuthorization(private_source=True),
+                )
             )
         except ValueError as exc:
             raise HTTPException(
@@ -517,9 +669,12 @@ def create_app(
 
     @web_app.post("/rekordbox/qualification/drafts/{draft_id}/decisions")
     def decide_qualification_item(
-        draft_id: str, request: QualificationDecisionRequest,
+        draft_id: str,
+        request: FastAPIRequest,
+        payload: QualificationDecisionRequest,
     ):
-        if not request.authorize_private_source:
+        require_qualification_loopback(request)
+        if not payload.authorize_private_source:
             raise HTTPException(
                 status_code=403, detail="Private source authorization required",
             )
@@ -527,11 +682,12 @@ def create_app(
         try:
             view = qualification_transfer(draft_id).record_qualification(
                 draft_id,
-                request.item_id,
-                request.decision,
-                spotify_reference=request.spotify_reference,
-                reason=request.reason,
-                exclude=request.exclude,
+                payload.item_id,
+                payload.decision,
+                TransferAuthorization(private_source=True),
+                spotify_reference=payload.spotify_reference,
+                reason=payload.reason,
+                exclude=payload.exclude,
             )
         except ValueError as exc:
             raise HTTPException(
@@ -540,14 +696,53 @@ def create_app(
         return _qualification_to_dict(view)
 
     @web_app.post(
+        "/rekordbox/qualification/drafts/{draft_id}/include-all"
+    )
+    def include_all_qualification_items(
+        draft_id: str,
+        request: FastAPIRequest,
+        payload: QualificationAuthorizationRequest,
+    ):
+        require_qualification_loopback(request)
+        if not payload.authorize_private_source:
+            raise HTTPException(
+                status_code=403, detail="Private source authorization required",
+            )
+        require_authenticated()
+        transfer = qualification_transfer(draft_id)
+        context = qualification_contexts[draft_id]
+        try:
+            view = transfer.obtain_qualification(
+                QualificationRequest(
+                    transfer_id=context.transfer_id,
+                    playlist_reference=context.playlist_reference,
+                    include_all=True,
+                ),
+                TransferAuthorization(private_source=True),
+            )
+        except SpotifyPlaylistReviewRequired as exc:
+            raise HTTPException(
+                status_code=409, detail="Qualification review required",
+            ) from exc
+        except (PermissionError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400,
+                detail="Qualification Draft cannot include all proposals",
+            ) from exc
+        qualification_contexts[view.draft_id] = context
+        return _qualification_to_dict(view)
+
+    @web_app.post(
         "/rekordbox/qualification/drafts/{draft_id}/audition/{item_id}"
     )
     def audition_qualification_item(
         draft_id: str,
         item_id: str,
-        request: QualificationAuthorizationRequest,
+        request: FastAPIRequest,
+        payload: QualificationAuthorizationRequest,
     ):
-        if not request.authorize_private_source:
+        require_qualification_loopback(request)
+        if not payload.authorize_private_source:
             raise HTTPException(
                 status_code=403, detail="Private source authorization required",
             )
@@ -558,6 +753,10 @@ def create_app(
                 item_id,
                 TransferAuthorization(private_source=True),
             )
+        except (SpotifyPlaylistChanged, SpotifyPlaylistReviewRequired) as exc:
+            raise HTTPException(
+                status_code=409, detail="Qualification review required",
+            ) from exc
         except (PermissionError, ValueError) as exc:
             raise HTTPException(
                 status_code=400, detail="Local audition is unavailable",
@@ -578,13 +777,16 @@ def create_app(
 
     @web_app.post("/rekordbox/qualification/drafts/{draft_id}/apply")
     def apply_qualification_draft(
-        draft_id: str, request: QualificationAuthorizationRequest,
+        draft_id: str,
+        request: FastAPIRequest,
+        payload: QualificationAuthorizationRequest,
     ):
-        if not request.authorize_private_source:
+        require_qualification_loopback(request)
+        if not payload.authorize_private_source:
             raise HTTPException(
                 status_code=403, detail="Private source authorization required",
             )
-        if not request.authorize_spotify_write:
+        if not payload.authorize_spotify_write:
             raise HTTPException(
                 status_code=403, detail="Spotify write authorization required",
             )
@@ -594,7 +796,7 @@ def create_app(
                 draft_id,
                 TransferAuthorization(private_source=True, spotify_write=True),
             )
-        except SpotifyPlaylistReviewRequired as exc:
+        except (SpotifyPlaylistChanged, SpotifyPlaylistReviewRequired) as exc:
             raise HTTPException(
                 status_code=409, detail="Qualification review required",
             ) from exc
@@ -610,31 +812,150 @@ def create_app(
             "next_actions": list(outcome.next_actions),
         }
 
+    @web_app.post("/rekordbox/qualification/drafts/{draft_id}/link")
+    def link_qualification_draft(
+        draft_id: str,
+        request: FastAPIRequest,
+        payload: QualificationLinkRequest,
+    ):
+        require_qualification_loopback(request)
+        if not payload.authorize_private_source:
+            raise HTTPException(
+                status_code=403, detail="Private source authorization required",
+            )
+        require_authenticated()
+        try:
+            view = qualification_transfer(draft_id).link_qualification(
+                draft_id,
+                payload.publishing_transfer_id,
+                TransferAuthorization(private_source=True),
+            )
+        except (SpotifyPlaylistChanged, SpotifyPlaylistReviewRequired) as exc:
+            raise HTTPException(
+                status_code=409, detail="Qualification review required",
+            ) from exc
+        except (PermissionError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400, detail="Qualification Draft cannot be linked",
+            ) from exc
+        return _qualification_to_dict(view)
+
+    @web_app.post("/rekordbox/qualification/drafts/{draft_id}/discard")
+    def discard_qualification_draft(
+        draft_id: str,
+        request: FastAPIRequest,
+        payload: QualificationAuthorizationRequest,
+    ):
+        require_qualification_loopback(request)
+        if not payload.authorize_private_source:
+            raise HTTPException(
+                status_code=403, detail="Private source authorization required",
+            )
+        require_authenticated()
+        try:
+            view = qualification_transfer(draft_id).discard_qualification(
+                draft_id, TransferAuthorization(private_source=True),
+            )
+        except (PermissionError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400, detail="Qualification Draft cannot be discarded",
+            ) from exc
+        return _qualification_to_dict(view)
+
+    @web_app.post("/rekordbox/qualification/drafts/{draft_id}/supersede")
+    def supersede_qualification_draft(
+        draft_id: str,
+        request: FastAPIRequest,
+        payload: QualificationAuthorizationRequest,
+    ):
+        require_qualification_loopback(request)
+        if not payload.authorize_private_source:
+            raise HTTPException(
+                status_code=403, detail="Private source authorization required",
+            )
+        require_authenticated()
+        try:
+            view = qualification_transfer(draft_id).supersede_qualification(
+                draft_id, TransferAuthorization(private_source=True),
+            )
+        except SpotifyPlaylistReviewRequired as exc:
+            raise HTTPException(
+                status_code=409, detail="Qualification review required",
+            ) from exc
+        except (PermissionError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400, detail="Qualification Draft cannot be superseded",
+            ) from exc
+        qualification_contexts[view.draft_id] = qualification_contexts[draft_id]
+        return _qualification_to_dict(view)
+
+    @web_app.post("/rekordbox/qualification/drafts/{draft_id}/approve")
+    def approve_qualification_draft(
+        draft_id: str,
+        request: FastAPIRequest,
+        payload: QualificationAuthorizationRequest,
+    ):
+        require_qualification_loopback(request)
+        if not payload.authorize_private_source:
+            raise HTTPException(
+                status_code=403, detail="Private source authorization required",
+            )
+        require_authenticated()
+        try:
+            outcome = qualification_transfer(draft_id).approve_qualification(
+                draft_id,
+                TransferAuthorization(private_source=True),
+            )
+        except (SpotifyPlaylistChanged, SpotifyPlaylistReviewRequired) as exc:
+            raise HTTPException(
+                status_code=409, detail="Qualification review required",
+            ) from exc
+        except (PermissionError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400, detail="Qualification Draft cannot be approved",
+            ) from exc
+        return {
+            "draft_id": draft_id,
+            "status": outcome.status.value.replace(" ", "_"),
+            "authority": (
+                "playlist_approval"
+                if outcome.status.value == "approved" else "none"
+            ),
+            "counts": {
+                "approved": len(outcome.approved),
+                "rejected": len(outcome.rejected),
+                "collisions": len(outcome.collisions),
+                "corrections": len(outcome.corrections),
+            },
+            "next_actions": (
+                ["review"] if outcome.status.value == "needs review" else []
+            ),
+        }
+
     @web_app.get("/rekordbox/qualification/media/{handle}")
     def qualification_media(handle: str, request: FastAPIRequest):
-        client_host = request.client.host if request.client else ""
-        if client_host not in {"127.0.0.1", "::1", "localhost", "testclient"}:
-            raise HTTPException(status_code=403, detail="Local media only")
+        require_qualification_loopback(request)
+        privacy_headers = QUALIFICATION_PRIVACY_HEADERS
         try:
             stream = audition.stream(handle, request.headers.get("range"))
         except AuditionHandleUnavailable as exc:
             raise HTTPException(
                 status_code=404, detail="Local audition is unavailable",
+                headers=privacy_headers,
             ) from exc
         except AuditionRangeNotSatisfiable as exc:
             raise HTTPException(
                 status_code=416,
                 detail="Audition byte range is not satisfiable",
-                headers={"Content-Range": f"bytes */{exc.total_size}"},
+                headers={
+                    **privacy_headers,
+                    "Content-Range": f"bytes */{exc.total_size}",
+                },
             ) from exc
         headers = {
+            **privacy_headers,
             "Accept-Ranges": "bytes",
             "Content-Length": str(stream.content_length),
-            "Cache-Control": "private, no-store",
-            "Content-Security-Policy": "default-src 'none'; media-src 'self'",
-            "Cross-Origin-Resource-Policy": "same-origin",
-            "Referrer-Policy": "no-referrer",
-            "X-Content-Type-Options": "nosniff",
         }
         if stream.content_range is not None:
             headers["Content-Range"] = stream.content_range
@@ -700,7 +1021,8 @@ def create_app(
         return HTMLResponse((STATIC_DIR / "index.html").read_text())
 
     @web_app.get("/qualification/{draft_id}")
-    def qualification_workspace(draft_id: str):
+    def qualification_workspace(draft_id: str, request: FastAPIRequest):
+        require_qualification_loopback(request)
         del draft_id
         return HTMLResponse((STATIC_DIR / "index.html").read_text())
 
@@ -755,7 +1077,14 @@ def _qualification_to_dict(view: QualificationView) -> dict[str, Any]:
                 "score_reasons": list(item.score_reasons),
                 "authority_status": item.authority_status,
                 "attention_reasons": list(item.attention_reasons),
+                "availability_status": item.availability_status,
+                "availability_reason": item.availability_reason,
+                "availability_checked_at": item.availability_checked_at,
+                "availability_source": item.availability_source,
             },
+            "permitted_actions": [
+                action.value for action in item.permitted_actions
+            ],
             "audition_status": item.audition_status,
             "audition_reason": item.audition_reason,
             "decision": item.decision.value if item.decision else None,
@@ -768,12 +1097,16 @@ def _qualification_to_dict(view: QualificationView) -> dict[str, Any]:
         "transfer_id": view.transfer_id,
         "status": view.status.value,
         "authority": "none",
+        "next_actions": list(view.next_actions),
         "include_all": view.include_all,
         "counts": {
             "items": len(view.items),
             "pending": view.pending,
             "deferred": view.deferred,
         },
+        "current_item_id": (
+            view.current_item.item_id if view.current_item is not None else None
+        ),
         "items": items,
     }
 

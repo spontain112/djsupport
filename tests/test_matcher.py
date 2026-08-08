@@ -24,7 +24,10 @@ from djsupport.cache import MatchCache
 from djsupport.rekordbox import Track
 
 
-def make_track(name="Test Track", artist="Test Artist", remixer="", duration=0):
+def make_track(
+    name="Test Track", artist="Test Artist", remixer="", duration=0,
+    version="",
+):
     return Track(
         track_id="1",
         name=name,
@@ -35,6 +38,7 @@ def make_track(name="Test Track", artist="Test Artist", remixer="", duration=0):
         genre="",
         date_added="",
         duration=duration,
+        version=version,
     )
 
 
@@ -211,6 +215,12 @@ class TestIsNamedVariant:
 
 
 class TestClassifyVersionMatch:
+    def test_rekordbox_mix_metadata_protects_plain_title_version_intent(self):
+        track = make_track("Track", version="Extended Mix")
+        result = make_result("Track")
+
+        assert _classify_version_match(track, result) == "fallback_version"
+
     def test_both_original_mix_is_exact(self):
         track = make_track("Vultora (Original Mix)")
         result = make_result("Vultora (Original Mix)")
@@ -284,6 +294,27 @@ class TestMatchTrack:
         assert result["uri"] == "spotify:track:abc"
         assert result["score"] >= 80
         assert result["match_type"] == "exact"
+
+    def test_rekordbox_mix_metadata_surfaces_fallback_version_evidence(self):
+        sp = self._mock_sp([
+            make_spotify_item(
+                "Synthetic Signal", "Synthetic Artist",
+                "spotify:track:default-version",
+            ),
+        ])
+
+        result = match_track(
+            sp,
+            make_track(
+                "Synthetic Signal", "Synthetic Artist",
+                version="Extended Mix",
+            ),
+            threshold=80,
+        )
+
+        assert result is not None
+        assert result["match_type"] == "fallback_version"
+        assert "fallback version" in result["score_reasons"]
 
     def test_materially_shorter_candidate_is_reviewable_not_exact(self):
         sp = self._mock_sp([

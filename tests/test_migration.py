@@ -175,7 +175,7 @@ class TestLegacyMigration:
 
         assert result.applied is True
         stored = json.loads((app_data / "matching-knowledge.json").read_text())
-        assert stored["version"] == 2
+        assert stored["version"] == 3
         assert stored["fingerprint_associations"] == [association]
         assert "new||track" in stored["entries"]
 
