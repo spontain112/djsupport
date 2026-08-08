@@ -27,6 +27,8 @@ class CacheEntry:
     approval_status: str | None = None
     source_duration: int = 0
     score_reasons: tuple[str, ...] = ()
+    spotify_release: str = ""
+    spotify_duration: int = 0
 
     def __post_init__(self) -> None:
         self.score_reasons = tuple(self.score_reasons)
@@ -128,6 +130,8 @@ class MatchCache:
                 score=result["score"],
                 match_type=result.get("match_type"),
                 score_reasons=tuple(result.get("score_reasons", ())),
+                spotify_release=result.get("album", ""),
+                spotify_duration=int(result.get("duration_ms", 0)) // 1000,
                 matched=True,
                 timestamp=datetime.now().isoformat(),
                 threshold=threshold,
@@ -184,6 +188,13 @@ class MatchCache:
                 threshold=0,
                 match_type=result.get("match_type"),
                 score_reasons=tuple(result.get("score_reasons", ())),
+                spotify_release=result.get("spotify_release", result.get("album", "")),
+                spotify_duration=int(
+                    result.get(
+                        "spotify_duration",
+                        int(result.get("duration_ms", 0)) // 1000,
+                    )
+                ),
                 source_duration=source_duration,
             )
             self.entries[key] = entry
@@ -262,7 +273,12 @@ class MatchCache:
             "artist": item["spotify_artist"],
             "score": item["score"],
             "match_type": "approved_local_audio",
-            "score_reasons": ["Approved Match reused from local audio identity"],
+            "score_reasons": [
+                "Approved Match reused from local audio identity",
+                *item.get("score_reasons", ()),
+            ],
+            "album": item.get("spotify_release", ""),
+            "duration_ms": int(item.get("spotify_duration", 0)) * 1000,
             "authoritative": True,
         }
 
@@ -294,6 +310,8 @@ class MatchCache:
             "score": result["score"],
             "match_type": result.get("match_type", "exact"),
             "score_reasons": list(result.get("score_reasons", ())),
+            "spotify_release": result.get("spotify_release", ""),
+            "spotify_duration": int(result.get("spotify_duration", 0)),
             "authority_status": "approved",
             "approved_at": datetime.now().isoformat(),
         }

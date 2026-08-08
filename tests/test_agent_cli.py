@@ -14,7 +14,7 @@ def test_capabilities_json_does_not_require_xml_or_spotify(monkeypatch):
 
     assert result.exit_code == 0
     assert json.loads(result.output) == {
-        "contract_version": 1,
+        "contract_version": 2,
         "phase": "capability",
         "status": "ready",
         "capabilities": {
@@ -23,6 +23,17 @@ def test_capabilities_json_does_not_require_xml_or_spotify(monkeypatch):
                 "algorithm": "chromaprint",
                 "algorithm_version": None,
                 "reason": "binary_unavailable",
+                "default_enabled": False,
+                "authority": "approved_match_reuse_only",
+                "first_run_discovery": "none_until_explicit_approval",
+                "execution_order": "after_retained_knowledge_before_spotify_search",
+            },
+            "local_audio_audition": {
+                "available": True,
+                "default_enabled": False,
+                "authority": "none",
+                "requires_local_audio_identity": False,
+                "requires_durable_matching_knowledge": False,
             },
         },
         "next_actions": ["plan"],
@@ -45,7 +56,7 @@ def test_sync_json_requires_explicit_private_source_authorization(monkeypatch):
 
     assert result.exit_code == 2
     assert json.loads(result.output) == {
-        "contract_version": 1,
+        "contract_version": 2,
         "phase": "plan",
         "status": "authorization_required",
         "required_authorizations": ["private_source"],
@@ -87,7 +98,7 @@ def test_json_source_error_is_structured_and_does_not_echo_private_path(tmp_path
 
     assert result.exit_code == 2
     assert json.loads(result.output) == {
-        "contract_version": 1,
+        "contract_version": 2,
         "phase": "plan",
         "status": "error",
         "error": {"code": "private_source_unavailable"},
@@ -147,7 +158,7 @@ def test_authorized_sync_json_returns_only_structured_outcome(
 
     assert result.exit_code == 0, result.output
     outcome = json.loads(result.output)
-    assert outcome["contract_version"] == 1
+    assert outcome["contract_version"] == 2
     assert outcome["phase"] == "outcome"
     assert outcome["status"] == "completed"
     assert outcome["counts"] == {
@@ -162,3 +173,71 @@ def test_authorized_sync_json_returns_only_structured_outcome(
     }
     assert "My Playlists" not in result.output
     assert "Solomun" not in result.output
+
+
+def test_audition_intent_is_independent_and_compatible_with_no_cache(
+    monkeypatch, tmp_path,
+):
+    class Spotify:
+        def account_id(self):
+            return "spotify-account-one"
+
+        def match(self, track, threshold):
+            return {
+                "uri": f"spotify:track:{track.track_id}",
+                "name": "Synthetic Result", "artist": "Synthetic Artist",
+                "score": 95.0, "match_type": "exact",
+            }
+
+    monkeypatch.setattr("djsupport.cli.get_client", lambda: object())
+    monkeypatch.setattr(
+        "djsupport.transfer.SpotifyMatcher", lambda client: Spotify(),
+    )
+
+    result = CliRunner().invoke(cli, [
+        "sync", "tests/fixtures/library.xml",
+        "--playlist", "My Playlists/Peak Time",
+        "--json", "--authorize-private-source",
+        "--local-audio-audition", "--no-cache",
+        "--state-path", str(tmp_path / "publications.json"),
+    ])
+
+    assert result.exit_code == 2, result.output
+    document = json.loads(result.output)
+    assert document["requested_effects"] == [
+        "private_source", "local_audio_audition", "spotify_write",
+    ]
+    assert document["local_audio"]["identity_requested"] is False
+    assert document["local_audio"]["audition_requested"] is True
+
+
+def test_qualification_cli_denies_private_intake_through_versioned_contract(
+    tmp_path,
+):
+    private_path = tmp_path / "owner-library-name.xml"
+
+    result = CliRunner().invoke(cli, [
+        "qualification", "batch-opaque-1", str(private_path),
+        "--playlist", "Private/Selection", "--json",
+    ])
+
+    assert result.exit_code == 2
+    assert json.loads(result.output) == {
+        "contract_version": 2,
+        "phase": "qualification",
+        "status": "authorization_required",
+        "required_authorizations": ["private_source"],
+        "next_actions": ["authorize_private_source"],
+    }
+    assert "owner-library-name" not in result.output
+
+
+def test_qualification_cli_exposes_explicit_draft_and_apply_operations():
+    result = CliRunner().invoke(cli, ["qualification", "--help"])
+
+    assert result.exit_code == 0
+    assert "--item-id" in result.output
+    assert "--decision" in result.output
+    assert "--apply" in result.output
+    assert "--authorize-private-source" in result.output
+    assert "--authorize-spotify-write" in result.output

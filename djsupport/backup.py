@@ -18,8 +18,8 @@ from typing import Callable
 BACKUP_VERSION = 1
 SUPPORTED_SCHEMAS = {
     "matching-knowledge.json": (1, 2),
-    "transfers.json": (1, 2, 3),
-    "publication-manifests.transfers.json": (1, 2, 3),
+    "transfers.json": (1, 2, 3, 4),
+    "publication-manifests.transfers.json": (1, 2, 3, 4),
     "publication-manifests.json": (1, 2, 3, 4, 5),
     "playlist-state.json": (1, 2),
     "legacy-migration.json": (1,),
@@ -323,12 +323,21 @@ class LocalDataBackup:
                         label=f"local-audio:{safe_identity}",
                     )
         elif path in ("transfers.json", "publication-manifests.transfers.json"):
-            for field in ("transfers", "batches"):
+            combined["version"] = max(
+                current.get("version", 1), incoming.get("version", 1),
+            )
+            for field in ("transfers", "batches", "qualifications"):
                 combined.setdefault(field, {})
                 for key, value in incoming.get(field, {}).items():
                     if key not in combined[field]:
                         combined[field][key] = value
                         changes.append(f"add {field[:-1]}: {key}")
+                    elif field == "qualifications" and combined[field][key] != value:
+                        self._resolve_conflict(
+                            combined[field], key, value,
+                            "qualification-draft", path,
+                            conflicts, resolutions,
+                        )
         elif path == "playlist-state.json":
             combined.setdefault("entries", {})
             for key, value in incoming.get("entries", {}).items():

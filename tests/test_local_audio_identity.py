@@ -91,8 +91,11 @@ class SpotifyBoundary:
             "uri": "spotify:track:approved",
             "name": "Known Recording",
             "artist": "Known Artist",
+            "album": "Known Spotify Release",
+            "duration_ms": 359_000,
             "score": 97.0,
             "match_type": "exact",
+            "score_reasons": ["original version evidence retained"],
         }
 
     def publish_provisional_snapshot(
@@ -173,6 +176,13 @@ def test_approved_local_identity_recovers_damaged_metadata_without_spotify(tmp_p
     assert later.total_matched == 1
     assert later.playlists[0].matched[0].spotify_uri == "spotify:track:approved"
     assert later.playlists[0].matched[0].match_type == "approved_local_audio"
+    reused_review = later.playlists[0].review_items[0]
+    assert reused_review.spotify_release == "Known Spotify Release"
+    assert reused_review.spotify_duration == 359
+    assert reused_review.score_reasons == (
+        "Approved Match reused from local audio identity",
+        "original version evidence retained",
+    )
 
 
 def test_local_identity_requires_durable_matching_knowledge_before_audio_access(
@@ -317,7 +327,7 @@ def test_completed_local_observation_is_not_recalculated_after_spotify_timeout(
 
     assert resumed.total_matched == 1
     assert local_audio.observed == ["rb-original"]
-    assert json.loads(state_path.read_text())["version"] == 3
+    assert json.loads(state_path.read_text())["version"] == 4
 
 
 def test_explicit_drift_revocation_removes_local_identity_authority(tmp_path):

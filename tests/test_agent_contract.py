@@ -10,6 +10,7 @@ from djsupport.agent import (
     error_document,
 )
 from djsupport.local_audio import LocalAudioCapability
+from djsupport.local_audition import LocalAuditionCapability
 from djsupport.rekordbox import Track
 from djsupport.transfer import (
     AccountPublishingGuards,
@@ -69,6 +70,11 @@ class AvailableLocalAudio:
         )
 
 
+class AvailableAudition:
+    def capability(self):
+        return LocalAuditionCapability(available=True)
+
+
 def test_capability_inspection_is_versioned_and_side_effect_free(tmp_path):
     source = UntouchedSource()
     spotify = UntouchedSpotify()
@@ -78,12 +84,13 @@ def test_capability_inspection_is_versioned_and_side_effect_free(tmp_path):
         matching_knowledge=UntouchedKnowledge(),
         publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
         local_audio=AvailableLocalAudio(),
+        local_audition=AvailableAudition(),
     ))
 
     result = contract.capabilities()
 
     assert result == {
-        "contract_version": 1,
+        "contract_version": 2,
         "phase": "capability",
         "status": "ready",
         "capabilities": {
@@ -91,6 +98,19 @@ def test_capability_inspection_is_versioned_and_side_effect_free(tmp_path):
                 "available": True,
                 "algorithm": "chromaprint",
                 "algorithm_version": "1.6.1",
+                "default_enabled": False,
+                "authority": "approved_match_reuse_only",
+                "first_run_discovery": "none_until_explicit_approval",
+                "execution_order": (
+                    "after_retained_knowledge_before_spotify_search"
+                ),
+            },
+            "local_audio_audition": {
+                "available": True,
+                "default_enabled": False,
+                "authority": "none",
+                "requires_local_audio_identity": False,
+                "requires_durable_matching_knowledge": False,
             },
         },
         "next_actions": ["plan"],
@@ -156,7 +176,7 @@ def test_batch_plan_requires_explicit_private_source_authorization(tmp_path):
     blocked = contract.plan_batch(request, AgentAuthorization())
 
     assert blocked == {
-        "contract_version": 1,
+        "contract_version": 2,
         "phase": "plan",
         "status": "authorization_required",
         "required_authorizations": ["private_source"],
@@ -180,7 +200,7 @@ def test_authorized_plan_is_stable_bounded_and_privacy_redacted(tmp_path):
     second = contract.plan_batch(request, authorization)
 
     assert first == second
-    assert first["contract_version"] == 1
+    assert first["contract_version"] == 2
     assert first["phase"] == "plan"
     assert first["status"] == "ready"
     assert len(first["batch_id"]) == 64
@@ -200,6 +220,16 @@ def test_authorized_plan_is_stable_bounded_and_privacy_redacted(tmp_path):
     rendered = json.dumps(first)
     assert "Private" not in rendered
     assert "Invented" not in rendered
+    assert first["local_audio"] == {
+        "identity_requested": False,
+        "audition_requested": False,
+        "identity_default_enabled": False,
+        "identity_first_run_discovery": "none_until_explicit_approval",
+        "identity_execution_order": (
+            "after_retained_knowledge_before_spotify_search"
+        ),
+        "audition_requires_identity": False,
+    }
 
 
 def test_expensive_confirmation_does_not_change_batch_identity(tmp_path):
@@ -255,7 +285,7 @@ def test_private_read_authorization_does_not_authorize_spotify_mutation(tmp_path
         request, AgentAuthorization(private_source=True),
     )
 
-    assert blocked["contract_version"] == 1
+    assert blocked["contract_version"] == 2
     assert blocked["phase"] == "execute"
     assert blocked["status"] == "authorization_required"
     assert blocked["required_authorizations"] == ["spotify_write"]
@@ -300,7 +330,7 @@ def test_authorized_preview_executes_non_interactively_and_is_idempotent(tmp_pat
     progress = contract.progress(first["transfer_id"], authorization)
 
     assert first == repeated
-    assert first["contract_version"] == 1
+    assert first["contract_version"] == 2
     assert first["phase"] == "outcome"
     assert first["status"] == "completed"
     assert first["transfer_id"] == first["batch_id"]
@@ -314,10 +344,10 @@ def test_authorized_preview_executes_non_interactively_and_is_idempotent(tmp_pat
         "local_audio_unavailable": 0,
         "local_audio_reused": 0,
     }
-    assert first["next_actions"] == ["review"]
+    assert first["next_actions"] == ["qualify"]
     assert spotify.searches == 1
     assert progress == {
-        "contract_version": 1,
+        "contract_version": 2,
         "phase": "progress",
         "status": "completed",
         "transfer_id": first["transfer_id"],
@@ -327,7 +357,7 @@ def test_authorized_preview_executes_non_interactively_and_is_idempotent(tmp_pat
             "failed": 0,
             "pending": 0,
         },
-        "next_actions": ["review"],
+        "next_actions": ["qualify"],
     }
     rendered = json.dumps(first)
     assert "Private" not in rendered

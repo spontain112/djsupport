@@ -33,6 +33,7 @@ else:
     import fcntl
 
 from djsupport.cache import MatchCache
+from djsupport.local_audition import LocalAuditionResult
 from djsupport.matcher import match_track_with_alternatives
 from djsupport.rekordbox import Track
 from djsupport.report import (
@@ -57,7 +58,7 @@ from djsupport.spotify import (
 
 
 PUBLICATION_MANIFEST_VERSION = 5
-TRANSFER_STATE_VERSION = 3
+TRANSFER_STATE_VERSION = 4
 EXPENSIVE_BATCH_LOOKUP_THRESHOLD = 100
 SPOTIFY_TRACK_URI = re.compile(r"^spotify:track:([A-Za-z0-9]{22})$")
 SPOTIFY_TRACK_URL = re.compile(
@@ -110,6 +111,7 @@ class TransferRequest:
     mirror_playlist_id: str | None = None
     retain_matching_knowledge: bool = True
     local_audio_identity: bool = False
+    local_audio_audition: bool = False
 
 
 @dataclass(frozen=True)
@@ -151,6 +153,7 @@ class BatchPlanRequest:
     retry_days: int = 7
     playlist_prefix: str | None = "djsupport"
     local_audio_identity: bool = False
+    local_audio_audition: bool = False
 
 
 @dataclass(frozen=True)
@@ -186,6 +189,7 @@ class BatchPlan:
     retry_days: int = 7
     playlist_prefix: str | None = "djsupport"
     local_audio_identity: bool = False
+    local_audio_audition: bool = False
 
     @property
     def ready(self) -> bool:
@@ -238,6 +242,7 @@ class BatchPlan:
             "retry_days": self.retry_days,
             "playlist_prefix": self.playlist_prefix,
             "local_audio_identity": self.local_audio_identity,
+            "local_audio_audition": self.local_audio_audition,
         }
         canonical = json.dumps(material, sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(canonical.encode()).hexdigest()
@@ -262,6 +267,7 @@ class TransferProgress:
     error: str | None = None
     retain_matching_knowledge: bool = True
     local_audio_identity: bool = False
+    local_audio_audition: bool = False
 
 
 class BatchPhase(str, Enum):
@@ -318,6 +324,7 @@ class BatchState:
     retry_days: int = 7
     playlist_prefix: str | None = "djsupport"
     local_audio_identity: bool = False
+    local_audio_audition: bool = False
     plan_id: str = ""
 
     @classmethod
@@ -340,6 +347,148 @@ class BatchProgress:
     completed: int
     failed: int
     pending: int
+
+
+class QualificationDecision(str, Enum):
+    """One non-authoritative human outcome in a Qualification Draft."""
+
+    KEEP_PROPOSAL = "keep_proposal"
+    CORRECTION = "correction"
+    DEFERRED = "deferred"
+    REJECT_PROPOSAL = "reject_proposal"
+
+
+class QualificationStatus(str, Enum):
+    DRAFT = "draft"
+    READY = "ready"
+    APPLYING = "applying"
+    PAUSED = "paused"
+    APPLIED = "applied"
+    REVIEW_REQUIRED = "review_required"
+
+
+@dataclass(frozen=True)
+class QualificationRequest:
+    """Select one completed Rekordbox playlist Transfer for qualification."""
+
+    transfer_id: str
+    playlist_reference: str | None = None
+    include_all: bool = False
+
+
+@dataclass
+class QualificationDraftState:
+    """Private, durable, non-authoritative Qualification working state."""
+
+    draft_id: str
+    transfer_id: str
+    batch_id: str | None
+    source_reference: str
+    account_id: str
+    playlist_id: str | None
+    playlist_head: str | None
+    manifest_digest: str
+    selection_digest: str
+    include_all: bool
+    item_ids: list[str]
+    decisions: dict[str, dict]
+    status: QualificationStatus
+    created_at: str
+    updated_at: str
+    mutation_snapshots: list[str] = field(default_factory=list)
+    completed_chunks: list[str] = field(default_factory=list)
+    applied_manifest: dict | None = None
+    audition_statuses: dict[str, dict] = field(default_factory=dict)
+
+    @classmethod
+    def from_dict(cls, value: dict) -> QualificationDraftState:
+        return cls(**{
+            "mutation_snapshots": [],
+            "completed_chunks": [],
+            "applied_manifest": None,
+            "audition_statuses": {},
+            **value,
+            "status": QualificationStatus(
+                value.get("status", QualificationStatus.DRAFT.value)
+            ),
+        })
+
+
+@dataclass(frozen=True)
+class QualificationItem:
+    """Privacy-bounded comparison facts for one selected source occurrence."""
+
+    item_id: str
+    source_index: int
+    source_track_id: str
+    source_artist: str
+    source_title: str
+    source_release: str = ""
+    source_label: str = ""
+    source_version: str = ""
+    source_duration: int = 0
+    spotify_uri: str = ""
+    spotify_name: str = ""
+    spotify_artist: str = ""
+    spotify_release: str = ""
+    spotify_duration: int = 0
+    score: float = 0.0
+    match_type: str = "unmatched"
+    score_reasons: tuple[str, ...] = ()
+    authority_status: str = "proposal"
+    attention_reasons: tuple[str, ...] = ()
+    audition_status: str = "not_requested"
+    audition_reason: str | None = None
+    decision: QualificationDecision | None = None
+    correction_uri: str | None = None
+    deferred_reason: str | None = None
+    excluded: bool = False
+
+
+@dataclass(frozen=True)
+class QualificationView:
+    draft_id: str
+    transfer_id: str
+    source_reference: str
+    spotify_playlist_id: str | None
+    status: QualificationStatus
+    items: tuple[QualificationItem, ...]
+    include_all: bool = False
+
+    @property
+    def pending(self) -> int:
+        return sum(item.decision is None for item in self.items)
+
+    @property
+    def deferred(self) -> int:
+        return sum(
+            item.decision == QualificationDecision.DEFERRED and not item.excluded
+            for item in self.items
+        )
+
+    @property
+    def complete(self) -> bool:
+        return self.pending == 0 and self.deferred == 0
+
+    @property
+    def current_item(self) -> QualificationItem | None:
+        return next((
+            item for item in self.items
+            if item.decision is None
+            or (
+                item.decision == QualificationDecision.DEFERRED
+                and not item.excluded
+            )
+        ), self.items[0] if self.items else None)
+
+
+@dataclass(frozen=True)
+class QualificationApplyOutcome:
+    draft_id: str
+    spotify_playlist_id: str
+    status: QualificationStatus
+    applied_items: int
+    next_actions: tuple[str, ...]
 
 
 class ApprovalStatus(str, Enum):
@@ -545,9 +694,16 @@ class PublicationItem:
     source_name: str
     source_artist: str
     source_title: str
+    occurrence_id: str = ""
+    source_index: int = 0
+    source_release: str = ""
+    source_label: str = ""
+    source_version: str = ""
     spotify_uri: str = ""
     spotify_name: str = ""
     spotify_artist: str = ""
+    spotify_release: str = ""
+    spotify_duration: int = 0
     score: float = 0.0
     match_type: str = "unmatched"
     score_reasons: tuple[str, ...] = ()
@@ -860,6 +1016,18 @@ class TransferStorage(Protocol):
 
     def save_batch(self, transfer_id: str, state: BatchState) -> None: ...
 
+    def load_qualification(
+        self, draft_id: str,
+    ) -> QualificationDraftState | None: ...
+
+    def save_qualification(
+        self, draft_id: str, state: QualificationDraftState,
+    ) -> None: ...
+
+    def qualifications_for_playlist(
+        self, account_id: str, playlist_id: str,
+    ) -> list[QualificationDraftState]: ...
+
 
 class FileTransferStorage:
     """Atomically persisted, versioned state for resumable Transfers."""
@@ -868,6 +1036,7 @@ class FileTransferStorage:
         self.path = Path(path)
         self.transfers: dict[str, TransferState] = {}
         self.batches: dict[str, BatchState] = {}
+        self.qualifications: dict[str, QualificationDraftState] = {}
         self._load()
 
     def _load(self) -> None:
@@ -877,7 +1046,7 @@ class FileTransferStorage:
             data = json.loads(self.path.read_text())
         except (json.JSONDecodeError, OSError):
             return
-        if data.get("version") in (1, 2, TRANSFER_STATE_VERSION):
+        if data.get("version") in (1, 2, 3, TRANSFER_STATE_VERSION):
             for transfer_id, state in data.get("transfers", {}).items():
                 try:
                     self.transfers[transfer_id] = TransferState.from_dict(state)
@@ -886,6 +1055,13 @@ class FileTransferStorage:
             for transfer_id, state in data.get("batches", {}).items():
                 try:
                     self.batches[transfer_id] = BatchState.from_dict(state)
+                except (KeyError, TypeError, ValueError):
+                    continue
+            for draft_id, state in data.get("qualifications", {}).items():
+                try:
+                    self.qualifications[draft_id] = (
+                        QualificationDraftState.from_dict(state)
+                    )
                 except (KeyError, TypeError, ValueError):
                     continue
 
@@ -903,6 +1079,25 @@ class FileTransferStorage:
         self.batches = {**self.batches, transfer_id: state}
         self._save()
 
+    def load_qualification(
+        self, draft_id: str,
+    ) -> QualificationDraftState | None:
+        return self.qualifications.get(draft_id)
+
+    def save_qualification(
+        self, draft_id: str, state: QualificationDraftState,
+    ) -> None:
+        self.qualifications = {**self.qualifications, draft_id: state}
+        self._save()
+
+    def qualifications_for_playlist(
+        self, account_id: str, playlist_id: str,
+    ) -> list[QualificationDraftState]:
+        return [
+            draft for draft in self.qualifications.values()
+            if draft.account_id == account_id and draft.playlist_id == playlist_id
+        ]
+
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(f"{self.path.suffix}.tmp")
@@ -913,6 +1108,10 @@ class FileTransferStorage:
             },
             "batches": {
                 key: asdict(batch) for key, batch in self.batches.items()
+            },
+            "qualifications": {
+                key: asdict(draft)
+                for key, draft in self.qualifications.items()
             },
         }, indent=2))
         os.replace(temporary, self.path)
@@ -964,6 +1163,8 @@ class MatchingKnowledge(Protocol):
     def local_audio_observation(
         self, evidence_id: str,
     ) -> LocalAudioObservation | None: ...
+
+    def approval_conflict(self, item: PublicationItem) -> bool: ...
 
 
 class BeatportChartSource:
@@ -1276,6 +1477,9 @@ class SpotifyMatcher:
             "uri": track["uri"],
             "name": track["name"],
             "artist": ", ".join(artist["name"] for artist in track["artists"]),
+            "album": (track.get("album") or {}).get("name", ""),
+            "duration_ms": int(track.get("duration_ms", 0)),
+            "is_playable": track.get("is_playable", True),
         }
 
 
@@ -1297,6 +1501,8 @@ class MatchCacheKnowledge:
             "uri": entry.spotify_uri,
             "name": entry.spotify_name,
             "artist": entry.spotify_artist,
+            "album": entry.spotify_release,
+            "duration_ms": entry.spotify_duration * 1000,
             "score": entry.score,
             "match_type": entry.match_type or "exact",
             "score_reasons": list(entry.score_reasons),
@@ -1331,6 +1537,8 @@ class MatchCacheKnowledge:
                 "score": item.score,
                 "match_type": item.match_type,
                 "score_reasons": list(item.score_reasons),
+                "spotify_release": item.spotify_release,
+                "spotify_duration": item.spotify_duration,
             }, item.source_duration,
         )
         return ApprovalConflict(**conflict) if conflict else None
@@ -1345,6 +1553,8 @@ class MatchCacheKnowledge:
                 "score": item.score,
                 "match_type": item.match_type,
                 "score_reasons": list(item.score_reasons),
+                "spotify_release": item.spotify_release,
+                "spotify_duration": item.spotify_duration,
             }, item.source_duration,
         )
 
@@ -1421,6 +1631,8 @@ class MatchCacheKnowledge:
                 "score": item.score,
                 "match_type": item.match_type,
                 "score_reasons": list(item.score_reasons),
+                "spotify_release": item.spotify_release,
+                "spotify_duration": item.spotify_duration,
             },
         )
         return ApprovalConflict(**conflict) if conflict else None
@@ -1446,6 +1658,15 @@ class MatchCacheKnowledge:
             algorithm=item["algorithm"],
             algorithm_version=item["algorithm_version"],
             duration=item["audio_duration"],
+        )
+
+    def approval_conflict(self, item: PublicationItem) -> bool:
+        return any(
+            conflict.get("source_artist") == item.source_artist
+            and conflict.get("source_title") == item.source_title
+            and int(conflict.get("source_duration", 0)) == item.source_duration
+            and conflict.get("proposed_spotify_uri") == item.spotify_uri
+            for conflict in self._cache.approval_conflicts
         )
 
 
@@ -1510,6 +1731,9 @@ class EphemeralMatchingKnowledge:
     ) -> LocalAudioObservation | None:
         return None
 
+    def approval_conflict(self, item: PublicationItem) -> bool:
+        return False
+
 
 class Transfer:
     """Coordinate a Transfer through source, Spotify, and storage seams."""
@@ -1525,6 +1749,7 @@ class Transfer:
         transfer_storage: TransferStorage | None = None,
         retry_policy: RetryPolicy | None = None,
         local_audio=None,
+        local_audition=None,
     ) -> None:
         self._source = source
         self._spotify = spotify
@@ -1534,6 +1759,7 @@ class Transfer:
         self._transfer_storage = transfer_storage
         self._retry_policy = retry_policy or RetryPolicy()
         self._local_audio = local_audio
+        self._local_audition = local_audition
         self._pause_requested = False
 
     @staticmethod
@@ -1593,6 +1819,16 @@ class Transfer:
             )
         return self._local_audio.capability()
 
+    def local_audition_capability(self):
+        """Inspect audition support without opening source media."""
+        if self._local_audition is None:
+            from djsupport.local_audition import LocalAuditionCapability
+
+            return LocalAuditionCapability(
+                available=False, reason="not_configured",
+            )
+        return self._local_audition.capability()
+
     def prepare(self, request: TransferRequest) -> str:
         """Durably reserve a Transfer ID before potentially slow source intake."""
         if self._transfer_storage is None:
@@ -1647,6 +1883,7 @@ class Transfer:
                 "retain_matching_knowledge", True,
             ),
             local_audio_identity=state.request.get("local_audio_identity", False),
+            local_audio_audition=state.request.get("local_audio_audition", False),
         )
 
     def batch_progress(self, transfer_id: str) -> BatchProgress:
@@ -1700,6 +1937,7 @@ class Transfer:
             "mirror_playlist_id": request.mirror_playlist_id,
             "retain_matching_knowledge": request.retain_matching_knowledge,
             "local_audio_identity": request.local_audio_identity,
+            "local_audio_audition": request.local_audio_audition,
         }
 
     @staticmethod
@@ -1715,6 +1953,7 @@ class Transfer:
             "genre": track.genre,
             "date_added": track.date_added,
             "duration": track.duration,
+            "version": track.version,
         }
         if include_location:
             stored["location"] = track.location
@@ -1739,7 +1978,11 @@ class Transfer:
         for selection in selections:
             selection_material = [
                 self._stored_track(
-                    track, include_location=request.local_audio_identity,
+                    track,
+                    include_location=(
+                        request.local_audio_identity
+                        or request.local_audio_audition
+                    ),
                 )
                 for track in selection.tracks
             ]
@@ -1811,6 +2054,7 @@ class Transfer:
             retry_days=request.retry_days,
             playlist_prefix=request.playlist_prefix,
             local_audio_identity=request.local_audio_identity,
+            local_audio_audition=request.local_audio_audition,
         )
 
     def execute_batch(
@@ -1881,6 +2125,7 @@ class Transfer:
                 retry_days=plan.retry_days,
                 playlist_prefix=plan.playlist_prefix,
                 local_audio_identity=plan.local_audio_identity,
+                local_audio_audition=plan.local_audio_audition,
                 plan_id=plan.batch_id,
                 playlists=[
                     BatchPlaylistState(
@@ -1917,6 +2162,7 @@ class Transfer:
                     playlist_prefix=batch.playlist_prefix,
                     transfer_id=item.transfer_id,
                     local_audio_identity=batch.local_audio_identity,
+                    local_audio_audition=batch.local_audio_audition,
                 ))
             except Exception as exc:
                 if not self._is_shared_failure(exc) and not self._is_playlist_failure(exc):
@@ -2069,6 +2315,878 @@ class Transfer:
             raise ValueError("A Transfer cannot be abandoned under another Spotify account")
         state.status = TransferStatus.ABANDONED
         self._transfer_storage.save_transfer(transfer_id, state)
+        if self._local_audition is not None and hasattr(
+            self._local_audition, "invalidate_transfer"
+        ):
+            self._local_audition.invalidate_transfer(transfer_id)
+
+    def obtain_qualification(
+        self,
+        request: QualificationRequest,
+        authorization: TransferAuthorization,
+    ) -> QualificationView:
+        """Obtain or resume one non-authoritative Rekordbox draft."""
+        required = self.private_source_authorization_requirement(authorization)
+        if required:
+            raise PermissionError(required)
+        if self._source.source_label != "Rekordbox":
+            raise ValueError(
+                "Qualification is available only for Rekordbox Mirrors"
+            )
+        if self._transfer_storage is None or not all(
+            hasattr(self._transfer_storage, method)
+            for method in ("load_qualification", "save_qualification")
+        ):
+            raise ValueError("Qualification requires durable Transfer storage")
+        child_id, batch_id, state = self._qualification_transfer(request)
+        if state.status != TransferStatus.COMPLETED:
+            raise ValueError("Qualification requires a completed Transfer")
+        if state.request.get("mode") != TransferMode.MIRROR.value:
+            raise ValueError(
+                "Qualification is available only for Rekordbox Mirrors"
+            )
+        source_reference = state.selection.get("reference")
+        if not source_reference:
+            raise ValueError("Qualification source selection is unavailable")
+        selection_digest = self._qualification_selection_digest(state.selection)
+        manifest_digest = self._qualification_manifest_digest(state)
+        account_id = self._spotify.account_id()
+        if state.account_id != account_id:
+            raise ValueError(
+                "A Qualification Draft cannot resume under another Spotify account"
+            )
+        playlist_head = None
+        if state.spotify_playlist_id and hasattr(self._spotify, "playlist_head"):
+            playlist_head = self._retry_policy.run(
+                lambda: self._spotify.playlist_head(
+                    state.spotify_playlist_id  # type: ignore[arg-type]
+                ).snapshot_id
+            )
+        draft_id = hashlib.sha256(
+            f"qualification\0{child_id}\0{source_reference}".encode()
+        ).hexdigest()
+        draft = self._transfer_storage.load_qualification(draft_id)
+        items = self._qualification_items(state, None)
+        selected_ids = [
+            item.item_id for item in items
+            if request.include_all or item.attention_reasons
+        ]
+        now = datetime.now().isoformat()
+        if draft is None:
+            draft = QualificationDraftState(
+                draft_id=draft_id,
+                transfer_id=child_id,
+                batch_id=batch_id,
+                source_reference=source_reference,
+                account_id=account_id,
+                playlist_id=state.spotify_playlist_id,
+                playlist_head=playlist_head,
+                manifest_digest=manifest_digest,
+                selection_digest=selection_digest,
+                include_all=request.include_all,
+                item_ids=selected_ids,
+                decisions={},
+                status=QualificationStatus.DRAFT,
+                created_at=now,
+                updated_at=now,
+            )
+        else:
+            if draft.account_id != account_id:
+                raise ValueError(
+                    "A Qualification Draft cannot resume under another Spotify account"
+                )
+            if (
+                draft.transfer_id != child_id
+                or draft.source_reference != source_reference
+                or draft.selection_digest != selection_digest
+                or draft.manifest_digest != manifest_digest
+                or draft.playlist_id != state.spotify_playlist_id
+            ):
+                draft.status = QualificationStatus.REVIEW_REQUIRED
+                draft.updated_at = now
+                self._transfer_storage.save_qualification(draft_id, draft)
+                raise SpotifyPlaylistReviewRequired(
+                    "Qualification evidence changed; create a new bounded review"
+                )
+            if (
+                draft.playlist_head is not None
+                and playlist_head is not None
+                and draft.playlist_head != playlist_head
+                and draft.status not in {
+                    QualificationStatus.APPLYING,
+                    QualificationStatus.PAUSED,
+                    QualificationStatus.APPLIED,
+                }
+            ):
+                draft.status = QualificationStatus.REVIEW_REQUIRED
+                draft.updated_at = now
+                self._transfer_storage.save_qualification(draft_id, draft)
+                raise SpotifyPlaylistReviewRequired(
+                    "Spotify playlist changed; Qualification review required"
+                )
+            draft.include_all = request.include_all
+            draft.item_ids = selected_ids
+            draft.updated_at = now
+        self._preflight_qualification_audition(draft, state)
+        view = self._qualification_view(draft, state)
+        draft.status = (
+            QualificationStatus.READY if view.complete
+            else QualificationStatus.DRAFT
+        )
+        draft.updated_at = now
+        self._transfer_storage.save_qualification(draft_id, draft)
+        return self._qualification_view(draft, state)
+
+    def qualification(self, draft_id: str) -> QualificationView:
+        """Render one durable draft without inferring any outcome."""
+        if self._transfer_storage is None or not hasattr(
+            self._transfer_storage, "load_qualification"
+        ):
+            raise ValueError("Qualification requires durable Transfer storage")
+        draft = self._transfer_storage.load_qualification(draft_id)
+        if draft is None:
+            raise ValueError(f"Unknown Qualification Draft: {draft_id}")
+        if draft.account_id != self._spotify.account_id():
+            raise ValueError(
+                "A Qualification Draft cannot be viewed under another Spotify account"
+            )
+        state = self._transfer_storage.load_transfer(draft.transfer_id)
+        if state is None:
+            raise ValueError("Qualification Transfer evidence is unavailable")
+        return self._qualification_view(draft, state)
+
+    def _qualification_transfer(
+        self, request: QualificationRequest,
+    ) -> tuple[str, str | None, TransferState]:
+        assert self._transfer_storage is not None
+        batch = self._transfer_storage.load_batch(request.transfer_id)
+        batch_id = request.transfer_id if batch is not None else None
+        if batch is not None:
+            candidates = [
+                item for item in batch.playlists
+                if request.playlist_reference is not None
+                and item.reference == request.playlist_reference
+            ]
+            if not candidates:
+                raise ValueError(
+                    "Select one playlist from the completed Rekordbox Batch"
+                )
+            if len(candidates) != 1:
+                raise ValueError("Qualification playlist selection is ambiguous")
+            child_id = candidates[0].transfer_id
+        else:
+            child_id = request.transfer_id
+        state = self._transfer_storage.load_transfer(child_id)
+        if state is None:
+            raise ValueError(f"Unknown Transfer: {request.transfer_id}")
+        if (
+            request.playlist_reference is not None
+            and state.selection.get("reference") != request.playlist_reference
+        ):
+            raise ValueError("Qualification playlist is outside the selected Batch")
+        return child_id, batch_id, state
+
+    @classmethod
+    def _qualification_selection_digest(cls, selection: dict) -> str:
+        private_safe = {
+            "reference": selection.get("reference"),
+            "tracks": [
+                {key: value for key, value in track.items() if key != "location"}
+                for track in selection.get("tracks", ())
+            ],
+        }
+        return hashlib.sha256(json.dumps(
+            private_safe, sort_keys=True, separators=(",", ":"),
+        ).encode()).hexdigest()
+
+    @staticmethod
+    def _qualification_manifest_digest(state: TransferState) -> str:
+        evidence = state.publication_manifest or {
+            "preview_items": state.publication_items,
+            "playlist_id": state.spotify_playlist_id,
+        }
+        return hashlib.sha256(json.dumps(
+            evidence, sort_keys=True, separators=(",", ":"),
+        ).encode()).hexdigest()
+
+    def _qualification_items(
+        self,
+        state: TransferState,
+        draft: QualificationDraftState | None,
+    ) -> list[QualificationItem]:
+        publication_items = [
+            PublicationItem(**item) for item in state.publication_items
+        ]
+        source_identities_by_uri: dict[
+            str, set[tuple[str, str, int]]
+        ] = {}
+        for item in publication_items:
+            if item.spotify_uri:
+                source_identities_by_uri.setdefault(item.spotify_uri, set()).add((
+                    item.source_artist.casefold(),
+                    item.source_title.casefold(),
+                    item.source_duration,
+                ))
+        collision_uris = {
+            uri for uri, identities in source_identities_by_uri.items()
+            if len(identities) > 1
+        }
+        alternative_ids = {
+            item.get("source_track_id") for item in state.alternatives
+        }
+        rendered: list[QualificationItem] = []
+        for ordinal, item in enumerate(publication_items):
+            source_index = item.source_index if item.occurrence_id else ordinal
+            item_id = item.occurrence_id or hashlib.sha256(
+                f"{state.source}\0{source_index}\0{item.source_track_id}".encode()
+            ).hexdigest()
+            reasons: list[str] = []
+            authority_status = "approved" if item.authoritative else "proposal"
+            if not item.authoritative:
+                if item.spotify_uri:
+                    reasons.append("new_proposal")
+                else:
+                    reasons.append("unresolved")
+                if item.match_type in {"shorter_version", "fallback_version"}:
+                    reasons.append(item.match_type)
+                if (
+                    item.source_duration > 0
+                    and item.spotify_duration > 0
+                    and abs(item.source_duration - item.spotify_duration) > 30
+                ):
+                    reasons.append("duration_conflict")
+                if any(
+                    "version" in reason.casefold()
+                    and any(marker in reason.casefold() for marker in (
+                        "conflict", "differ", "fallback", "shorter", "mismatch",
+                    ))
+                    for reason in item.score_reasons
+                ):
+                    reasons.append("version_conflict")
+                if item.source_track_id in alternative_ids:
+                    reasons.append("alternatives")
+                if item.spotify_uri in collision_uris:
+                    reasons.append("match_collision")
+                conflict_checker = getattr(
+                    self._knowledge, "approval_conflict", None
+                )
+                if conflict_checker is not None and conflict_checker(item):
+                    reasons.append("approval_conflict")
+            decision_data = (
+                draft.decisions.get(item_id, {}) if draft is not None else {}
+            )
+            decision_value = decision_data.get("decision")
+            decision = (
+                QualificationDecision(decision_value)
+                if decision_value is not None else None
+            )
+            if decision == QualificationDecision.DEFERRED and not decision_data.get(
+                "excluded", False
+            ):
+                reasons.append("deferred")
+            audition_fact = (
+                draft.audition_statuses.get(item_id, {})
+                if draft is not None else {}
+            )
+            audition_status = (
+                str(audition_fact.get("status"))
+                if audition_fact.get("status")
+                else "available_on_request"
+                if state.request.get("local_audio_audition")
+                and self._local_audition is not None
+                else "not_configured"
+                if state.request.get("local_audio_audition")
+                else "not_requested"
+            )
+            rendered.append(QualificationItem(
+                item_id=item_id,
+                source_index=source_index,
+                source_track_id=item.source_track_id,
+                source_artist=item.source_artist,
+                source_title=item.source_title,
+                source_release=item.source_release,
+                source_label=item.source_label,
+                source_version=item.source_version,
+                source_duration=item.source_duration,
+                spotify_uri=item.spotify_uri,
+                spotify_name=item.spotify_name,
+                spotify_artist=item.spotify_artist,
+                spotify_release=item.spotify_release,
+                spotify_duration=item.spotify_duration,
+                score=item.score,
+                match_type=item.match_type,
+                score_reasons=item.score_reasons,
+                authority_status=authority_status,
+                attention_reasons=tuple(dict.fromkeys(reasons)),
+                audition_status=audition_status,
+                audition_reason=audition_fact.get("reason"),
+                decision=decision,
+                correction_uri=decision_data.get("correction_uri"),
+                deferred_reason=decision_data.get("reason"),
+                excluded=bool(decision_data.get("excluded", False)),
+            ))
+        return rendered
+
+    def _preflight_qualification_audition(
+        self, draft: QualificationDraftState, state: TransferState,
+    ) -> None:
+        if (
+            not state.request.get("local_audio_audition", False)
+            or self._local_audition is None
+            or not hasattr(self._local_audition, "preflight")
+        ):
+            return
+        selection = self._source.consume(draft.source_reference)
+        comparison = {
+            "reference": selection.reference,
+            "tracks": [
+                self._stored_track(track, include_location=False)
+                for track in selection.tracks
+            ],
+        }
+        if self._qualification_selection_digest(comparison) != draft.selection_digest:
+            raise SpotifyPlaylistReviewRequired(
+                "Rekordbox source selection changed; audition blocked"
+            )
+        items = {
+            item.item_id: item
+            for item in self._qualification_items(state, draft)
+            if item.item_id in draft.item_ids
+        }
+        for item_id, item in items.items():
+            if item.source_index >= len(selection.tracks):
+                draft.audition_statuses[item_id] = {
+                    "status": "unavailable", "reason": "unselected_source",
+                }
+                continue
+            track = selection.tracks[item.source_index]
+            if track.track_id != item.source_track_id:
+                draft.audition_statuses[item_id] = {
+                    "status": "unavailable", "reason": "unselected_source",
+                }
+                continue
+            result = self._local_audition.preflight(track)
+            draft.audition_statuses[item_id] = {
+                "status": result.status,
+                "reason": result.reason,
+            }
+
+    def _qualification_view(
+        self, draft: QualificationDraftState, state: TransferState,
+    ) -> QualificationView:
+        item_by_id = {
+            item.item_id: item
+            for item in self._qualification_items(state, draft)
+        }
+        items = tuple(
+            item_by_id[item_id]
+            for item_id in draft.item_ids
+            if item_id in item_by_id
+        )
+        return QualificationView(
+            draft_id=draft.draft_id,
+            transfer_id=draft.transfer_id,
+            source_reference=draft.source_reference,
+            spotify_playlist_id=draft.playlist_id,
+            status=draft.status,
+            items=items,
+            include_all=draft.include_all,
+        )
+
+    def record_qualification(
+        self,
+        draft_id: str,
+        item_id: str,
+        decision: QualificationDecision,
+        *,
+        spotify_reference: str | None = None,
+        reason: str | None = None,
+        exclude: bool = False,
+    ) -> QualificationView:
+        """Record or revise one draft outcome without creating authority."""
+        if self._transfer_storage is None or not hasattr(
+            self._transfer_storage, "load_qualification"
+        ):
+            raise ValueError("Qualification requires durable Transfer storage")
+        draft = self._transfer_storage.load_qualification(draft_id)
+        if draft is None:
+            raise ValueError(f"Unknown Qualification Draft: {draft_id}")
+        if draft.status == QualificationStatus.APPLIED:
+            raise ValueError("An applied Qualification Draft cannot be revised")
+        if draft.account_id != self._spotify.account_id():
+            raise ValueError(
+                "A Qualification Draft cannot be revised under another Spotify account"
+            )
+        state = self._transfer_storage.load_transfer(draft.transfer_id)
+        if state is None:
+            raise ValueError("Qualification Transfer evidence is unavailable")
+        items = {
+            item.item_id: item
+            for item in self._qualification_items(state, draft)
+        }
+        if item_id not in draft.item_ids or item_id not in items:
+            raise ValueError("Qualification item is outside the selected playlist")
+        item = items[item_id]
+        if exclude and decision != QualificationDecision.DEFERRED:
+            raise ValueError("Only a deferred item can be explicitly excluded")
+        if decision == QualificationDecision.KEEP_PROPOSAL and not item.spotify_uri:
+            raise ValueError("An unresolved source track has no proposal to keep")
+        stored: dict[str, object] = {
+            "decision": decision.value,
+            "updated_at": datetime.now().isoformat(),
+        }
+        if decision == QualificationDecision.CORRECTION:
+            if spotify_reference is None:
+                raise ValueError("A staged Correction requires a Spotify track URL or URI")
+            spotify_uri = self._spotify_uri(spotify_reference, 1)
+            spotify_track = self._retry_policy.run(
+                lambda: self._spotify.spotify_track(spotify_uri)
+            )
+            if spotify_track.get("uri") != spotify_uri:
+                raise ValueError("The staged Correction did not resolve to its Spotify track")
+            stored.update({
+                "correction_uri": spotify_uri,
+                "spotify_name": spotify_track["name"],
+                "spotify_artist": spotify_track["artist"],
+                "spotify_release": spotify_track.get("album", ""),
+                "spotify_duration": int(
+                    spotify_track.get("duration_ms", 0)
+                ) // 1000,
+            })
+        elif decision == QualificationDecision.DEFERRED:
+            stored.update({
+                "reason": reason.strip() if reason and reason.strip() else None,
+                "excluded": exclude,
+            })
+        draft.decisions[item_id] = stored
+        draft.updated_at = datetime.now().isoformat()
+        view = self._qualification_view(draft, state)
+        draft.status = (
+            QualificationStatus.READY if view.complete
+            else QualificationStatus.DRAFT
+        )
+        self._transfer_storage.save_qualification(draft_id, draft)
+        return self._qualification_view(draft, state)
+
+    def audition_qualification(
+        self,
+        draft_id: str,
+        item_id: str,
+        authorization: TransferAuthorization,
+    ) -> LocalAuditionResult:
+        """Open only one exact selected source occurrence after authorization."""
+        required = self.private_source_authorization_requirement(authorization)
+        if required:
+            raise PermissionError(required)
+        if self._local_audition is None:
+            return LocalAuditionResult.unavailable("not_configured")
+        if self._transfer_storage is None or not hasattr(
+            self._transfer_storage, "load_qualification"
+        ):
+            raise ValueError("Qualification requires durable Transfer storage")
+        draft = self._transfer_storage.load_qualification(draft_id)
+        if draft is None:
+            raise ValueError(f"Unknown Qualification Draft: {draft_id}")
+        if draft.account_id != self._spotify.account_id():
+            raise ValueError(
+                "A Qualification Draft cannot be auditioned under another Spotify account"
+            )
+        state = self._transfer_storage.load_transfer(draft.transfer_id)
+        if state is None:
+            raise ValueError("Qualification Transfer evidence is unavailable")
+        if not state.request.get("local_audio_audition", False):
+            return LocalAuditionResult.unavailable("not_requested")
+        view_items = {
+            item.item_id: item
+            for item in self._qualification_items(state, draft)
+            if item.item_id in draft.item_ids
+        }
+        if item_id not in view_items:
+            raise ValueError(
+                "Audition item is outside the selected Qualification playlist"
+            )
+        item = view_items[item_id]
+        selection = self._source.consume(draft.source_reference)
+        comparison = {
+            "reference": selection.reference,
+            "tracks": [
+                self._stored_track(track, include_location=False)
+                for track in selection.tracks
+            ],
+        }
+        if self._qualification_selection_digest(comparison) != draft.selection_digest:
+            raise SpotifyPlaylistReviewRequired(
+                "Rekordbox source selection changed; audition blocked"
+            )
+        if item.source_index >= len(selection.tracks):
+            raise ValueError("Audition item is outside the selected source")
+        selected_track = selection.tracks[item.source_index]
+        if selected_track.track_id != item.source_track_id:
+            raise ValueError("Audition item is outside the selected source")
+        result = self._local_audition.open(
+            draft.transfer_id, item_id, selected_track,
+        )
+        draft.audition_statuses[item_id] = {
+            "status": result.status,
+            "reason": result.reason,
+        }
+        self._transfer_storage.save_qualification(draft_id, draft)
+        return result
+
+    def apply_qualification(
+        self,
+        draft_id: str,
+        authorization: TransferAuthorization,
+    ) -> QualificationApplyOutcome:
+        """Apply a complete draft to its Provisional Playlist, never Approval."""
+        required = self.private_source_authorization_requirement(authorization)
+        if required:
+            raise PermissionError(required)
+        if not authorization.spotify_write:
+            raise PermissionError("spotify_write")
+        if self._transfer_storage is None or not hasattr(
+            self._transfer_storage, "load_qualification"
+        ):
+            raise ValueError("Qualification requires durable Transfer storage")
+        if self._publication_storage is None:
+            raise ValueError("Qualification application requires publication storage")
+        draft = self._transfer_storage.load_qualification(draft_id)
+        if draft is None:
+            raise ValueError(f"Unknown Qualification Draft: {draft_id}")
+        if draft.account_id != self._spotify.account_id():
+            raise ValueError(
+                "A Qualification Draft cannot be applied under another Spotify account"
+            )
+        if draft.playlist_id is None:
+            raise ValueError(
+                "A Preview Qualification Draft requires a Provisional Playlist before apply"
+            )
+        if draft.status == QualificationStatus.APPLIED:
+            applied_count = len(
+                (draft.applied_manifest or {}).get("managed_items", ())
+            )
+            return QualificationApplyOutcome(
+                draft_id, draft.playlist_id, QualificationStatus.APPLIED,
+                applied_count, ("approve",),
+            )
+        state = self._transfer_storage.load_transfer(draft.transfer_id)
+        if state is None:
+            raise ValueError("Qualification Transfer evidence is unavailable")
+        view = self._qualification_view(draft, state)
+        if not view.complete:
+            raise ValueError(
+                "Qualification Draft has pending or deferred items"
+            )
+        unresolved_conflicts = []
+        for item in view.items:
+            if not ({"match_collision", "approval_conflict"} & set(
+                item.attention_reasons
+            )):
+                continue
+            decision = draft.decisions.get(item.item_id, {})
+            choice = decision.get("decision")
+            resolved = choice in {
+                QualificationDecision.CORRECTION.value,
+                QualificationDecision.REJECT_PROPOSAL.value,
+            } or (
+                choice == QualificationDecision.DEFERRED.value
+                and bool(decision.get("excluded"))
+            )
+            if not resolved:
+                unresolved_conflicts.append(item.item_id)
+        if unresolved_conflicts:
+            draft.status = QualificationStatus.REVIEW_REQUIRED
+            self._transfer_storage.save_qualification(draft_id, draft)
+            raise SpotifyPlaylistReviewRequired(
+                "Qualification conflict remains unresolved"
+            )
+        current_selection = self._source.consume(draft.source_reference)
+        selection = {
+            "reference": current_selection.reference,
+            "tracks": [
+                self._stored_track(track, include_location=False)
+                for track in current_selection.tracks
+            ],
+        }
+        if self._qualification_selection_digest(selection) != draft.selection_digest:
+            draft.status = QualificationStatus.REVIEW_REQUIRED
+            self._transfer_storage.save_qualification(draft_id, draft)
+            raise SpotifyPlaylistReviewRequired(
+                "Rekordbox source selection changed; review required"
+            )
+        current_manifest = self._publication_storage.publication_for_playlist(
+            draft.account_id, draft.playlist_id,
+        )
+        if current_manifest is None:
+            raise SpotifyPlaylistReviewRequired(
+                "The linked Provisional Playlist manifest is unavailable"
+            )
+        if (
+            self._publication_digest(current_manifest)
+            != draft.manifest_digest
+        ):
+            draft.status = QualificationStatus.REVIEW_REQUIRED
+            self._transfer_storage.save_qualification(draft_id, draft)
+            raise SpotifyPlaylistReviewRequired(
+                "Publication manifest changed; review required"
+            )
+        account_id = self._spotify.account_id()
+        with self._publishing_guards.acquire(account_id):
+            expected_head = (
+                draft.mutation_snapshots[-1]
+                if draft.mutation_snapshots else draft.playlist_head
+            )
+            if expected_head is not None and hasattr(self._spotify, "playlist_head"):
+                current_head = self._retry_policy.run(
+                    lambda: self._spotify.playlist_head(draft.playlist_id)
+                )
+                if current_head.snapshot_id != expected_head:
+                    draft.status = QualificationStatus.REVIEW_REQUIRED
+                    self._transfer_storage.save_qualification(draft_id, draft)
+                    raise SpotifyPlaylistChanged(
+                        "Spotify playlist changed before Qualification apply"
+                    )
+            updated_manifest, desired_uris = self._qualification_application(
+                draft, state, current_manifest,
+            )
+            identities_by_uri: dict[str, set[tuple[str, str, int]]] = {}
+            for item in updated_manifest.managed_items:
+                identities_by_uri.setdefault(item.spotify_uri, set()).add((
+                    item.source_artist.casefold(),
+                    item.source_title.casefold(),
+                    item.source_duration,
+                ))
+            if any(
+                len(identities) > 1
+                for identities in identities_by_uri.values()
+            ):
+                draft.status = QualificationStatus.REVIEW_REQUIRED
+                self._transfer_storage.save_qualification(draft_id, draft)
+                raise SpotifyPlaylistReviewRequired(
+                    "Qualification conflict remains unresolved"
+                )
+            preservation_manifest = current_manifest
+            if draft.completed_chunks and draft.applied_manifest is not None:
+                preservation_manifest = self._publication_from_stored(
+                    draft.applied_manifest
+                )
+            desired_uris = self._preserve_unmanaged_playlist_items(
+                draft.playlist_id, preservation_manifest, desired_uris,
+            )
+            draft.applied_manifest = self._stored_publication(updated_manifest)
+            draft.status = QualificationStatus.APPLYING
+            draft.updated_at = datetime.now().isoformat()
+            self._transfer_storage.save_qualification(draft_id, draft)
+            paused = self._apply_qualification_chunks(
+                draft, desired_uris,
+            )
+            if paused:
+                return QualificationApplyOutcome(
+                    draft_id, draft.playlist_id, QualificationStatus.PAUSED,
+                    len(updated_manifest.managed_items), ("resume",),
+                )
+            self._publication_storage.retain_publication(updated_manifest)
+            state.publication_manifest = self._stored_publication(updated_manifest)
+            self._save_transfer(draft.transfer_id, state)
+            draft.status = QualificationStatus.APPLIED
+            if draft.mutation_snapshots:
+                draft.playlist_head = draft.mutation_snapshots[-1]
+            draft.updated_at = datetime.now().isoformat()
+            self._transfer_storage.save_qualification(draft_id, draft)
+            return QualificationApplyOutcome(
+                draft_id, draft.playlist_id, QualificationStatus.APPLIED,
+                len(updated_manifest.managed_items), ("approve",),
+            )
+
+    @staticmethod
+    def _stored_publication(manifest: PublicationManifest) -> dict:
+        stored = asdict(manifest)
+        stored["created_at"] = manifest.created_at.isoformat()
+        return stored
+
+    @staticmethod
+    def _publication_from_stored(stored: dict) -> PublicationManifest:
+        return PublicationManifest(**{
+            **stored,
+            "mode": TransferMode(
+                stored.get("mode", TransferMode.SNAPSHOT.value)
+            ),
+            "created_at": datetime.fromisoformat(stored["created_at"]),
+            "items": tuple(
+                PublicationItem(**item) for item in stored.get("items", ())
+            ),
+            "managed_items": tuple(
+                PublicationItem(**item)
+                for item in stored.get("managed_items", stored.get("items", ()))
+            ),
+        })
+
+    @classmethod
+    def _publication_digest(cls, manifest: PublicationManifest) -> str:
+        return hashlib.sha256(json.dumps(
+            cls._stored_publication(manifest),
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()).hexdigest()
+
+    def _qualification_application(
+        self,
+        draft: QualificationDraftState,
+        state: TransferState,
+        manifest: PublicationManifest,
+    ) -> tuple[PublicationManifest, list[str]]:
+        all_items = [PublicationItem(**item) for item in state.publication_items]
+        decision_by_id = draft.decisions
+        desired_items: list[PublicationItem] = []
+        review_items: list[PublicationItem] = []
+        original_review_ids = {
+            item.occurrence_id or item.source_track_id for item in manifest.items
+        }
+        for ordinal, item in enumerate(all_items):
+            item_id = item.occurrence_id or hashlib.sha256(
+                f"{state.source}\0{ordinal}\0{item.source_track_id}".encode()
+            ).hexdigest()
+            decision = decision_by_id.get(item_id)
+            resolved = item
+            excluded = False
+            rejected = False
+            if decision is not None:
+                choice = QualificationDecision(decision["decision"])
+                if choice == QualificationDecision.CORRECTION:
+                    resolved = replace(
+                        item,
+                        spotify_uri=str(decision["correction_uri"]),
+                        spotify_name=str(decision["spotify_name"]),
+                        spotify_artist=str(decision["spotify_artist"]),
+                        spotify_release=str(decision.get("spotify_release", "")),
+                        spotify_duration=int(
+                            decision.get("spotify_duration", 0)
+                        ),
+                        score=100.0,
+                        match_type="correction",
+                        score_reasons=("explicit Qualification Correction",),
+                        authoritative=False,
+                    )
+                elif choice == QualificationDecision.REJECT_PROPOSAL:
+                    rejected = True
+                elif choice == QualificationDecision.DEFERRED:
+                    excluded = bool(decision.get("excluded"))
+            if resolved.spotify_uri and not rejected and not excluded:
+                desired_items.append(resolved)
+            was_review_item = (
+                item.occurrence_id or item.source_track_id
+            ) in original_review_ids
+            if excluded:
+                continue
+            if was_review_item or resolved.match_type == "correction":
+                review_items.append(resolved)
+        updated = replace(
+            manifest,
+            items=tuple(review_items),
+            managed_items=tuple(desired_items),
+        )
+        return updated, [item.spotify_uri for item in desired_items]
+
+    def _preserve_unmanaged_playlist_items(
+        self,
+        playlist_id: str,
+        manifest: PublicationManifest,
+        desired_uris: list[str],
+    ) -> list[str]:
+        if hasattr(self._spotify, "ordered_playlist_items"):
+            ordered = self._retry_policy.run(
+                lambda: self._spotify.ordered_playlist_items(playlist_id)
+            )
+            if any(item.kind != SpotifyItemKind.TRACK for item in ordered.items):
+                raise SpotifyPlaylistReviewRequired(
+                    "Spotify playlist contains unsupported items; review required"
+                )
+            current_uris = [item.uri for item in ordered.items if item.uri]
+        else:
+            current_uris = self._retry_policy.run(
+                lambda: self._spotify.provisional_playlist_track_uris(playlist_id)
+            ) or []
+        managed = Counter(
+            item.spotify_uri for item in (manifest.managed_items or manifest.items)
+            if item.spotify_uri
+        )
+        manual_by_boundary: dict[int, list[str]] = {}
+        managed_seen = 0
+        for uri in current_uris:
+            if managed[uri] > 0:
+                managed[uri] -= 1
+                managed_seen += 1
+                continue
+            boundary = min(managed_seen, len(desired_uris))
+            manual_by_boundary.setdefault(boundary, []).append(uri)
+        repaired: list[str] = []
+        for boundary in range(len(desired_uris) + 1):
+            repaired.extend(manual_by_boundary.get(boundary, ()))
+            if boundary < len(desired_uris):
+                repaired.append(desired_uris[boundary])
+        return repaired
+
+    def _apply_qualification_chunks(
+        self, draft: QualificationDraftState, uris: list[str],
+    ) -> bool:
+        assert self._transfer_storage is not None
+        assert draft.playlist_id is not None
+        chunks = [uris[:100]] + [
+            uris[offset:offset + 100] for offset in range(100, len(uris), 100)
+        ]
+        for index, chunk in enumerate(chunks):
+            chunk_id = hashlib.sha256(json.dumps(
+                [index, chunk], separators=(",", ":"),
+            ).encode()).hexdigest()
+            if chunk_id in draft.completed_chunks:
+                continue
+            expected_head = (
+                draft.mutation_snapshots[-1]
+                if draft.mutation_snapshots else draft.playlist_head
+            )
+            if expected_head is not None and hasattr(self._spotify, "playlist_head"):
+                current = self._retry_policy.run(
+                    lambda: self._spotify.playlist_head(draft.playlist_id)
+                )
+                if current.snapshot_id != expected_head:
+                    raise SpotifyPlaylistChanged(
+                        "Spotify playlist changed during Qualification apply"
+                    )
+            if all(hasattr(self._spotify, method) for method in (
+                "replace_items", "add_items",
+            )):
+                result = self._retry_policy.run(
+                    lambda: (
+                        self._spotify.replace_items(draft.playlist_id, chunk)
+                        if index == 0 else self._spotify.add_items(
+                            draft.playlist_id, chunk,
+                        )
+                    )
+                )
+                snapshot_id = result.snapshot_id
+            else:
+                if index > 0:
+                    raise ValueError(
+                        "Qualification application requires checkpointed playlist writes"
+                    )
+                self._retry_policy.run(
+                    lambda: self._spotify.replace_provisional_playlist_tracks(
+                        draft.playlist_id, chunk,
+                    )
+                )
+                snapshot_id = (
+                    self._spotify.playlist_head(draft.playlist_id).snapshot_id
+                    if hasattr(self._spotify, "playlist_head") else ""
+                )
+            draft.mutation_snapshots.append(snapshot_id)
+            draft.completed_chunks.append(chunk_id)
+            self._transfer_storage.save_qualification(draft.draft_id, draft)
+            if self._pause_requested:
+                self._pause_requested = False
+                draft.status = QualificationStatus.PAUSED
+                self._transfer_storage.save_qualification(draft.draft_id, draft)
+                return True
+        return False
 
     def approve(
         self, playlist_id: str, *, corrections: str | Path | None = None,
@@ -2084,6 +3202,19 @@ class Transfer:
             raise ValueError(
                 f"No Provisional Playlist {playlist_id} belongs to this Spotify account"
             )
+        if self._transfer_storage is not None and hasattr(
+            self._transfer_storage, "qualifications_for_playlist"
+        ):
+            unapplied = [
+                draft for draft in self._transfer_storage.qualifications_for_playlist(
+                    account_id, playlist_id,
+                )
+                if draft.status != QualificationStatus.APPLIED
+            ]
+            if unapplied:
+                raise SpotifyPlaylistReviewRequired(
+                    "Qualification Draft must be completed and applied before Approval"
+                )
         with self._publishing_guards.acquire(account_id):
             corrected_items = self._read_corrections(corrections, manifest)
             if all(hasattr(self._spotify, method) for method in (
@@ -2153,25 +3284,47 @@ class Transfer:
                     corrected_items.get(item.source_track_id, item)
                     for item in manifest.items
                 )
-                original_proposal_counts = Counter(
-                    item.spotify_uri for item in manifest.items
-                    if item.spotify_uri
-                )
+                original_identities: dict[
+                    str, set[tuple[str, str, int]]
+                ] = {}
+                for item in manifest.items:
+                    if item.spotify_uri:
+                        original_identities.setdefault(item.spotify_uri, set()).add((
+                            item.source_artist.casefold(),
+                            item.source_title.casefold(),
+                            item.source_duration,
+                        ))
+                original_collision_uris = {
+                    uri for uri, identities in original_identities.items()
+                    if len(identities) > 1
+                }
                 unresolved_collision_ids = {
-                    item.source_track_id for item in manifest.items
-                    if original_proposal_counts[item.spotify_uri] > 1
+                    item.occurrence_id or item.source_track_id
+                    for item in manifest.items
+                    if item.spotify_uri in original_collision_uris
                     and item.source_track_id not in corrected_items
                 }
-                proposed_counts = Counter(item.spotify_uri for item in reviewed_items)
+                proposed_identities: dict[
+                    str, set[tuple[str, str, int]]
+                ] = {}
+                for item in reviewed_items:
+                    if item.spotify_uri:
+                        proposed_identities.setdefault(item.spotify_uri, set()).add((
+                            item.source_artist.casefold(),
+                            item.source_title.casefold(),
+                            item.source_duration,
+                        ))
                 collision_uris = {
-                    uri for uri, count in proposed_counts.items() if count > 1
+                    uri for uri, identities in proposed_identities.items()
+                    if len(identities) > 1
                 }
                 collisions: list[PublicationItem] = []
                 for item in reviewed_items:
                     if not item.spotify_uri:
                         continue
                     if (
-                        item.source_track_id in unresolved_collision_ids
+                        (item.occurrence_id or item.source_track_id)
+                        in unresolved_collision_ids
                         or item.spotify_uri in collision_uris
                     ):
                         collisions.append(item)
@@ -2195,11 +3348,15 @@ class Transfer:
                     corrections=tuple(
                         item for item in approved
                         if item.source_track_id in corrected_items
+                        or item.match_type == "correction"
                     ),
                 )
                 conflicts: list[ApprovalConflict] = []
                 for item in outcome.approved:
-                    if item.source_track_id in corrected_items:
+                    if (
+                        item.source_track_id in corrected_items
+                        or item.match_type == "correction"
+                    ):
                         conflict = self._knowledge.correct(item)
                     else:
                         conflict = self._knowledge.approve(item)
@@ -2683,6 +3840,7 @@ class Transfer:
         try:
             for index in range(state.next_track_index, len(selection.tracks)):
                 track = selection.tracks[index]
+                occurrence_id = self._occurrence_id(transfer_id, index, track)
                 result = self._knowledge.lookup(track, request.threshold)
                 local_evidence_id = None
                 if (
@@ -2733,9 +3891,18 @@ class Transfer:
                             source_name=track.display,
                             source_artist=track.artist,
                             source_title=track.name,
+                            occurrence_id=occurrence_id,
+                            source_index=index,
+                            source_release=track.album,
+                            source_label=track.label,
+                            source_version=track.version,
                             spotify_uri=result["uri"],
                             spotify_name=result["name"],
                             spotify_artist=result["artist"],
+                            spotify_release=result.get("album", ""),
+                            spotify_duration=(
+                                int(result.get("duration_ms", 0)) // 1000
+                            ),
                             score=result["score"],
                             match_type=result.get("match_type", "exact"),
                             score_reasons=tuple(result.get("score_reasons", ())),
@@ -2761,12 +3928,19 @@ class Transfer:
 
                 if result is None or "alternatives" in result:
                     playlist.unmatched.append(track.display)
-                    if self._is_new_reviewable_source(track, publication_items):
+                    if self._is_new_reviewable_occurrence(
+                        occurrence_id, publication_items,
+                    ):
                         publication_items.append(PublicationItem(
                             source_track_id=track.track_id,
                             source_name=track.display,
                             source_artist=track.artist,
                             source_title=track.name,
+                            occurrence_id=occurrence_id,
+                            source_index=index,
+                            source_release=track.album,
+                            source_label=track.label,
+                            source_version=track.version,
                             source_duration=track.duration,
                             local_evidence_id=local_evidence_id,
                         ))
@@ -2803,15 +3977,26 @@ class Transfer:
                         spotify_uri=result["uri"],
                     )
                     playlist.matched.append(matched_track)
-                    if self._is_new_reviewable_source(track, publication_items):
+                    if self._is_new_reviewable_occurrence(
+                        occurrence_id, publication_items,
+                    ):
                         publication_items.append(PublicationItem(
                             source_track_id=track.track_id,
                             source_name=track.display,
                             source_artist=track.artist,
                             source_title=track.name,
+                            occurrence_id=occurrence_id,
+                            source_index=index,
+                            source_release=track.album,
+                            source_label=track.label,
+                            source_version=track.version,
                             spotify_uri=result["uri"],
                             spotify_name=matched_track.spotify_name,
                             spotify_artist=matched_track.spotify_artist,
+                            spotify_release=result.get("album", ""),
+                            spotify_duration=(
+                                int(result.get("duration_ms", 0)) // 1000
+                            ),
                             score=matched_track.score,
                             match_type=matched_track.match_type,
                             score_reasons=matched_track.score_reasons,
@@ -2843,7 +4028,9 @@ class Transfer:
                     return report
                 self._save_transfer(transfer_id, state)
 
-            source_ids_by_uri: dict[str, set[tuple[str, str, int]]] = {}
+            source_ids_by_uri: dict[
+                str, set[tuple[str, str, int]]
+            ] = {}
             for item in publication_items:
                 if not item.spotify_uri:
                     continue
@@ -3294,29 +4481,36 @@ class Transfer:
                 source_name=item.source_name,
                 source_artist=item.source_artist,
                 source_title=item.source_title,
+                source_release=item.source_release,
+                source_label=item.source_label,
+                source_version=item.source_version,
                 source_duration=item.source_duration,
                 spotify_uri=item.spotify_uri,
                 spotify_name=item.spotify_name,
                 spotify_artist=item.spotify_artist,
+                spotify_release=item.spotify_release,
+                spotify_duration=item.spotify_duration,
                 score=item.score,
                 match_type=item.match_type,
                 score_reasons=item.score_reasons,
+                authority_status=(
+                    "approved" if item.authoritative else "proposal"
+                ),
             )
             for item in items
         ]
 
     @staticmethod
-    def _is_new_reviewable_source(
-        track: Track, items: list[PublicationItem],
+    def _occurrence_id(transfer_id: str, index: int, track: Track) -> str:
+        material = f"{transfer_id}\0{index}\0{track.track_id}"
+        return hashlib.sha256(material.encode()).hexdigest()
+
+    @staticmethod
+    def _is_new_reviewable_occurrence(
+        occurrence_id: str, items: list[PublicationItem],
     ) -> bool:
-        if not track.track_id:
-            return False
-        return not any(
-            item.source_track_id == track.track_id
-            and item.source_artist == track.artist
-            and item.source_title == track.name
-            and item.source_duration == track.duration
-            for item in items
+        return bool(occurrence_id) and not any(
+            item.occurrence_id == occurrence_id for item in items
         )
 
     def _approved_available(self, spotify_uri: str) -> bool:

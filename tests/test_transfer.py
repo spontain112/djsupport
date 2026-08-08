@@ -635,6 +635,7 @@ class TestProtectedTransferBehavior:
         assert report.playlists[0].match_collisions == []
         assert spotify.playlists[report.playlists[0].spotify_playlist_id]["tracks"] == [
             "spotify:track:shared",
+            "spotify:track:shared",
         ]
 
     def test_previously_unmatched_tracks_retry_only_when_explicitly_requested(
@@ -2098,9 +2099,15 @@ class TestTransferPublicationLifecycle:
             "source_track": "New Artist - New Track",
             "source_artist": "New Artist",
             "source_title": "New Track",
+            "source_release": "",
+            "source_label": "",
+            "source_version": "",
             "source_duration": "420",
             "spotify_url": "",
             "spotify_track": "",
+            "spotify_release": "",
+            "spotify_duration": "0",
+            "authority_status": "proposal",
             "score": "",
             "match_type": "unmatched",
             "score_reasons": "",

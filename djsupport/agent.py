@@ -4,18 +4,20 @@ from __future__ import annotations
 
 from djsupport.transfer import (
     BatchPlanRequest,
+    QualificationRequest,
+    QualificationStatus,
     Transfer,
     TransferAuthorization,
 )
 
 
-AGENT_CONTRACT_VERSION = 1
+AGENT_CONTRACT_VERSION = 2
 
 
 AgentAuthorization = TransferAuthorization
 
 
-def capability_document(capability_value) -> dict:
+def capability_document(capability_value, audition_value=None) -> dict:
     capability = {
         "available": capability_value.available,
         "algorithm": capability_value.algorithm,
@@ -23,11 +25,33 @@ def capability_document(capability_value) -> dict:
     }
     if capability_value.reason is not None:
         capability["reason"] = capability_value.reason
+    capability.update({
+        "default_enabled": False,
+        "authority": "approved_match_reuse_only",
+        "first_run_discovery": "none_until_explicit_approval",
+        "execution_order": "after_retained_knowledge_before_spotify_search",
+    })
+    audition = {
+        "available": bool(
+            audition_value is not None and audition_value.available
+        ),
+        "default_enabled": False,
+        "authority": "none",
+        "requires_local_audio_identity": False,
+        "requires_durable_matching_knowledge": False,
+    }
+    if audition_value is not None and audition_value.reason is not None:
+        audition["reason"] = audition_value.reason
+    elif audition_value is None:
+        audition["reason"] = "not_configured"
     return {
         "contract_version": AGENT_CONTRACT_VERSION,
         "phase": "capability",
         "status": "ready",
-        "capabilities": {"local_audio_identity": capability},
+        "capabilities": {
+            "local_audio_identity": capability,
+            "local_audio_audition": audition,
+        },
         "next_actions": ["plan"],
     }
 
@@ -67,7 +91,10 @@ class AgentTransferContract:
         self._transfer = transfer
 
     def capabilities(self) -> dict:
-        return capability_document(self._transfer.local_audio_capability())
+        return capability_document(
+            self._transfer.local_audio_capability(),
+            self._transfer.local_audition_capability(),
+        )
 
     def plan_batch(
         self, request: BatchPlanRequest, authorization: AgentAuthorization,
@@ -109,8 +136,26 @@ class AgentTransferContract:
             },
             "requested_effects": [
                 "private_source",
+                *(
+                    ["local_audio_identity"]
+                    if request.local_audio_identity else []
+                ),
+                *(
+                    ["local_audio_audition"]
+                    if request.local_audio_audition else []
+                ),
                 *([] if request.preview else ["spotify_write"]),
             ],
+            "local_audio": {
+                "identity_requested": request.local_audio_identity,
+                "audition_requested": request.local_audio_audition,
+                "identity_default_enabled": False,
+                "identity_first_run_discovery": "none_until_explicit_approval",
+                "identity_execution_order": (
+                    "after_retained_knowledge_before_spotify_search"
+                ),
+                "audition_requires_identity": False,
+            },
             "required_authorizations": required,
             "next_actions": next_actions,
         }
@@ -174,8 +219,88 @@ class AgentTransferContract:
             },
             "required_authorizations": [],
             "next_actions": (
-                ["resume"] if status == "paused" else ["review"]
+                ["resume"] if status == "paused" else ["qualify"]
             ),
+        }
+
+    def qualification_draft(
+        self,
+        request: QualificationRequest,
+        authorization: AgentAuthorization,
+        *,
+        review_origin: str = "http://127.0.0.1:8000",
+    ) -> dict:
+        """Obtain a draft while keeping source and playlist facts local."""
+        required = self._transfer.private_source_authorization_requirement(
+            authorization,
+        )
+        if required:
+            return authorization_required_document("qualification", required)
+        view = self._transfer.obtain_qualification(request, authorization)
+        return self._qualification_document(view, review_origin)
+
+    def qualification_progress(
+        self,
+        draft_id: str,
+        authorization: AgentAuthorization,
+        *,
+        review_origin: str = "http://127.0.0.1:8000",
+    ) -> dict:
+        required = self._transfer.private_source_authorization_requirement(
+            authorization,
+        )
+        if required:
+            return authorization_required_document("qualification", required)
+        view = self._transfer.qualification(draft_id)
+        return self._qualification_document(view, review_origin)
+
+    @staticmethod
+    def _qualification_document(view, review_origin: str) -> dict:
+        status = view.status.value
+        next_actions = (
+            ["approve"] if status == QualificationStatus.APPLIED.value
+            else ["apply"] if view.complete
+            else ["review"]
+        )
+        return {
+            "contract_version": AGENT_CONTRACT_VERSION,
+            "phase": "qualification",
+            "status": status,
+            "draft_id": view.draft_id,
+            "transfer_id": view.transfer_id,
+            "counts": {
+                "items": len(view.items),
+                "pending": view.pending,
+                "deferred": view.deferred,
+            },
+            "authority": "none",
+            "review_url": (
+                f"{review_origin.rstrip('/')}/qualification/{view.draft_id}"
+            ),
+            "next_actions": next_actions,
+        }
+
+    def apply_qualification(
+        self, draft_id: str, authorization: AgentAuthorization,
+    ) -> dict:
+        required = self._transfer.private_source_authorization_requirement(
+            authorization,
+        )
+        if required:
+            return authorization_required_document("qualification_apply", required)
+        if not authorization.spotify_write:
+            return authorization_required_document(
+                "qualification_apply", "spotify_write",
+            )
+        outcome = self._transfer.apply_qualification(draft_id, authorization)
+        return {
+            "contract_version": AGENT_CONTRACT_VERSION,
+            "phase": "qualification_apply",
+            "status": outcome.status.value,
+            "draft_id": outcome.draft_id,
+            "counts": {"applied_items": outcome.applied_items},
+            "authority": "none",
+            "next_actions": list(outcome.next_actions),
         }
 
     def progress(
@@ -201,6 +326,6 @@ class AgentTransferContract:
             },
             "next_actions": (
                 ["resume"] if status in {"paused", "partial_success"}
-                else ["review"]
+                else ["qualify"]
             ),
         }

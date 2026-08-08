@@ -41,8 +41,11 @@ def capabilities(as_json: bool) -> None:
     """Inspect optional capabilities without reading a library or Spotify."""
     from djsupport.agent import capability_document
     from djsupport.local_audio import ChromaprintLocalAudio
+    from djsupport.local_audition import LocalSourceAudition
 
-    document = capability_document(ChromaprintLocalAudio().capability())
+    document = capability_document(
+        ChromaprintLocalAudio().capability(), LocalSourceAudition().capability(),
+    )
     if as_json:
         click.echo(json.dumps(document, sort_keys=True))
         return
@@ -54,6 +57,7 @@ def capabilities(as_json: bool) -> None:
         )
     else:
         click.echo("Local audio identity unavailable; install fpcalc to enable it.")
+    click.echo("Local audition available for explicitly authorized Rekordbox audio.")
 
 
 def _resolve_xml_path(explicit_xml_path: str | None) -> str:
@@ -264,6 +268,10 @@ def migrate_0_5(legacy_account_id: str, account_id: str) -> None:
     help="Opt into local audio identity for the selected Rekordbox Batch.",
 )
 @click.option(
+    "--local-audio-audition", is_flag=True,
+    help="Opt into private local audition for the selected Rekordbox Batch.",
+)
+@click.option(
     "--json", "agent_json", is_flag=True,
     help="Emit the versioned non-interactive agent contract.",
 )
@@ -294,6 +302,7 @@ def sync(
     no_prefix: bool,
     state_path: str,
     local_audio_identity: bool,
+    local_audio_audition: bool,
     agent_json: bool,
     authorize_private_source: bool,
     authorize_spotify_write: bool,
@@ -326,6 +335,7 @@ def sync(
         TransferAuthorization,
     )
     from djsupport.local_audio import ChromaprintLocalAudio
+    from djsupport.local_audition import LocalSourceAudition
 
     request = BatchPlanRequest(
         playlist_references=playlist,
@@ -337,6 +347,7 @@ def sync(
         playlist_prefix=None if no_prefix else prefix,
         confirm_expensive=confirm_expensive,
         local_audio_identity=local_audio_identity,
+        local_audio_audition=local_audio_audition,
     )
     authorization = TransferAuthorization(
         private_source=authorize_private_source,
@@ -395,7 +406,8 @@ def sync(
     ) is None
     transfer = Transfer(
         source=RekordboxPlaylistSource(
-            xml_path, include_locations=local_audio_identity,
+            xml_path,
+            include_locations=(local_audio_identity or local_audio_audition),
         ),
         spotify=(
             SpotifyMatcher(get_client())
@@ -413,6 +425,7 @@ def sync(
             str(Path(state_path).with_suffix(".transfers.json"))
         ),
         local_audio=(ChromaprintLocalAudio() if local_audio_identity else None),
+        local_audition=(LocalSourceAudition() if local_audio_audition else None),
     )
     if agent_json:
         from djsupport.agent import AgentTransferContract
@@ -471,6 +484,168 @@ def sync(
         save_review_csv(report, review_path)
         click.echo(f"\nDetailed report saved to {report_path}")
         click.echo(f"Editable review CSV saved to {review_path}")
+
+
+@cli.command("qualification")
+@click.argument("transfer_id")
+@click.argument("xml_path", required=False, type=click.Path())
+@click.option("--playlist", required=True, help="Exact selected Rekordbox playlist reference.")
+@click.option("--include-all", is_flag=True, help="Include authoritative proposals for spot-checking.")
+@click.option("--item-id", default=None, help="Opaque queue item to revise.")
+@click.option(
+    "--decision",
+    type=click.Choice([
+        "keep_proposal", "correction", "deferred", "reject_proposal",
+    ]),
+    default=None,
+    help="Stage one non-authoritative draft outcome.",
+)
+@click.option("--spotify-reference", default=None, help="Explicit Spotify URL/URI for a Correction.")
+@click.option("--reason", default=None, help="Optional private reason for a deferred item.")
+@click.option("--exclude", is_flag=True, help="Explicitly exclude one deferred item from apply.")
+@click.option("--apply", "apply_draft", is_flag=True, help="Apply a complete draft to its Provisional Playlist.")
+@click.option("--no-cache", is_flag=True, help="Bypass retained matching knowledge.")
+@click.option("--cache-path", default=DEFAULT_MATCHING_KNOWLEDGE_PATH, show_default=True)
+@click.option("--state-path", default=DEFAULT_PUBLICATION_MANIFEST_PATH, show_default=True)
+@click.option("--local-audio-audition", is_flag=True, help="Enable authorized audition facts for this session.")
+@click.option("--authorize-private-source", is_flag=True, help="Authorize this bounded Rekordbox selection.")
+@click.option("--authorize-spotify-write", is_flag=True, help="Authorize explicit draft application.")
+@click.option("--review-origin", default="http://127.0.0.1:8000", show_default=True)
+@click.option("--json", "agent_json", is_flag=True, help="Emit the privacy-redacted agent contract.")
+def qualification_command(
+    transfer_id: str,
+    xml_path: str | None,
+    playlist: str,
+    include_all: bool,
+    item_id: str | None,
+    decision: str | None,
+    spotify_reference: str | None,
+    reason: str | None,
+    exclude: bool,
+    apply_draft: bool,
+    no_cache: bool,
+    cache_path: str,
+    state_path: str,
+    local_audio_audition: bool,
+    authorize_private_source: bool,
+    authorize_spotify_write: bool,
+    review_origin: str,
+    agent_json: bool,
+) -> None:
+    """Obtain, revise, or apply one Rekordbox Qualification Draft."""
+    from djsupport.agent import (
+        AgentTransferContract,
+        authorization_required_document,
+        error_document,
+    )
+    from djsupport.cache import MatchCache
+    from djsupport.local_audition import LocalSourceAudition
+    from djsupport.transfer import (
+        EphemeralMatchingKnowledge,
+        FilePublicationStorage,
+        FileTransferStorage,
+        MatchCacheKnowledge,
+        QualificationDecision,
+        QualificationRequest,
+        RekordboxPlaylistSource,
+        SpotifyMatcher,
+        Transfer,
+        TransferAuthorization,
+    )
+
+    if not authorize_private_source:
+        if agent_json:
+            click.echo(json.dumps(
+                authorization_required_document(
+                    "qualification", "private_source",
+                ),
+                sort_keys=True,
+            ))
+            raise click.exceptions.Exit(2)
+        raise click.UsageError(
+            "Qualification requires --authorize-private-source."
+        )
+    if (item_id is None) != (decision is None):
+        raise click.UsageError("Use --item-id and --decision together.")
+    xml_path = _resolve_xml_path(xml_path)
+    cache = None if no_cache else MatchCache(cache_path)
+    if cache is not None:
+        cache.load()
+    transfer = Transfer(
+        source=RekordboxPlaylistSource(
+            xml_path, include_locations=local_audio_audition,
+        ),
+        spotify=SpotifyMatcher(get_client()),
+        publishing_guards=AccountPublishingGuards(),
+        matching_knowledge=(
+            EphemeralMatchingKnowledge()
+            if cache is None else MatchCacheKnowledge(cache)
+        ),
+        publication_storage=FilePublicationStorage(state_path),
+        transfer_storage=FileTransferStorage(
+            str(Path(state_path).with_suffix(".transfers.json"))
+        ),
+        local_audition=(
+            LocalSourceAudition() if local_audio_audition else None
+        ),
+    )
+    authorization = TransferAuthorization(
+        private_source=True,
+        spotify_write=authorize_spotify_write,
+    )
+    contract = AgentTransferContract(transfer)
+    request = QualificationRequest(
+        transfer_id=transfer_id,
+        playlist_reference=playlist,
+        include_all=include_all,
+    )
+    try:
+        document = contract.qualification_draft(
+            request, authorization, review_origin=review_origin,
+        )
+        draft_id = document.get("draft_id")
+        if draft_id and item_id and decision:
+            transfer.record_qualification(
+                draft_id,
+                item_id,
+                QualificationDecision(decision),
+                spotify_reference=spotify_reference,
+                reason=reason,
+                exclude=exclude,
+            )
+            document = contract.qualification_progress(
+                draft_id, authorization, review_origin=review_origin,
+            )
+        if draft_id and apply_draft:
+            document = contract.apply_qualification(draft_id, authorization)
+    except (OSError, PermissionError, ValueError) as exc:
+        if agent_json:
+            click.echo(json.dumps(
+                error_document("qualification", "qualification_unavailable"),
+                sort_keys=True,
+            ))
+            raise click.exceptions.Exit(2) from exc
+        raise click.ClickException("Qualification operation is unavailable.") from exc
+    if agent_json:
+        click.echo(json.dumps(document, sort_keys=True))
+        if document["status"] in {"authorization_required", "error"}:
+            raise click.exceptions.Exit(2)
+        return
+    view = transfer.qualification(document["draft_id"])
+    click.echo(
+        f"Qualification Draft {view.draft_id}: {view.status.value}; "
+        f"{len(view.items)} items, {view.pending} pending, "
+        f"{view.deferred} deferred."
+    )
+    current = view.current_item
+    if current is not None:
+        click.echo(
+            f"Current: {current.source_artist} — {current.source_title}; "
+            f"proposal {current.spotify_artist} — {current.spotify_name}; "
+            f"{current.match_type}; score {current.score:.0f}."
+        )
+    click.echo(f"Review locally: {review_origin.rstrip('/')}/qualification/{view.draft_id}")
+    click.echo("Draft outcomes carry no authority; Approval remains separate.")
 
 
 @cli.command("list")

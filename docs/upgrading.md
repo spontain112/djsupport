@@ -41,6 +41,16 @@ cannot resume stale work. New fingerprint evidence remains in private
 application data and is never added to Git or generated reports. Unsupported
 matching-knowledge schemas are rejected without rewriting the private file.
 
+## To the Qualification Workspace release
+
+The next Transfer-state write upgrades retained state to schema 4 and adds a
+`qualifications` collection. Transfer schemas 1–3 remain readable. Qualification
+Drafts are additive private state: they do not become matching knowledge or
+Approval during upgrade. Backup/restore merges distinct drafts and requires an
+explicit current/archive choice when the same draft differs, so neither state
+wins silently. Audition handles, audio bytes, paths, filenames, and fingerprints
+are not stored in a draft.
+
 ## From 0.3.0
 
 DJ Support does not migrate working-directory data automatically. Keep the old

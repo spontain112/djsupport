@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Rekordbox-only, attention-led Qualification Workspace with durable,
+  non-authoritative drafts; explicit draft application remains separate from
+  playlist-scoped Approval.
+- Exact selected-source local audition through short-lived opaque handles,
+  loopback-only no-store media streaming, and bounded byte ranges, independent
+  of Chromaprint identity and durable matching knowledge.
+- Rich retained source/Spotify release, version, duration, evidence, and
+  authority facts, including zero-search Approved Match reuse by exact local
+  audio identity.
 - Opt-in, Rekordbox-only local Chromaprint evidence that can recover an exact,
   account-scoped Approved Match after XML metadata changes without another
   Spotify search.
@@ -18,8 +27,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Durable matching-knowledge schema 2, including private fingerprint
   observations and associations with backup, restore, and legacy-migration
   support.
-- Transfer-state schema 3 for durable local-audio opt-in, evidence checkpoints,
-  and stable aggregate outcomes; schemas 1 and 2 remain readable.
+- Transfer-state schema 4 for durable local-audio opt-in, evidence checkpoints,
+  stable aggregate outcomes, and Qualification Drafts; schemas 1–3 remain
+  readable.
 
 ### Changed
 

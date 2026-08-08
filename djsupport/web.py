@@ -13,7 +13,7 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request as FastAPIRequest
 from fastapi.responses import (
     HTMLResponse,
     JSONResponse,
@@ -26,6 +26,11 @@ from spotipy.oauth2 import SpotifyOAuth
 
 from djsupport.report import SyncReport
 from djsupport.spotify import SCOPES
+from djsupport.local_audition import (
+    AuditionHandleUnavailable,
+    AuditionRangeNotSatisfiable,
+    LocalSourceAudition,
+)
 from djsupport.transfer import (
     AccountPublishingGuards,
     BatchPlanRequest,
@@ -35,7 +40,11 @@ from djsupport.transfer import (
     FilePublicationStorage,
     FileTransferStorage,
     MatchCacheKnowledge,
+    QualificationDecision,
+    QualificationRequest,
+    QualificationView,
     RekordboxPlaylistSource,
+    SpotifyPlaylistReviewRequired,
     SpotifyMatcher,
     Transfer,
     TransferAuthorization,
@@ -79,7 +88,47 @@ class RekordboxBatchRequest(BaseModel):
     prefix: str | None = "djsupport"
     no_cache: bool = False
     local_audio_identity: bool = False
+    local_audio_audition: bool = False
     confirm_expensive: bool = False
+    authorize_private_source: bool = False
+    authorize_spotify_write: bool = False
+
+
+class QualificationDraftRequest(BaseModel):
+    """One explicit Rekordbox playlist selected for local qualification."""
+
+    xml_path: str
+    transfer_id: str
+    playlist_reference: str | None = None
+    include_all: bool = False
+    no_cache: bool = False
+    local_audio_identity: bool = False
+    local_audio_audition: bool = False
+    authorize_private_source: bool = False
+
+    def transfer_request(self) -> RekordboxBatchRequest:
+        return RekordboxBatchRequest(
+            xml_path=self.xml_path,
+            playlists=(
+                [self.playlist_reference] if self.playlist_reference else []
+            ),
+            no_cache=self.no_cache,
+            local_audio_identity=self.local_audio_identity,
+            local_audio_audition=self.local_audio_audition,
+            authorize_private_source=self.authorize_private_source,
+        )
+
+
+class QualificationDecisionRequest(BaseModel):
+    item_id: str
+    decision: QualificationDecision
+    spotify_reference: str | None = None
+    reason: str | None = None
+    exclude: bool = False
+    authorize_private_source: bool = False
+
+
+class QualificationAuthorizationRequest(BaseModel):
     authorize_private_source: bool = False
     authorize_spotify_write: bool = False
 
@@ -134,6 +183,7 @@ def _default_transfer_factory(url_type: str, request: SyncRequest) -> Transfer:
 
 def _default_rekordbox_transfer_factory(
     request: RekordboxBatchRequest, execute_authorized: bool,
+    *, local_audition: LocalSourceAudition | None = None,
 ) -> Transfer:
     from djsupport.cache import MatchCache
     from djsupport.local_audio import ChromaprintLocalAudio
@@ -148,7 +198,9 @@ def _default_rekordbox_transfer_factory(
     return Transfer(
         source=RekordboxPlaylistSource(
             request.xml_path,
-            include_locations=request.local_audio_identity,
+            include_locations=(
+                request.local_audio_identity or request.local_audio_audition
+            ),
         ),
         spotify=(
             SpotifyMatcher(get_client()) if execute_authorized else object()
@@ -167,6 +219,9 @@ def _default_rekordbox_transfer_factory(
         local_audio=(
             ChromaprintLocalAudio() if request.local_audio_identity else None
         ),
+        local_audition=(
+            local_audition if request.local_audio_audition else None
+        ),
     )
 
 
@@ -182,15 +237,23 @@ def create_app(
     ] | None = None,
     auth_manager: Callable[[], SpotifyOAuth] | None = None,
     background_runner: Callable[[Callable, tuple], None] | None = None,
+    local_audition: LocalSourceAudition | None = None,
 ) -> FastAPI:
     """Create the web adapter with replaceable external-boundary wiring."""
     web_app = FastAPI(title="djsupport", lifespan=lifespan)
     web_app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
     make_transfer = transfer_factory or _default_transfer_factory
-    make_rekordbox_transfer = (
-        rekordbox_transfer_factory or _default_rekordbox_transfer_factory
-    )
+    audition = local_audition or LocalSourceAudition()
+    uses_default_rekordbox_wiring = rekordbox_transfer_factory is None
+    if rekordbox_transfer_factory is None:
+        def make_rekordbox_transfer(request, execute_authorized):
+            return _default_rekordbox_transfer_factory(
+                request, execute_authorized, local_audition=audition,
+            )
+    else:
+        make_rekordbox_transfer = rekordbox_transfer_factory
     run_background = background_runner or _thread_runner
+    qualification_contexts: dict[str, QualificationDraftRequest] = {}
 
     def oauth_manager():
         return auth_manager() if auth_manager is not None else _auth_manager()
@@ -224,7 +287,9 @@ def create_app(
         from djsupport.agent import capability_document
         from djsupport.local_audio import ChromaprintLocalAudio
 
-        return capability_document(ChromaprintLocalAudio().capability())
+        return capability_document(
+            ChromaprintLocalAudio().capability(), audition.capability(),
+        )
 
     @web_app.get("/auth/status")
     def auth_status():
@@ -294,6 +359,7 @@ def create_app(
             retry_days=request.retry_days,
             playlist_prefix=request.prefix,
             local_audio_identity=request.local_audio_identity,
+            local_audio_audition=request.local_audio_audition,
             confirm_expensive=request.confirm_expensive,
         ), TransferAuthorization(
             private_source=request.authorize_private_source,
@@ -355,6 +421,230 @@ def create_app(
     def execute_rekordbox_batch(request: RekordboxBatchRequest):
         return rekordbox_contract(request, execute=True)
 
+    def recover_qualification_context(
+        draft_id: str,
+    ) -> QualificationDraftRequest | None:
+        if not uses_default_rekordbox_wiring:
+            return None
+        from djsupport.config import ConfigManager
+
+        publication_path = default_publication_manifest_path()
+        storage = FileTransferStorage(
+            publication_path.with_suffix(".transfers.json")
+        )
+        draft = storage.load_qualification(draft_id)
+        if draft is None:
+            return None
+        state = storage.load_transfer(draft.transfer_id)
+        if state is None:
+            return None
+        config = ConfigManager()
+        config.load()
+        xml_path = config.get_rekordbox_xml_path()
+        if not xml_path or not Path(xml_path).is_file():
+            return None
+        return QualificationDraftRequest(
+            xml_path=xml_path,
+            transfer_id=draft.batch_id or draft.transfer_id,
+            playlist_reference=draft.source_reference,
+            no_cache=not state.request.get("retain_matching_knowledge", True),
+            local_audio_identity=state.request.get(
+                "local_audio_identity", False,
+            ),
+            local_audio_audition=state.request.get(
+                "local_audio_audition", False,
+            ),
+            authorize_private_source=True,
+        )
+
+    def qualification_transfer(draft_id: str) -> Transfer:
+        context = qualification_contexts.get(draft_id)
+        if context is None:
+            context = recover_qualification_context(draft_id)
+            if context is not None:
+                qualification_contexts[draft_id] = context
+        if context is None:
+            raise HTTPException(
+                status_code=404, detail="Qualification Draft is unavailable",
+            )
+        return make_rekordbox_transfer(context.transfer_request(), True)
+
+    @web_app.post("/rekordbox/qualification/drafts")
+    def create_qualification_draft(request: QualificationDraftRequest):
+        if not request.authorize_private_source:
+            raise HTTPException(
+                status_code=403, detail="Private source authorization required",
+            )
+        require_authenticated()
+        transfer = make_rekordbox_transfer(request.transfer_request(), True)
+        try:
+            view = transfer.obtain_qualification(
+                QualificationRequest(
+                    transfer_id=request.transfer_id,
+                    playlist_reference=request.playlist_reference,
+                    include_all=request.include_all,
+                ),
+                TransferAuthorization(private_source=True),
+            )
+        except SpotifyPlaylistReviewRequired as exc:
+            raise HTTPException(
+                status_code=409, detail="Qualification review required",
+            ) from exc
+        except (PermissionError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400, detail="Qualification Draft is unavailable",
+            ) from exc
+        qualification_contexts[view.draft_id] = request
+        return _qualification_to_dict(view)
+
+    @web_app.get("/rekordbox/qualification/drafts/{draft_id}")
+    def get_qualification_draft(
+        draft_id: str, authorize_private_source: bool = False,
+    ):
+        if not authorize_private_source:
+            raise HTTPException(
+                status_code=403, detail="Private source authorization required",
+            )
+        require_authenticated()
+        try:
+            return _qualification_to_dict(
+                qualification_transfer(draft_id).qualification(draft_id)
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=404, detail="Qualification Draft is unavailable",
+            ) from exc
+
+    @web_app.post("/rekordbox/qualification/drafts/{draft_id}/decisions")
+    def decide_qualification_item(
+        draft_id: str, request: QualificationDecisionRequest,
+    ):
+        if not request.authorize_private_source:
+            raise HTTPException(
+                status_code=403, detail="Private source authorization required",
+            )
+        require_authenticated()
+        try:
+            view = qualification_transfer(draft_id).record_qualification(
+                draft_id,
+                request.item_id,
+                request.decision,
+                spotify_reference=request.spotify_reference,
+                reason=request.reason,
+                exclude=request.exclude,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=400, detail="Qualification decision is invalid",
+            ) from exc
+        return _qualification_to_dict(view)
+
+    @web_app.post(
+        "/rekordbox/qualification/drafts/{draft_id}/audition/{item_id}"
+    )
+    def audition_qualification_item(
+        draft_id: str,
+        item_id: str,
+        request: QualificationAuthorizationRequest,
+    ):
+        if not request.authorize_private_source:
+            raise HTTPException(
+                status_code=403, detail="Private source authorization required",
+            )
+        require_authenticated()
+        try:
+            result = qualification_transfer(draft_id).audition_qualification(
+                draft_id,
+                item_id,
+                TransferAuthorization(private_source=True),
+            )
+        except (PermissionError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400, detail="Local audition is unavailable",
+            ) from exc
+        response = {
+            "status": result.status,
+            "media_type": result.media_type,
+            "content_length": result.content_length,
+            "expires_in": result.expires_in,
+        }
+        if result.status == "available" and result.handle:
+            response["media_url"] = (
+                f"/rekordbox/qualification/media/{result.handle}"
+            )
+        elif result.reason:
+            response["reason"] = result.reason
+        return response
+
+    @web_app.post("/rekordbox/qualification/drafts/{draft_id}/apply")
+    def apply_qualification_draft(
+        draft_id: str, request: QualificationAuthorizationRequest,
+    ):
+        if not request.authorize_private_source:
+            raise HTTPException(
+                status_code=403, detail="Private source authorization required",
+            )
+        if not request.authorize_spotify_write:
+            raise HTTPException(
+                status_code=403, detail="Spotify write authorization required",
+            )
+        require_authenticated()
+        try:
+            outcome = qualification_transfer(draft_id).apply_qualification(
+                draft_id,
+                TransferAuthorization(private_source=True, spotify_write=True),
+            )
+        except SpotifyPlaylistReviewRequired as exc:
+            raise HTTPException(
+                status_code=409, detail="Qualification review required",
+            ) from exc
+        except (PermissionError, ValueError) as exc:
+            raise HTTPException(
+                status_code=400, detail="Qualification Draft cannot be applied",
+            ) from exc
+        return {
+            "draft_id": outcome.draft_id,
+            "status": outcome.status.value,
+            "applied_items": outcome.applied_items,
+            "authority": "none",
+            "next_actions": list(outcome.next_actions),
+        }
+
+    @web_app.get("/rekordbox/qualification/media/{handle}")
+    def qualification_media(handle: str, request: FastAPIRequest):
+        client_host = request.client.host if request.client else ""
+        if client_host not in {"127.0.0.1", "::1", "localhost", "testclient"}:
+            raise HTTPException(status_code=403, detail="Local media only")
+        try:
+            stream = audition.stream(handle, request.headers.get("range"))
+        except AuditionHandleUnavailable as exc:
+            raise HTTPException(
+                status_code=404, detail="Local audition is unavailable",
+            ) from exc
+        except AuditionRangeNotSatisfiable as exc:
+            raise HTTPException(
+                status_code=416,
+                detail="Audition byte range is not satisfiable",
+                headers={"Content-Range": f"bytes */{exc.total_size}"},
+            ) from exc
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(stream.content_length),
+            "Cache-Control": "private, no-store",
+            "Content-Security-Policy": "default-src 'none'; media-src 'self'",
+            "Cross-Origin-Resource-Policy": "same-origin",
+            "Referrer-Policy": "no-referrer",
+            "X-Content-Type-Options": "nosniff",
+        }
+        if stream.content_range is not None:
+            headers["Content-Range"] = stream.content_range
+        return StreamingResponse(
+            stream.body,
+            status_code=stream.status_code,
+            media_type=stream.media_type,
+            headers=headers,
+        )
+
     @web_app.get("/sync/{transfer_id}/progress")
     async def sync_progress(transfer_id: str):
         async def event_stream():
@@ -409,6 +699,11 @@ def create_app(
     def index():
         return HTMLResponse((STATIC_DIR / "index.html").read_text())
 
+    @web_app.get("/qualification/{draft_id}")
+    def qualification_workspace(draft_id: str):
+        del draft_id
+        return HTMLResponse((STATIC_DIR / "index.html").read_text())
+
     return web_app
 
 
@@ -417,6 +712,70 @@ def _run_transfer(transfer: Transfer, request: TransferRequest) -> None:
         transfer.execute(request)
     except Exception:
         logger.exception("Transfer failed")
+
+
+def _qualification_to_dict(view: QualificationView) -> dict[str, Any]:
+    """Render only review facts; filesystem references stay behind Transfer."""
+    items = []
+    for item in view.items:
+        spotify_id = None
+        prefix = "spotify:track:"
+        if item.spotify_uri.startswith(prefix):
+            candidate = item.spotify_uri[len(prefix):]
+            if len(candidate) == 22 and candidate.isalnum():
+                spotify_id = candidate
+        items.append({
+            "item_id": item.item_id,
+            "source": {
+                "artist": item.source_artist,
+                "title": item.source_title,
+                "release": item.source_release,
+                "label": item.source_label,
+                "version": item.source_version,
+                "duration": item.source_duration,
+            },
+            "spotify": {
+                "uri": item.spotify_uri,
+                "name": item.spotify_name,
+                "artist": item.spotify_artist,
+                "release": item.spotify_release,
+                "duration": item.spotify_duration,
+                "embed_url": (
+                    f"https://open.spotify.com/embed/track/{spotify_id}"
+                    if spotify_id else None
+                ),
+                "open_url": (
+                    f"https://open.spotify.com/track/{spotify_id}"
+                    if spotify_id else None
+                ),
+            },
+            "proposal": {
+                "score": item.score,
+                "match_type": item.match_type,
+                "score_reasons": list(item.score_reasons),
+                "authority_status": item.authority_status,
+                "attention_reasons": list(item.attention_reasons),
+            },
+            "audition_status": item.audition_status,
+            "audition_reason": item.audition_reason,
+            "decision": item.decision.value if item.decision else None,
+            "correction_uri": item.correction_uri,
+            "deferred_reason": item.deferred_reason,
+            "excluded": item.excluded,
+        })
+    return {
+        "draft_id": view.draft_id,
+        "transfer_id": view.transfer_id,
+        "status": view.status.value,
+        "authority": "none",
+        "include_all": view.include_all,
+        "counts": {
+            "items": len(view.items),
+            "pending": view.pending,
+            "deferred": view.deferred,
+        },
+        "items": items,
+    }
 
 
 def _report_to_dict(report: SyncReport) -> dict[str, Any]:

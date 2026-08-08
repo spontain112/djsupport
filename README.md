@@ -6,11 +6,11 @@ publication, and later playlist changes.
 
 ## Supported workflows
 
-| Source | Default result | Best for |
-| --- | --- | --- |
-| Rekordbox playlist | **Mirror** | Keeping a Spotify playlist aligned with an explicitly selected Rekordbox playlist |
-| Beatport chart | **Snapshot** | Capturing a chart once; opt into a Mirror only when it should be maintained |
-| Beatport label | **Snapshot** | Capturing a label selection once; opt into a Mirror only when it should be maintained |
+| Source | Default result | Review surface | Best for |
+| --- | --- | --- | --- |
+| Rekordbox playlist | **Mirror** | Qualification Workspace, then separate Approval | Keeping a Spotify playlist aligned with an explicitly selected Rekordbox playlist |
+| Beatport chart | **Snapshot** | Spotify, then Approval | Capturing a chart once; opt into a Mirror only when it should be maintained |
+| Beatport label | **Snapshot** | Spotify, then Approval | Capturing a label selection once; opt into a Mirror only when it should be maintained |
 
 Every Transfer can be Previewed before Spotify is changed. Published matches
 are reviewable in Spotify, and explicit Approval turns accepted matches into
@@ -103,6 +103,41 @@ expensive:
 djsupport sync --whole-library
 ```
 
+## Qualify a Rekordbox playlist
+
+Rekordbox Mirrors can use the local Qualification Workspace because Spotify
+cannot reveal what the selected source file sounded like. Opt into audition
+when creating the bounded Batch; this is independent of fingerprint identity
+and remains compatible with `--no-cache`:
+
+```bash
+djsupport sync -p "Deep House" --local-audio-audition
+djsupport web
+```
+
+Obtain or resume the playlist-scoped Qualification Draft through the same
+Transfer lifecycle:
+
+```bash
+djsupport qualification <batch-or-transfer-id> \
+  --playlist "Deep House" --local-audio-audition \
+  --authorize-private-source
+```
+
+The workspace defaults to proposals needing attention, shows retained source
+release/version/duration beside Spotify release/duration and match evidence,
+and offers only **Correct**, **Wrong — find another**, **Cannot verify**, or
+**Not my source**. Local playback opens only the exact selected occurrence
+after private-source authorization; the browser receives an opaque temporary
+URL, never its path or filename.
+
+Every outcome remains a non-authoritative, revisable draft. Applying a complete
+draft is a separate operation requiring `--authorize-spotify-write`; it updates
+only the linked Provisional Playlist. Playlist-scoped Approval is still the
+only operation that records Approved Matches, Corrections, or Rejected Matches.
+Beatport and other browser-origin selections continue to be reviewed directly
+in Spotify.
+
 ## Beatport charts and labels
 
 Preview and publish a one-time chart Snapshot:
@@ -186,6 +221,13 @@ upload audio or fingerprints, modify files, or identify unknown recordings.
 Exact compatible evidence can only reuse a match that the same Spotify account
 already approved. Missing or unreadable audio falls back to metadata matching.
 
+On a new installation, identity cannot improve the first Spotify discovery:
+there is no fingerprint-backed Approved Match to reuse yet. During an
+authorized Transfer it runs only after retained matching-knowledge lookup and
+before Spotify search. Its benefit begins after explicit Approval binds that
+observation to retained Approved Match facts. Audition never requires or
+automatically triggers this calculation.
+
 ## AI-agent use
 
 Codex and other harnesses are first-class clients of the same Transfer policy.
@@ -208,6 +250,10 @@ Spotify publication requires separate authorization:
 djsupport sync -p "Deep House" --json \
   --authorize-private-source --authorize-spotify-write
 ```
+
+After a Rekordbox outcome returns `qualify`, obtain a privacy-redacted draft
+document and opaque loopback review URL with `djsupport qualification --json`.
+Draft application and the later playlist Approval remain distinct actions.
 
 JSON mode is non-interactive and never treats conversation as authorization. A
 changed source selection or effect scope produces a different Batch identity.

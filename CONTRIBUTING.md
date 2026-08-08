@@ -40,6 +40,7 @@ djsupport/
   backup.py      Versioned local-data backup and restore
   migration.py   Explicit legacy-data migration
   local_audio.py Optional local-only Chromaprint boundary
+  local_audition.py Process-local, path-redacted selected-media boundary
 tests/           Offline behavior, adapter, migration, privacy, and package tests
 docs/adr/        Architecture decisions
 docs/plans/      Product roadmap and retained implementation history
@@ -65,6 +66,12 @@ publication rules.
 - Local audio identity is Rekordbox-only, selected-Batch-only, opt-in, exact,
   account-scoped, and subordinate to Approval. Never scan directories, upload
   evidence, emit paths or fingerprints, or require `fpcalc` as a package binary.
+- Qualification is Rekordbox-only and Transfer-owned. Draft decisions carry no
+  authority; draft application and playlist Approval are separate explicit
+  operations. Web, CLI, and agent code only render and collect Transfer facts.
+- Local audition is a separate opt-in capability from local audio identity. It
+  accepts only the exact selected occurrence, uses process-local opaque handles,
+  emits no paths or filenames, and never calculates a fingerprint.
 - Update `CONTRIBUTING.md` when the project map, development commands, or these
   conventions change.
 

@@ -9,6 +9,7 @@ import pytest
 from djsupport.report import (
     MatchedTrack,
     PlaylistReport,
+    ReviewTrack,
     SyncReport,
     save_report,
     save_review_csv,
@@ -282,3 +283,33 @@ class TestSaveReviewCsv:
         content = (tmp_path / "review.csv").read_text()
         assert "score_reasons" in content.splitlines()[0]
         assert reason in content
+
+    def test_retains_release_duration_version_and_authority_review_facts(self, tmp_path):
+        path = str(tmp_path / "review.csv")
+        playlist = _playlist()
+        playlist.review_items.append(ReviewTrack(
+            source_track_id="source-1",
+            source_name="Source Artist - Source Title",
+            source_artist="Source Artist",
+            source_title="Source Title",
+            source_release="Source Release",
+            source_label="Source Label",
+            source_version="Extended Mix",
+            source_duration=381,
+            spotify_uri="spotify:track:0123456789012345678901",
+            spotify_name="Spotify Title",
+            spotify_artist="Spotify Artist",
+            spotify_release="Spotify Release",
+            spotify_duration=250,
+            score=88,
+            match_type="shorter_version",
+            authority_status="proposal",
+        ))
+
+        save_review_csv(_report(playlists=[playlist]), path)
+
+        content = (tmp_path / "review.csv").read_text()
+        assert "source_release,source_label,source_version" in content
+        assert "spotify_release,spotify_duration,authority_status" in content
+        assert "Source Release,Source Label,Extended Mix" in content
+        assert "Spotify Release,250,proposal" in content
