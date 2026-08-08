@@ -1,0 +1,3 @@
+# Keep Correction Search subordinate to human Approval
+
+Correction Search may use agent-operated external web search inside a user-confirmed Correction Search Plan, but it returns only Correction Candidates. It cannot change proposal state, create a Correction or Approval, broaden the confirmed plan, or infer permanent Spotify catalog absence; the user auditions and selects a link, and the existing Correction plus playlist-scoped Approval workflow establishes matching authority. This preserves useful browser recall without creating a second matcher or allowing search results to bypass Transfer, at the deliberate cost of requiring human judgment for every accepted result.
