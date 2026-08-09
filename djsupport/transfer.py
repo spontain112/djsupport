@@ -60,7 +60,7 @@ from djsupport.spotify import (
 
 
 PUBLICATION_MANIFEST_VERSION = 6
-TRANSFER_STATE_VERSION = 4
+TRANSFER_STATE_VERSION = 5
 EXPENSIVE_BATCH_LOOKUP_THRESHOLD = 100
 SPOTIFY_TRACK_URI = re.compile(r"^spotify:track:([A-Za-z0-9]{22})$")
 SPOTIFY_TRACK_URL = re.compile(
@@ -362,6 +362,7 @@ class QualificationStatus(str, Enum):
     APPLYING = "applying"
     PAUSED = "paused"
     APPLIED = "applied"
+    APPROVED = "approved"
     REVIEW_REQUIRED = "review_required"
     DISCARDED = "discarded"
 
@@ -398,6 +399,7 @@ class QualificationDraftState:
     completed_chunks: list[str] = field(default_factory=list)
     applied_manifest: dict | None = None
     applied_uris: list[str] = field(default_factory=list)
+    approval_outcome: dict | None = None
     audition_statuses: dict[str, dict] = field(default_factory=dict)
     audition_selection_digest: str | None = None
     supersedes: str | None = None
@@ -412,6 +414,7 @@ class QualificationDraftState:
             "completed_chunks": [],
             "applied_manifest": None,
             "applied_uris": [],
+            "approval_outcome": None,
             "audition_statuses": {},
             "audition_selection_digest": None,
             "supersedes": None,
@@ -489,6 +492,8 @@ class QualificationView:
     @property
     def next_actions(self) -> tuple[str, ...]:
         """Return policy-owned lifecycle actions for thin clients."""
+        if self.status == QualificationStatus.APPROVED:
+            return ()
         if self.status == QualificationStatus.APPLIED:
             return ("approve",)
         if self.status == QualificationStatus.DISCARDED:
@@ -512,6 +517,7 @@ class QualificationView:
             QualificationStatus.APPLYING,
             QualificationStatus.PAUSED,
             QualificationStatus.APPLIED,
+            QualificationStatus.APPROVED,
             QualificationStatus.DISCARDED,
         }:
             return None
@@ -1181,7 +1187,7 @@ class FileTransferStorage:
                 "Transfer state is malformed; repair or restore it before use"
             ) from exc
         if not isinstance(data, dict) or data.get("version") not in (
-            1, 2, 3, TRANSFER_STATE_VERSION,
+            1, 2, 3, 4, TRANSFER_STATE_VERSION,
         ):
             raise ValueError(
                 "Transfer state schema is unsupported; upgrade djsupport "
@@ -2762,6 +2768,7 @@ class Transfer:
                     QualificationStatus.APPLYING,
                     QualificationStatus.PAUSED,
                     QualificationStatus.APPLIED,
+                    QualificationStatus.APPROVED,
                     QualificationStatus.DISCARDED,
                 }
             ):
@@ -2786,6 +2793,7 @@ class Transfer:
                 QualificationStatus.APPLYING,
                 QualificationStatus.PAUSED,
                 QualificationStatus.APPLIED,
+                QualificationStatus.APPROVED,
                 QualificationStatus.DISCARDED,
             }:
                 return self._qualification_view(draft, state)
@@ -2865,6 +2873,7 @@ class Transfer:
                 QualificationStatus.APPLYING,
                 QualificationStatus.PAUSED,
                 QualificationStatus.APPLIED,
+                QualificationStatus.APPROVED,
                 QualificationStatus.DISCARDED,
             }:
                 raise ValueError(
@@ -2984,6 +2993,7 @@ class Transfer:
                 if candidate.draft_id != draft_id
                 and candidate.status not in {
                     QualificationStatus.APPLIED,
+                    QualificationStatus.APPROVED,
                     QualificationStatus.DISCARDED,
                 }
             ]
@@ -3336,6 +3346,7 @@ class Transfer:
                     QualificationStatus.APPLYING,
                     QualificationStatus.PAUSED,
                     QualificationStatus.APPLIED,
+                    QualificationStatus.APPROVED,
                     QualificationStatus.DISCARDED,
                 }
                 or (
@@ -3523,6 +3534,7 @@ class Transfer:
             QualificationStatus.APPLYING,
             QualificationStatus.PAUSED,
             QualificationStatus.APPLIED,
+            QualificationStatus.APPROVED,
             QualificationStatus.DISCARDED,
         } or (
             draft.status == QualificationStatus.REVIEW_REQUIRED
@@ -3713,6 +3725,7 @@ class Transfer:
             QualificationStatus.APPLYING,
             QualificationStatus.PAUSED,
             QualificationStatus.APPLIED,
+            QualificationStatus.APPROVED,
         }:
             raise ValueError(
                 "A Qualification Draft cannot be discarded after application starts"
@@ -3874,9 +3887,26 @@ class Transfer:
             raise PermissionError(required)
         if self._transfer_storage is None:
             raise ValueError("Qualification requires durable Transfer storage")
-        return self._approve(
+        draft = self._transfer_storage.load_qualification(draft_id)
+        if draft is None:
+            raise ValueError(f"Unknown Qualification Draft: {draft_id}")
+        if (
+            draft.status == QualificationStatus.APPROVED
+            and draft.approval_outcome is not None
+        ):
+            return self._approval_from_stored(draft.approval_outcome)
+        outcome = self._approve(
             None, qualification_draft_id=draft_id,
         )
+        if outcome.status == ApprovalStatus.APPROVED:
+            draft = self._transfer_storage.load_qualification(draft_id)
+            if draft is None:
+                raise ValueError(f"Unknown Qualification Draft: {draft_id}")
+            draft.status = QualificationStatus.APPROVED
+            draft.approval_outcome = self._stored_approval(outcome)
+            draft.updated_at = datetime.now().isoformat()
+            self._transfer_storage.save_qualification(draft_id, draft)
+        return outcome
 
     def apply_qualification(
         self,
@@ -3909,12 +3939,19 @@ class Transfer:
                 )
             if draft.status == QualificationStatus.DISCARDED:
                 raise ValueError("A discarded Qualification Draft cannot be applied")
-            if draft.status == QualificationStatus.APPLIED:
+            if draft.status in {
+                QualificationStatus.APPLIED,
+                QualificationStatus.APPROVED,
+            }:
                 assert draft.playlist_id is not None
+                next_actions = (
+                    ("approve",)
+                    if draft.status == QualificationStatus.APPLIED else ()
+                )
                 return QualificationApplyOutcome(
-                    draft_id, draft.playlist_id, QualificationStatus.APPLIED,
+                    draft_id, draft.playlist_id, draft.status,
                     len((draft.applied_manifest or {}).get("managed_items", ())),
-                    ("approve",),
+                    next_actions,
                 )
             if draft.playlist_id is None:
                 raise SpotifyPlaylistReviewRequired(
@@ -4167,6 +4204,38 @@ class Transfer:
             "managed_items": tuple(
                 PublicationItem(**item)
                 for item in stored.get("managed_items", stored.get("items", ()))
+            ),
+        })
+
+    @staticmethod
+    def _stored_approval(outcome: ApprovalOutcome) -> dict:
+        stored = asdict(outcome)
+        stored["reviewed_at"] = outcome.reviewed_at.isoformat()
+        stored["status"] = outcome.status.value
+        return stored
+
+    @staticmethod
+    def _approval_from_stored(stored: dict) -> ApprovalOutcome:
+        return ApprovalOutcome(**{
+            **stored,
+            "reviewed_at": datetime.fromisoformat(stored["reviewed_at"]),
+            "status": ApprovalStatus(stored["status"]),
+            "approved": tuple(
+                PublicationItem(**item) for item in stored.get("approved", ())
+            ),
+            "rejected": tuple(
+                PublicationItem(**item) for item in stored.get("rejected", ())
+            ),
+            "collisions": tuple(
+                PublicationItem(**item)
+                for item in stored.get("collisions", ())
+            ),
+            "corrections": tuple(
+                PublicationItem(**item)
+                for item in stored.get("corrections", ())
+            ),
+            "conflicts": tuple(
+                ApprovalConflict(**item) for item in stored.get("conflicts", ())
             ),
         })
 

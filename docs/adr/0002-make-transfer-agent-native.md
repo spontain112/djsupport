@@ -47,3 +47,18 @@ Approved Match; similar evidence remains non-authoritative.
 This decision does not require a proprietary harness, an MCP server, a hosted
 agent service, conversational authorization inference, or an agent-specific
 policy engine. Those may be evaluated later as adapters over the same contract.
+
+The First Rekordbox Transfer guide is an additive presentation over that same
+contract. It derives readiness from current local configuration and durable
+Transfer or Qualification state; it has no onboarding-state store. Every
+response contains one primary `next_action`, and ordinary missing input is a
+successful structured state. JSON clients are non-interactive, stdout remains
+machine-readable, and `required_input` acts as runtime schema discovery for the
+next invocation.
+
+The guide may order existing operations and translate their reason codes into
+plain language. It cannot estimate work outside Transfer, select a playlist,
+broaden a Batch, read private input, open authentication, write Spotify, apply a
+draft, or create Approval without the exact input and authorization owned by
+that phase. CLI and local web routes are equivalent thin renderings of the
+versioned agent document.

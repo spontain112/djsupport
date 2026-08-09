@@ -1333,7 +1333,7 @@ def test_schema_three_transfer_and_schema_five_manifest_apply_additively(
     )
 
     assert outcome.status == QualificationStatus.APPLIED
-    assert json.loads(transfer_path.read_text())["version"] == 4
+    assert json.loads(transfer_path.read_text())["version"] == 5
     assert json.loads(publication_path.read_text())["version"] == 6
 
 

@@ -9,6 +9,7 @@ import pytest
 from djsupport.agent import (
     AgentAuthorization,
     AgentTransferContract,
+    FirstTransferGuideRequest,
     error_document,
 )
 from djsupport.local_audio import LocalAudioCapability
@@ -19,6 +20,7 @@ from djsupport.transfer import (
     BatchPlanRequest,
     FilePublicationStorage,
     FileTransferStorage,
+    QualificationDecision,
     QualificationRequest,
     SourceSelection,
     Transfer,
@@ -34,6 +36,199 @@ class UntouchedSource:
     def consume(self, reference):
         self.calls += 1
         raise AssertionError("capability inspection must not read the source")
+
+
+@pytest.mark.parametrize(
+    ("guide_request", "next_action", "required_input"),
+    (
+        (
+            FirstTransferGuideRequest(),
+            "configure_spotify",
+            {
+                "kind": "spotify_configuration",
+                "redirect_uri": "http://127.0.0.1:8888/callback",
+                "callback_policy": "add_without_replacing_existing",
+            },
+        ),
+        (
+            FirstTransferGuideRequest(spotify_configured=True),
+            "authenticate_spotify",
+            {"kind": "spotify_authentication"},
+        ),
+        (
+            FirstTransferGuideRequest(
+                spotify_configured=True,
+                spotify_authenticated=True,
+            ),
+            "select_rekordbox_xml",
+            {"kind": "rekordbox_xml", "selection": "exact_file"},
+        ),
+        (
+            FirstTransferGuideRequest(
+                spotify_configured=True,
+                spotify_authenticated=True,
+                rekordbox_configured=True,
+                rekordbox_available=False,
+            ),
+            "repair_rekordbox_xml",
+            {"kind": "rekordbox_xml", "selection": "exact_file"},
+        ),
+    ),
+)
+def test_first_transfer_readiness_returns_one_privacy_safe_next_action(
+    guide_request, next_action, required_input,
+):
+    transfer = MagicMock()
+    contract = AgentTransferContract(transfer)
+
+    document = contract.first_rekordbox_transfer(
+        guide_request, AgentAuthorization(),
+    )
+
+    assert document == {
+        "contract_version": 2,
+        "phase": "first_rekordbox_transfer",
+        "status": "input_required",
+        "next_action": next_action,
+        "required_input": required_input,
+    }
+    transfer.assert_not_called()
+    rendered = json.dumps(document)
+    for private_value in (
+        "client_secret", "access_token", "account_id", "playlist_name",
+        "track_name", "source_path", "fingerprint",
+    ):
+        assert private_value not in rendered
+
+
+def test_first_transfer_asks_for_one_bounded_playlist_after_setup():
+    transfer = MagicMock()
+    contract = AgentTransferContract(transfer)
+    guide_request = FirstTransferGuideRequest(
+        spotify_configured=True,
+        spotify_authenticated=True,
+        rekordbox_configured=True,
+        rekordbox_available=True,
+    )
+
+    document = contract.first_rekordbox_transfer(
+        guide_request, AgentAuthorization(),
+    )
+
+    assert document == {
+        "contract_version": 2,
+        "phase": "first_rekordbox_transfer",
+        "status": "input_required",
+        "next_action": "select_playlist",
+        "required_input": {
+            "kind": "rekordbox_playlist",
+            "selection": "one_explicit_playlist",
+            "whole_library": False,
+        },
+    }
+    transfer.assert_not_called()
+
+
+def test_first_transfer_explains_local_identity_before_an_explicit_choice():
+    transfer = MagicMock()
+    transfer.local_audio_capability.return_value = LocalAudioCapability(
+        available=True,
+        algorithm="chromaprint",
+        algorithm_version="1.6.1",
+    )
+    contract = AgentTransferContract(transfer)
+    guide_request = FirstTransferGuideRequest(
+        spotify_configured=True,
+        spotify_authenticated=True,
+        rekordbox_configured=True,
+        rekordbox_available=True,
+        playlist_reference="Private/Selection",
+    )
+
+    document = contract.first_rekordbox_transfer(
+        guide_request, AgentAuthorization(),
+    )
+
+    assert document == {
+        "contract_version": 2,
+        "phase": "first_rekordbox_transfer",
+        "status": "decision_required",
+        "next_action": "choose_local_audio_identity",
+        "required_input": {
+            "kind": "boolean",
+            "default": False,
+        },
+        "local_audio_identity": {
+            "available": True,
+            "scope": "selected_tracks_only",
+            "uploads": "none",
+            "file_changes": "none",
+            "first_run_spotify_search_reduction": False,
+            "future_reuse": "exact_approved_match_after_approval",
+            "approval_authority": "none",
+            "audition": "separate",
+        },
+    }
+    transfer.local_audio_capability.assert_called_once_with()
+
+
+def test_first_transfer_cannot_enable_unavailable_local_identity():
+    transfer = MagicMock()
+    transfer.local_audio_capability.return_value = LocalAudioCapability(
+        available=False,
+        algorithm="chromaprint",
+        algorithm_version=None,
+        reason="binary_unavailable",
+    )
+    contract = AgentTransferContract(transfer)
+
+    document = contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(
+            spotify_configured=True,
+            spotify_authenticated=True,
+            rekordbox_configured=True,
+            rekordbox_available=True,
+            playlist_reference="Private/Selection",
+            local_audio_identity=True,
+        ),
+        AgentAuthorization(private_source=True),
+    )
+
+    assert document == {
+        "contract_version": 2,
+        "phase": "first_rekordbox_transfer",
+        "status": "decision_required",
+        "next_action": "continue_without_local_audio_identity",
+        "required_input": {"kind": "boolean", "value": False},
+        "reason": {"code": "local_audio_identity_unavailable"},
+    }
+    transfer.plan_batch.assert_not_called()
+
+
+def test_first_transfer_requires_private_source_authority_before_planning():
+    transfer = MagicMock()
+    contract = AgentTransferContract(transfer)
+    guide_request = FirstTransferGuideRequest(
+        spotify_configured=True,
+        spotify_authenticated=True,
+        rekordbox_configured=True,
+        rekordbox_available=True,
+        playlist_reference="Private/Selection",
+        local_audio_identity=False,
+    )
+
+    document = contract.first_rekordbox_transfer(
+        guide_request, AgentAuthorization(),
+    )
+
+    assert document == {
+        "contract_version": 2,
+        "phase": "first_rekordbox_transfer",
+        "status": "authorization_required",
+        "next_action": "authorize_private_source",
+        "required_authorization": "private_source",
+    }
+    transfer.plan_batch.assert_not_called()
 
 
 def test_machine_error_next_actions_are_specific_to_the_failure():
@@ -185,6 +380,31 @@ class EmptyKnowledge(UntouchedKnowledge):
 
     def checkpoint(self):
         pass
+
+
+class FirstTransferKnowledge(EmptyKnowledge):
+    def __init__(self):
+        super().__init__()
+        self.approved = []
+        self.rejected = []
+        self.corrected = []
+
+    def approve(self, item):
+        self.approved.append(item)
+
+    def reject(self, item):
+        self.rejected.append(item)
+
+    def correct(self, item):
+        self.corrected.append(item)
+
+    def approval_conflict(self, item):
+        del item
+        return False
+
+    def approve_local_audio(self, item, account_id):
+        del item, account_id
+        return None
 
 
 def test_batch_plan_requires_explicit_private_source_authorization(tmp_path):
@@ -353,6 +573,603 @@ class PreviewSpotify:
             "score": 96.0,
             "match_type": "exact",
         }
+
+
+class FirstTransferSpotify(PreviewSpotify):
+    def __init__(self):
+        super().__init__()
+        self.playlists = {}
+        self.heads = {}
+        self.playlist_writes = 0
+
+    def create_playlist(self, name, description):
+        del name, description
+        self.playlists["provisional-one"] = []
+        self.heads["provisional-one"] = "head-0"
+        return "provisional-one"
+
+    def find_recovery_playlist(self, publication_key):
+        del publication_key
+        return None
+
+    def replace_items(self, playlist_id, uris):
+        self.playlist_writes += 1
+        self.playlists[playlist_id] = list(uris)
+        head = f"head-{self.playlist_writes}"
+        self.heads[playlist_id] = head
+        return SimpleNamespace(snapshot_id=head)
+
+    def add_items(self, playlist_id, uris):
+        return self.replace_items(
+            playlist_id, [*self.playlists[playlist_id], *uris],
+        )
+
+    def playlist_head(self, playlist_id):
+        return SimpleNamespace(snapshot_id=self.heads[playlist_id])
+
+    def ordered_playlist_items(self, playlist_id):
+        from djsupport.transfer import (
+            SpotifyItemKind,
+            SpotifyPlaylistItem,
+            SpotifyPlaylistPage,
+        )
+
+        return SpotifyPlaylistPage(tuple(
+            SpotifyPlaylistItem(index, SpotifyItemKind.TRACK, uri)
+            for index, uri in enumerate(self.playlists[playlist_id])
+        ))
+
+    def set_playlist_description(self, playlist_id, description):
+        del playlist_id, description
+
+    def provisional_playlist_track_uris(self, playlist_id):
+        return list(self.playlists[playlist_id])
+
+    def replace_provisional_playlist_tracks(self, playlist_id, uris):
+        return self.replace_items(playlist_id, uris)
+
+    def spotify_track(self, uri):
+        return {
+            "uri": uri,
+            "name": "Invented Signal",
+            "artist": "Invented Artist",
+            "album": "Invented Release",
+            "duration_ms": 180_000,
+            "is_playable": True,
+        }
+
+
+def test_first_transfer_returns_transfer_owned_preview_plan():
+    spotify = PreviewSpotify()
+    contract = AgentTransferContract(Transfer(
+        source=BoundedSource(),
+        spotify=spotify,
+        matching_knowledge=EmptyKnowledge(),
+        publishing_guards=AccountPublishingGuards(),
+    ))
+    guide_request = FirstTransferGuideRequest(
+        spotify_configured=True,
+        spotify_authenticated=True,
+        rekordbox_configured=True,
+        rekordbox_available=True,
+        playlist_reference="Private/Selection",
+        local_audio_identity=False,
+    )
+
+    document = contract.first_rekordbox_transfer(
+        guide_request, AgentAuthorization(private_source=True),
+    )
+
+    assert document["contract_version"] == 2
+    assert document["phase"] == "first_rekordbox_transfer"
+    assert document["status"] == "ready"
+    assert document["next_action"] == "preview"
+    assert document["required_input"] == {
+        "kind": "action_confirmation", "action": "preview",
+    }
+    assert document["counts"] == {
+        "playlists": 1,
+        "tracks": 1,
+        "approved_match_hits": 0,
+        "retained_proposal_hits": 0,
+        "expected_spotify_lookups": 1,
+        "local_audio_eligible": 0,
+        "local_audio_indexed": 0,
+        "local_audio_pending": 0,
+        "local_audio_unavailable": 0,
+    }
+    assert "next_actions" not in document
+    assert spotify.searches == 0
+    rendered = json.dumps(document)
+    assert "Private" not in rendered
+    assert "Invented" not in rendered
+
+
+def test_first_transfer_preview_is_explicit_and_idempotent(tmp_path):
+    spotify = PreviewSpotify()
+    contract = AgentTransferContract(Transfer(
+        source=BoundedSource(),
+        spotify=spotify,
+        matching_knowledge=EmptyKnowledge(),
+        publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
+        transfer_storage=FileTransferStorage(tmp_path / "transfers.json"),
+    ))
+    guide_request = FirstTransferGuideRequest(
+        spotify_configured=True,
+        spotify_authenticated=True,
+        rekordbox_configured=True,
+        rekordbox_available=True,
+        playlist_reference="Private/Selection",
+        local_audio_identity=False,
+        action="preview",
+    )
+    authorization = AgentAuthorization(private_source=True)
+
+    first = contract.first_rekordbox_transfer(guide_request, authorization)
+    repeated = contract.first_rekordbox_transfer(guide_request, authorization)
+
+    assert first == repeated
+    assert first["phase"] == "first_rekordbox_transfer"
+    assert first["status"] == "completed"
+    assert first["next_action"] == "qualify"
+    assert first["required_input"] == {
+        "kind": "action_confirmation", "action": "qualify",
+    }
+    assert first["transfer_id"] == first["batch_id"]
+    assert "next_actions" not in first
+    assert spotify.searches == 1
+
+
+def test_first_transfer_paused_preview_exposes_resume_not_qualification():
+    transfer = MagicMock()
+    transfer.authorization_requirement.return_value = None
+    transfer.plan_batch.return_value = SimpleNamespace(
+        batch_id="opaque-batch",
+        ready=True,
+    )
+    contract = AgentTransferContract(transfer)
+    contract.execute_batch = MagicMock(return_value={
+        "contract_version": 2,
+        "phase": "outcome",
+        "status": "paused",
+        "transfer_id": "opaque-transfer",
+        "next_actions": ["resume"],
+    })
+
+    document = contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(
+            spotify_configured=True,
+            spotify_authenticated=True,
+            rekordbox_configured=True,
+            rekordbox_available=True,
+            playlist_reference="Private/Selection",
+            local_audio_identity=False,
+            action="preview",
+        ),
+        AgentAuthorization(private_source=True),
+    )
+
+    assert document["next_action"] == "resume"
+    assert document["required_input"] == {
+        "kind": "action_confirmation", "action": "resume",
+    }
+
+
+def test_first_transfer_resume_reuses_the_exact_transfer_identity():
+    transfer = MagicMock()
+    contract = AgentTransferContract(transfer)
+    contract.execute_batch = MagicMock(return_value={
+        "contract_version": 2,
+        "phase": "outcome",
+        "status": "completed",
+        "transfer_id": "opaque-transfer",
+        "next_actions": ["qualify"],
+    })
+    request = FirstTransferGuideRequest(
+        spotify_configured=True,
+        spotify_authenticated=True,
+        rekordbox_configured=True,
+        rekordbox_available=True,
+        playlist_reference="Private/Selection",
+        local_audio_identity=False,
+        action="resume",
+        transfer_id="opaque-transfer",
+    )
+
+    document = contract.first_rekordbox_transfer(
+        request, AgentAuthorization(private_source=True),
+    )
+
+    _, authorization = contract.execute_batch.call_args.args
+    assert authorization.private_source is True
+    assert contract.execute_batch.call_args.kwargs == {
+        "transfer_id": "opaque-transfer",
+    }
+    assert document["next_action"] == "qualify"
+
+
+def test_first_transfer_abandonment_is_explicit_and_terminal():
+    transfer = MagicMock()
+    contract = AgentTransferContract(transfer)
+    request = FirstTransferGuideRequest(
+        spotify_configured=True,
+        spotify_authenticated=True,
+        rekordbox_configured=True,
+        rekordbox_available=True,
+        playlist_reference="Private/Selection",
+        local_audio_identity=False,
+        action="abandon",
+        transfer_id="opaque-transfer",
+    )
+
+    document = contract.first_rekordbox_transfer(
+        request, AgentAuthorization(private_source=True),
+    )
+
+    assert document == {
+        "contract_version": 2,
+        "phase": "first_rekordbox_transfer",
+        "status": "abandoned",
+        "transfer_id": "opaque-transfer",
+        "next_action": None,
+    }
+    transfer.abandon.assert_called_once_with("opaque-transfer")
+
+
+def test_first_transfer_restart_derives_the_next_action_from_durable_progress():
+    transfer = MagicMock()
+    contract = AgentTransferContract(transfer)
+    contract.progress = MagicMock(return_value={
+        "contract_version": 2,
+        "phase": "progress",
+        "status": "paused",
+        "transfer_id": "opaque-transfer",
+        "counts": {
+            "playlists": 1, "completed": 0, "failed": 0, "pending": 1,
+        },
+        "next_actions": ["resume"],
+    })
+
+    document = contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(
+            spotify_configured=True,
+            spotify_authenticated=True,
+            rekordbox_configured=True,
+            rekordbox_available=True,
+            playlist_reference="Private/Selection",
+            local_audio_identity=False,
+            transfer_id="opaque-transfer",
+        ),
+        AgentAuthorization(private_source=True),
+    )
+
+    assert document["phase"] == "first_rekordbox_transfer"
+    assert document["next_action"] == "resume"
+    assert document["required_input"] == {
+        "kind": "action_confirmation", "action": "resume",
+    }
+    contract.progress.assert_called_once()
+
+
+def test_first_transfer_rejects_unknown_actions_without_falling_back_to_plan():
+    transfer = MagicMock()
+    contract = AgentTransferContract(transfer)
+
+    document = contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(
+            spotify_configured=True,
+            spotify_authenticated=True,
+            rekordbox_configured=True,
+            rekordbox_available=True,
+            playlist_reference="Private/Selection",
+            local_audio_identity=False,
+            action="invent_authority",
+        ),
+        AgentAuthorization(private_source=True),
+    )
+
+    assert document == {
+        "contract_version": 2,
+        "phase": "first_rekordbox_transfer",
+        "status": "error",
+        "error": {"code": "unsupported_action"},
+        "next_action": "review_request",
+    }
+    transfer.plan_batch.assert_not_called()
+
+
+def test_first_transfer_hands_preview_to_local_qualification(tmp_path):
+    spotify = PreviewSpotify()
+    contract = AgentTransferContract(Transfer(
+        source=BoundedSource(),
+        spotify=spotify,
+        matching_knowledge=EmptyKnowledge(),
+        publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
+        transfer_storage=FileTransferStorage(tmp_path / "transfers.json"),
+    ))
+    base = dict(
+        spotify_configured=True,
+        spotify_authenticated=True,
+        rekordbox_configured=True,
+        rekordbox_available=True,
+        playlist_reference="Private/Selection",
+        local_audio_identity=False,
+    )
+    authorization = AgentAuthorization(private_source=True)
+    preview = contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(**base, action="preview"), authorization,
+    )
+
+    document = contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(
+            **base, action="qualify", transfer_id=preview["transfer_id"],
+        ),
+        authorization,
+    )
+
+    assert document["phase"] == "first_rekordbox_transfer"
+    assert document["status"] == "draft"
+    assert document["authority"] == "none"
+    assert document["counts"] == {"items": 1, "pending": 1, "deferred": 0}
+    assert document["next_action"] == "review"
+    assert document["required_input"] == {
+        "kind": "local_qualification_review",
+        "review_url": document["review_url"],
+    }
+    assert document["review_url"].startswith(
+        "http://127.0.0.1:8000/qualification/"
+    )
+    assert "next_actions" not in document
+    rendered = json.dumps(document)
+    assert "Private" not in rendered
+    assert "Invented" not in rendered
+
+
+def test_completed_preview_qualification_requires_separate_spotify_write(
+    tmp_path,
+):
+    spotify = PreviewSpotify()
+    contract = AgentTransferContract(Transfer(
+        source=BoundedSource(),
+        spotify=spotify,
+        matching_knowledge=EmptyKnowledge(),
+        publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
+        transfer_storage=FileTransferStorage(tmp_path / "transfers.json"),
+    ))
+    base = dict(
+        spotify_configured=True,
+        spotify_authenticated=True,
+        rekordbox_configured=True,
+        rekordbox_available=True,
+        playlist_reference="Private/Selection",
+        local_audio_identity=False,
+    )
+    private_source = AgentAuthorization(private_source=True)
+    preview = contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(**base, action="preview"), private_source,
+    )
+    draft = contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(
+            **base, action="qualify", transfer_id=preview["transfer_id"],
+        ),
+        private_source,
+    )
+    contract.record_qualification(
+        draft["draft_id"], draft["current_item"]["item_id"],
+        QualificationDecision.KEEP_PROPOSAL, private_source,
+    )
+
+    document = contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(**base, draft_id=draft["draft_id"]),
+        private_source,
+    )
+
+    assert document == {
+        "contract_version": 2,
+        "phase": "first_rekordbox_transfer",
+        "status": "authorization_required",
+        "draft_id": draft["draft_id"],
+        "authority": "none",
+        "next_action": "authorize_spotify_write",
+        "required_authorization": "spotify_write",
+    }
+    assert spotify.searches == 1
+
+
+def test_first_transfer_publishes_and_links_without_applying_the_draft(
+    tmp_path,
+):
+    spotify = FirstTransferSpotify()
+    contract = AgentTransferContract(Transfer(
+        source=BoundedSource(),
+        spotify=spotify,
+        matching_knowledge=EmptyKnowledge(),
+        publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
+        publication_storage=FilePublicationStorage(tmp_path / "publications.json"),
+        transfer_storage=FileTransferStorage(tmp_path / "transfers.json"),
+    ))
+    base = dict(
+        spotify_configured=True,
+        spotify_authenticated=True,
+        rekordbox_configured=True,
+        rekordbox_available=True,
+        playlist_reference="Private/Selection",
+        local_audio_identity=False,
+    )
+    private_source = AgentAuthorization(private_source=True)
+    preview = contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(**base, action="preview"), private_source,
+    )
+    draft = contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(
+            **base, action="qualify", transfer_id=preview["transfer_id"],
+        ),
+        private_source,
+    )
+    contract.record_qualification(
+        draft["draft_id"], draft["current_item"]["item_id"],
+        QualificationDecision.KEEP_PROPOSAL, private_source,
+    )
+    publish = FirstTransferGuideRequest(
+        **base, action="publish_and_link", draft_id=draft["draft_id"],
+    )
+    spotify_write = AgentAuthorization(
+        private_source=True, spotify_write=True,
+    )
+
+    first = contract.first_rekordbox_transfer(publish, spotify_write)
+    repeated = contract.first_rekordbox_transfer(publish, spotify_write)
+
+    assert first == repeated
+    assert first["status"] == "ready"
+    assert first["authority"] == "none"
+    assert first["next_action"] == "apply"
+    assert first["required_input"] == {
+        "kind": "action_confirmation", "action": "apply",
+    }
+    assert "next_actions" not in first
+    assert spotify.playlist_writes == 1
+
+
+def test_first_transfer_applies_draft_without_creating_approval(tmp_path):
+    spotify = FirstTransferSpotify()
+    contract = AgentTransferContract(Transfer(
+        source=BoundedSource(),
+        spotify=spotify,
+        matching_knowledge=EmptyKnowledge(),
+        publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
+        publication_storage=FilePublicationStorage(tmp_path / "publications.json"),
+        transfer_storage=FileTransferStorage(tmp_path / "transfers.json"),
+    ))
+    base = dict(
+        spotify_configured=True,
+        spotify_authenticated=True,
+        rekordbox_configured=True,
+        rekordbox_available=True,
+        playlist_reference="Private/Selection",
+        local_audio_identity=False,
+    )
+    private_source = AgentAuthorization(private_source=True)
+    spotify_write = AgentAuthorization(
+        private_source=True, spotify_write=True,
+    )
+    preview = contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(**base, action="preview"), private_source,
+    )
+    draft = contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(
+            **base, action="qualify", transfer_id=preview["transfer_id"],
+        ),
+        private_source,
+    )
+    contract.record_qualification(
+        draft["draft_id"], draft["current_item"]["item_id"],
+        QualificationDecision.KEEP_PROPOSAL, private_source,
+    )
+    contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(
+            **base, action="publish_and_link", draft_id=draft["draft_id"],
+        ),
+        spotify_write,
+    )
+    apply = FirstTransferGuideRequest(
+        **base, action="apply", draft_id=draft["draft_id"],
+    )
+
+    first = contract.first_rekordbox_transfer(apply, spotify_write)
+    repeated = contract.first_rekordbox_transfer(apply, spotify_write)
+
+    assert first == repeated
+    assert first == {
+        "contract_version": 2,
+        "phase": "first_rekordbox_transfer",
+        "status": "applied",
+        "draft_id": draft["draft_id"],
+        "counts": {"applied_items": 1},
+        "authority": "none",
+        "next_action": "approve",
+        "required_input": {
+            "kind": "authority_confirmation", "authority": "playlist_approval",
+        },
+    }
+
+
+def test_first_transfer_approval_is_a_final_explicit_authority_step(tmp_path):
+    spotify = FirstTransferSpotify()
+    knowledge = FirstTransferKnowledge()
+    contract = AgentTransferContract(Transfer(
+        source=BoundedSource(),
+        spotify=spotify,
+        matching_knowledge=knowledge,
+        publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
+        publication_storage=FilePublicationStorage(tmp_path / "publications.json"),
+        transfer_storage=FileTransferStorage(tmp_path / "transfers.json"),
+    ))
+    base = dict(
+        spotify_configured=True,
+        spotify_authenticated=True,
+        rekordbox_configured=True,
+        rekordbox_available=True,
+        playlist_reference="Private/Selection",
+        local_audio_identity=False,
+    )
+    private_source = AgentAuthorization(private_source=True)
+    spotify_write = AgentAuthorization(
+        private_source=True, spotify_write=True,
+    )
+    preview = contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(**base, action="preview"), private_source,
+    )
+    draft = contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(
+            **base, action="qualify", transfer_id=preview["transfer_id"],
+        ),
+        private_source,
+    )
+    contract.record_qualification(
+        draft["draft_id"], draft["current_item"]["item_id"],
+        QualificationDecision.KEEP_PROPOSAL, private_source,
+    )
+    contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(
+            **base, action="publish_and_link", draft_id=draft["draft_id"],
+        ),
+        spotify_write,
+    )
+    contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(
+            **base, action="apply", draft_id=draft["draft_id"],
+        ),
+        spotify_write,
+    )
+    approval = FirstTransferGuideRequest(
+        **base, action="approve", draft_id=draft["draft_id"],
+    )
+
+    first = contract.first_rekordbox_transfer(approval, private_source)
+    repeated = contract.first_rekordbox_transfer(approval, private_source)
+
+    assert first == repeated
+    assert first == {
+        "contract_version": 2,
+        "phase": "first_rekordbox_transfer",
+        "status": "approved",
+        "draft_id": draft["draft_id"],
+        "counts": {
+            "approved": 1,
+            "rejected": 0,
+            "collisions": 0,
+            "corrections": 0,
+        },
+        "authority": "playlist_approval",
+        "retained": {
+            "approved_matches": 1,
+            "corrections": 0,
+            "rejected_matches": 0,
+        },
+        "next_action": None,
+    }
+    assert len(knowledge.approved) == 1
 
 
 def test_authorized_preview_executes_non_interactively_and_is_idempotent(tmp_path):

@@ -22,8 +22,8 @@ BACKUP_VERSION = 1
 SUPPORTED_SCHEMAS = {
     CONFIG_FILENAME: (CONFIG_VERSION,),
     "matching-knowledge.json": (1, 2, 3),
-    "transfers.json": (1, 2, 3, 4),
-    "publication-manifests.transfers.json": (1, 2, 3, 4),
+    "transfers.json": (1, 2, 3, 4, 5),
+    "publication-manifests.transfers.json": (1, 2, 3, 4, 5),
     "publication-manifests.json": (1, 2, 3, 4, 5, 6),
     "playlist-state.json": (1, 2),
     "legacy-migration.json": (1,),

@@ -77,6 +77,15 @@ explicit current/archive choice when the same draft differs, so neither state
 wins silently. Audition handles, audio bytes, paths, filenames, and fingerprints
 are not stored in a draft.
 
+## To the First Rekordbox Transfer guide release
+
+The next durable write upgrades Transfer state to schema 5. Schemas 1–4 remain
+readable. Schema 5 retains only the aggregate outcome of a completed
+playlist-scoped Approval so a repeated agent invocation can return the same
+result without applying matching authority twice. It does not add source paths,
+track metadata, playlist names, fingerprints, credentials, or a separate
+onboarding store.
+
 ## From 0.3.0
 
 DJ Support does not migrate working-directory data automatically. Keep the old

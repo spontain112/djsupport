@@ -2034,6 +2034,21 @@ class TestRekordboxBatchExecution:
 
 
 class TestTransferPublicationLifecycle:
+    def test_transfer_state_schema_four_remains_readable(self, tmp_path):
+        state_path = tmp_path / "transfers.json"
+        state_path.write_text(json.dumps({
+            "version": 4,
+            "transfers": {},
+            "batches": {},
+            "qualifications": {},
+        }))
+
+        storage = FileTransferStorage(state_path)
+
+        assert storage.transfers == {}
+        assert storage.batches == {}
+        assert storage.qualifications == {}
+
     @pytest.mark.parametrize("stored", [
         '{"version": 99, "transfers": {"private": {}}}',
         '{"version": 4, "qualifications": {"private": {"draft_id": "x"}}}',

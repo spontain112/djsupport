@@ -96,6 +96,23 @@ class RekordboxBatchRequest(BaseModel):
     authorize_spotify_write: bool = False
 
 
+class FirstRekordboxTransferRequest(BaseModel):
+    """Explicit facts for one harness-neutral first Transfer step."""
+
+    spotify_configured: bool = False
+    spotify_authenticated: bool = False
+    rekordbox_configured: bool = False
+    rekordbox_available: bool = False
+    xml_path: str | None = None
+    playlist_reference: str | None = None
+    local_audio_identity: bool | None = None
+    action: str | None = None
+    transfer_id: str | None = None
+    draft_id: str | None = None
+    authorize_private_source: bool = False
+    authorize_spotify_write: bool = False
+
+
 class QualificationDraftRequest(BaseModel):
     """One explicit Rekordbox playlist selected for local qualification."""
 
@@ -513,6 +530,81 @@ def create_app(
     @web_app.post("/rekordbox/batches/execute")
     def execute_rekordbox_batch(request: RekordboxBatchRequest):
         return rekordbox_contract(request, execute=True)
+
+    @web_app.post("/rekordbox/first-transfer")
+    def first_rekordbox_transfer(request: FirstRekordboxTransferRequest):
+        """Render exactly one public guide step without adding policy."""
+        from djsupport.agent import (
+            AgentTransferContract,
+            FirstTransferGuideRequest,
+            error_document,
+        )
+        from djsupport.local_audio import ChromaprintLocalAudio
+
+        adapter_request = RekordboxBatchRequest(
+            xml_path=request.xml_path or "",
+            playlists=(
+                [request.playlist_reference]
+                if request.playlist_reference is not None else []
+            ),
+            preview=request.action not in {
+                "publish_and_link", "apply", "approve",
+            },
+            local_audio_identity=bool(request.local_audio_identity),
+            authorize_private_source=request.authorize_private_source,
+            authorize_spotify_write=request.authorize_spotify_write,
+        )
+        activate = bool(
+            request.spotify_configured
+            and request.spotify_authenticated
+            and request.rekordbox_configured
+            and request.rekordbox_available
+            and request.playlist_reference is not None
+            and request.local_audio_identity is not None
+            and request.authorize_private_source
+        )
+        spotify_access = bool(
+            activate and request.spotify_authenticated
+            and request.action in {
+                "preview", "qualify", "publish_and_link", "apply", "approve",
+                "resume",
+            }
+        )
+        try:
+            if uses_default_rekordbox_wiring and not activate:
+                transfer = Transfer(
+                    source=object(),
+                    spotify=object(),
+                    matching_knowledge=EphemeralMatchingKnowledge(),
+                    publishing_guards=AccountPublishingGuards(),
+                    local_audio=ChromaprintLocalAudio(),
+                )
+            else:
+                transfer = make_rekordbox_transfer(
+                    adapter_request, spotify_access,
+                )
+            contract = AgentTransferContract(transfer)
+            return contract.first_rekordbox_transfer(
+                FirstTransferGuideRequest(
+                    spotify_configured=request.spotify_configured,
+                    spotify_authenticated=request.spotify_authenticated,
+                    rekordbox_configured=request.rekordbox_configured,
+                    rekordbox_available=request.rekordbox_available,
+                    playlist_reference=request.playlist_reference,
+                    local_audio_identity=request.local_audio_identity,
+                    action=request.action,
+                    transfer_id=request.transfer_id,
+                    draft_id=request.draft_id,
+                ),
+                TransferAuthorization(
+                    private_source=request.authorize_private_source,
+                    spotify_write=request.authorize_spotify_write,
+                ),
+            )
+        except Exception:
+            return error_document(
+                "first_rekordbox_transfer", "transfer_failed",
+            )
 
     def recover_qualification_context(
         draft_id: str,

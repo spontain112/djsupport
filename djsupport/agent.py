@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from djsupport.transfer import (
@@ -21,6 +22,21 @@ AGENT_CONTRACT_VERSION = 2
 
 
 AgentAuthorization = TransferAuthorization
+
+
+@dataclass(frozen=True)
+class FirstTransferGuideRequest:
+    """Explicit setup facts for the first Rekordbox Transfer guide."""
+
+    spotify_configured: bool = False
+    spotify_authenticated: bool = False
+    rekordbox_configured: bool = False
+    rekordbox_available: bool = False
+    playlist_reference: str | None = None
+    local_audio_identity: bool | None = None
+    action: str | None = None
+    transfer_id: str | None = None
+    draft_id: str | None = None
 
 
 def _loopback_review_origin(value: str) -> str:
@@ -151,6 +167,319 @@ class AgentTransferContract:
             self._transfer.local_audio_capability(),
             self._transfer.local_audition_capability(),
         )
+
+    def first_rekordbox_transfer(
+        self,
+        request: FirstTransferGuideRequest,
+        authorization: AgentAuthorization,
+    ) -> dict:
+        """Return the next safe decision in a first Rekordbox journey."""
+        if not request.spotify_configured:
+            next_action = "configure_spotify"
+            required_input = {
+                "kind": "spotify_configuration",
+                "redirect_uri": "http://127.0.0.1:8888/callback",
+                "callback_policy": "add_without_replacing_existing",
+            }
+        elif not request.spotify_authenticated:
+            next_action = "authenticate_spotify"
+            required_input = {"kind": "spotify_authentication"}
+        elif not request.rekordbox_configured:
+            next_action = "select_rekordbox_xml"
+            required_input = {
+                "kind": "rekordbox_xml", "selection": "exact_file",
+            }
+        elif not request.rekordbox_available:
+            next_action = "repair_rekordbox_xml"
+            required_input = {
+                "kind": "rekordbox_xml", "selection": "exact_file",
+            }
+        elif request.playlist_reference is None:
+            next_action = "select_playlist"
+            required_input = {
+                "kind": "rekordbox_playlist",
+                "selection": "one_explicit_playlist",
+                "whole_library": False,
+            }
+        elif request.local_audio_identity is None:
+            capability = self._transfer.local_audio_capability()
+            return {
+                "contract_version": AGENT_CONTRACT_VERSION,
+                "phase": "first_rekordbox_transfer",
+                "status": "decision_required",
+                "next_action": "choose_local_audio_identity",
+                "required_input": {"kind": "boolean", "default": False},
+                "local_audio_identity": {
+                    "available": capability.available,
+                    "scope": "selected_tracks_only",
+                    "uploads": "none",
+                    "file_changes": "none",
+                    "first_run_spotify_search_reduction": False,
+                    "future_reuse": "exact_approved_match_after_approval",
+                    "approval_authority": "none",
+                    "audition": "separate",
+                },
+            }
+        elif (
+            request.local_audio_identity
+            and not self._transfer.local_audio_capability().available
+        ):
+            return {
+                "contract_version": AGENT_CONTRACT_VERSION,
+                "phase": "first_rekordbox_transfer",
+                "status": "decision_required",
+                "next_action": "continue_without_local_audio_identity",
+                "required_input": {"kind": "boolean", "value": False},
+                "reason": {"code": "local_audio_identity_unavailable"},
+            }
+        elif not authorization.private_source:
+            return {
+                "contract_version": AGENT_CONTRACT_VERSION,
+                "phase": "first_rekordbox_transfer",
+                "status": "authorization_required",
+                "next_action": "authorize_private_source",
+                "required_authorization": "private_source",
+            }
+        else:
+            allowed_actions = {
+                None, "preview", "qualify", "publish_and_link", "apply",
+                "approve", "resume", "abandon",
+            }
+            if request.action not in allowed_actions:
+                return {
+                    "contract_version": AGENT_CONTRACT_VERSION,
+                    "phase": "first_rekordbox_transfer",
+                    "status": "error",
+                    "error": {"code": "unsupported_action"},
+                    "next_action": "review_request",
+                }
+            batch_request = BatchPlanRequest(
+                playlist_references=(request.playlist_reference,),
+                preview=True,
+                local_audio_identity=request.local_audio_identity,
+            )
+            if request.action == "resume":
+                if request.transfer_id is None:
+                    raise ValueError("Resume requires a Transfer identity")
+                outcome = self.execute_batch(
+                    batch_request, authorization,
+                    transfer_id=request.transfer_id,
+                )
+                next_actions = outcome.pop("next_actions", None) or ["qualify"]
+                next_action = next_actions[0]
+                outcome.update({
+                    "phase": "first_rekordbox_transfer",
+                    "next_action": next_action,
+                    "required_input": {
+                        "kind": "action_confirmation", "action": next_action,
+                    },
+                })
+                return outcome
+            if request.action == "abandon":
+                if request.transfer_id is None:
+                    raise ValueError("Abandonment requires a Transfer identity")
+                self._transfer.abandon(request.transfer_id)
+                return {
+                    "contract_version": AGENT_CONTRACT_VERSION,
+                    "phase": "first_rekordbox_transfer",
+                    "status": "abandoned",
+                    "transfer_id": request.transfer_id,
+                    "next_action": None,
+                }
+            if request.action == "approve":
+                if request.draft_id is None:
+                    raise ValueError(
+                        "Approval requires a Qualification Draft identity"
+                    )
+                approved = self.approve_qualification(
+                    request.draft_id, authorization,
+                )
+                approved.pop("next_actions", None)
+                counts = approved["counts"]
+                approved.update({
+                    "phase": "first_rekordbox_transfer",
+                    "retained": {
+                        "approved_matches": counts["approved"],
+                        "corrections": counts["corrections"],
+                        "rejected_matches": counts["rejected"],
+                    },
+                    "next_action": None,
+                })
+                return approved
+            if request.action == "apply":
+                if request.draft_id is None:
+                    raise ValueError(
+                        "Draft application requires a Qualification identity"
+                    )
+                if not authorization.spotify_write:
+                    return {
+                        "contract_version": AGENT_CONTRACT_VERSION,
+                        "phase": "first_rekordbox_transfer",
+                        "status": "authorization_required",
+                        "draft_id": request.draft_id,
+                        "authority": "none",
+                        "next_action": "authorize_spotify_write",
+                        "required_authorization": "spotify_write",
+                    }
+                applied = self.apply_qualification(
+                    request.draft_id, authorization,
+                )
+                applied.pop("next_actions", None)
+                applied.update({
+                    "phase": "first_rekordbox_transfer",
+                    "next_action": "approve",
+                    "required_input": {
+                        "kind": "authority_confirmation",
+                        "authority": "playlist_approval",
+                    },
+                })
+                return applied
+            if request.action == "publish_and_link":
+                if request.draft_id is None:
+                    raise ValueError(
+                        "Publication requires a Qualification Draft identity"
+                    )
+                progress = self.qualification_progress(
+                    request.draft_id, authorization,
+                )
+                progress_actions = progress["next_actions"]
+                if progress_actions[0] == "apply":
+                    progress.pop("next_actions")
+                    progress.update({
+                        "phase": "first_rekordbox_transfer",
+                        "next_action": "apply",
+                        "required_input": {
+                            "kind": "action_confirmation", "action": "apply",
+                        },
+                    })
+                    return progress
+                if not authorization.spotify_write:
+                    return {
+                        "contract_version": AGENT_CONTRACT_VERSION,
+                        "phase": "first_rekordbox_transfer",
+                        "status": "authorization_required",
+                        "draft_id": request.draft_id,
+                        "authority": "none",
+                        "next_action": "authorize_spotify_write",
+                        "required_authorization": "spotify_write",
+                    }
+                publishing_request = BatchPlanRequest(
+                    playlist_references=(request.playlist_reference,),
+                    preview=False,
+                    local_audio_identity=request.local_audio_identity,
+                )
+                published = self.execute_batch(
+                    publishing_request, authorization,
+                )
+                linked = self.link_qualification(
+                    request.draft_id, published["transfer_id"], authorization,
+                )
+                linked.pop("next_actions", None)
+                linked.update({
+                    "phase": "first_rekordbox_transfer",
+                    "next_action": "apply",
+                    "required_input": {
+                        "kind": "action_confirmation", "action": "apply",
+                    },
+                })
+                return linked
+            if request.draft_id is not None and request.action is None:
+                qualification = self.qualification_progress(
+                    request.draft_id, authorization,
+                )
+                next_actions = qualification.pop("next_actions")
+                if not next_actions:
+                    qualification.update({
+                        "phase": "first_rekordbox_transfer",
+                        "next_action": None,
+                    })
+                    return qualification
+                primary_action = next_actions[0]
+                if (
+                    primary_action in {"publish_and_link", "apply"}
+                    and not authorization.spotify_write
+                ):
+                    return {
+                        "contract_version": AGENT_CONTRACT_VERSION,
+                        "phase": "first_rekordbox_transfer",
+                        "status": "authorization_required",
+                        "draft_id": request.draft_id,
+                        "authority": "none",
+                        "next_action": "authorize_spotify_write",
+                        "required_authorization": "spotify_write",
+                    }
+                qualification.update({
+                    "phase": "first_rekordbox_transfer",
+                    "next_action": primary_action,
+                    "required_input": {
+                        "kind": "action_confirmation",
+                        "action": primary_action,
+                    },
+                })
+                return qualification
+            if request.transfer_id is not None and request.action is None:
+                progress = self.progress(request.transfer_id, authorization)
+                next_actions = progress.pop("next_actions", None) or []
+                next_action = next_actions[0] if next_actions else None
+                progress.update({
+                    "phase": "first_rekordbox_transfer",
+                    "next_action": next_action,
+                })
+                if next_action is not None:
+                    progress["required_input"] = {
+                        "kind": "action_confirmation", "action": next_action,
+                    }
+                return progress
+            if request.action == "qualify":
+                if request.transfer_id is None:
+                    raise ValueError("Qualification requires a Transfer identity")
+                qualification = self.qualification_draft(
+                    QualificationRequest(
+                        transfer_id=request.transfer_id,
+                        playlist_reference=request.playlist_reference,
+                        include_all=True,
+                    ),
+                    authorization,
+                )
+                next_actions = qualification.pop("next_actions")
+                qualification.update({
+                    "phase": "first_rekordbox_transfer",
+                    "next_action": next_actions[0],
+                    "required_input": {
+                        "kind": "local_qualification_review",
+                        "review_url": qualification["review_url"],
+                    },
+                })
+                return qualification
+            if request.action == "preview":
+                outcome = self.execute_batch(batch_request, authorization)
+                next_actions = outcome.pop("next_actions", None) or ["qualify"]
+                next_action = next_actions[0]
+                outcome.update({
+                    "phase": "first_rekordbox_transfer",
+                    "next_action": next_action,
+                    "required_input": {
+                        "kind": "action_confirmation", "action": next_action,
+                    },
+                })
+                return outcome
+            plan_document = self.plan_batch(batch_request, authorization)
+            plan_document.pop("next_actions", None)
+            plan_document.update({
+                "phase": "first_rekordbox_transfer",
+                "next_action": "preview",
+                "required_input": {
+                    "kind": "action_confirmation", "action": "preview",
+                },
+            })
+            return plan_document
+        return {
+            "contract_version": AGENT_CONTRACT_VERSION,
+            "phase": "first_rekordbox_transfer",
+            "status": "input_required",
+            "next_action": next_action,
+            "required_input": required_input,
+        }
 
     def plan_batch(
         self, request: BatchPlanRequest, authorization: AgentAuthorization,
