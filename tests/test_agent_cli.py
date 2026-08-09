@@ -6,6 +6,44 @@ from unittest.mock import MagicMock
 from click.testing import CliRunner
 
 from djsupport.cli import cli
+from djsupport.readiness import inspect_first_transfer_readiness
+
+
+def test_first_transfer_readiness_does_not_open_or_validate_token_cache(
+    monkeypatch, tmp_path,
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SPOTIPY_CLIENT_ID", "synthetic-client")
+    monkeypatch.setenv("SPOTIPY_CLIENT_SECRET", "synthetic-secret")
+    monkeypatch.setenv(
+        "SPOTIPY_REDIRECT_URI", "http://127.0.0.1:8888/callback",
+    )
+    xml_path = tmp_path / "selected.xml"
+    xml_path.write_text("private content must remain unread")
+
+    readiness = inspect_first_transfer_readiness(str(xml_path))
+
+    assert readiness.spotify_configured is True
+    assert readiness.spotify_authenticated is False
+    assert readiness.rekordbox_available is True
+
+
+def test_first_transfer_readiness_only_checks_cache_presence(
+    monkeypatch, tmp_path,
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SPOTIPY_CLIENT_ID", "synthetic-client")
+    monkeypatch.setenv("SPOTIPY_CLIENT_SECRET", "synthetic-secret")
+    monkeypatch.setenv(
+        "SPOTIPY_REDIRECT_URI", "http://127.0.0.1:8888/callback",
+    )
+    (tmp_path / ".cache").write_text("not a token and never parsed")
+    xml_path = tmp_path / "selected.xml"
+    xml_path.write_text("private content must remain unread")
+
+    readiness = inspect_first_transfer_readiness(str(xml_path))
+
+    assert readiness.spotify_authenticated is True
 
 
 def test_first_transfer_json_renders_one_input_required_action(monkeypatch):

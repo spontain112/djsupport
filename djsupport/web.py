@@ -24,8 +24,14 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from spotipy.oauth2 import SpotifyOAuth
+from spotipy.exceptions import SpotifyOauthError
 
 from djsupport.report import SyncReport
+from djsupport.agent import FirstTransferAction
+from djsupport.readiness import (
+    FirstTransferReadiness,
+    inspect_first_transfer_readiness,
+)
 from djsupport.spotify import SCOPES
 from djsupport.local_audition import (
     AuditionHandleUnavailable,
@@ -99,14 +105,10 @@ class RekordboxBatchRequest(BaseModel):
 class FirstRekordboxTransferRequest(BaseModel):
     """Explicit facts for one harness-neutral first Transfer step."""
 
-    spotify_configured: bool = False
-    spotify_authenticated: bool = False
-    rekordbox_configured: bool = False
-    rekordbox_available: bool = False
     xml_path: str | None = None
     playlist_reference: str | None = None
     local_audio_identity: bool | None = None
-    action: str | None = None
+    action: FirstTransferAction | None = None
     transfer_id: str | None = None
     draft_id: str | None = None
     authorize_private_source: bool = False
@@ -277,6 +279,9 @@ def create_app(
     auth_manager: Callable[[], SpotifyOAuth] | None = None,
     background_runner: Callable[[Callable, tuple], None] | None = None,
     local_audition: LocalSourceAudition | None = None,
+    first_transfer_readiness: Callable[
+        [str | None, bool], FirstTransferReadiness
+    ] | None = None,
 ) -> FastAPI:
     """Create the web adapter with replaceable external-boundary wiring."""
     web_app = FastAPI(title="djsupport", lifespan=lifespan)
@@ -293,6 +298,14 @@ def create_app(
         make_rekordbox_transfer = rekordbox_transfer_factory
     run_background = background_runner or _thread_runner
     qualification_contexts: dict[str, QualificationDraftRequest] = {}
+    if first_transfer_readiness is None:
+        def inspect_readiness(xml_path, authorize_private_source):
+            return inspect_first_transfer_readiness(
+                xml_path,
+                authorize_private_source=authorize_private_source,
+            )
+    else:
+        inspect_readiness = first_transfer_readiness
 
     @web_app.middleware("http")
     async def qualification_privacy(request: FastAPIRequest, call_next):
@@ -541,34 +554,34 @@ def create_app(
         )
         from djsupport.local_audio import ChromaprintLocalAudio
 
+        readiness = inspect_readiness(
+            request.xml_path, request.authorize_private_source,
+        )
+
         adapter_request = RekordboxBatchRequest(
-            xml_path=request.xml_path or "",
+            xml_path=readiness.xml_path or "",
             playlists=(
                 [request.playlist_reference]
                 if request.playlist_reference is not None else []
             ),
-            preview=request.action not in {
-                "publish_and_link", "apply", "approve",
-            },
+            preview=not bool(request.action and request.action.publishes),
             local_audio_identity=bool(request.local_audio_identity),
             authorize_private_source=request.authorize_private_source,
             authorize_spotify_write=request.authorize_spotify_write,
         )
         activate = bool(
-            request.spotify_configured
-            and request.spotify_authenticated
-            and request.rekordbox_configured
-            and request.rekordbox_available
+            readiness.spotify_configured
+            and readiness.spotify_authenticated
+            and readiness.rekordbox_configured
+            and readiness.rekordbox_available
             and request.playlist_reference is not None
             and request.local_audio_identity is not None
             and request.authorize_private_source
         )
         spotify_access = bool(
-            activate and request.spotify_authenticated
-            and request.action in {
-                "preview", "qualify", "publish_and_link", "apply", "approve",
-                "resume",
-            }
+            activate and readiness.spotify_authenticated
+            and request.action is not None
+            and request.action.needs_spotify_access
         )
         try:
             if uses_default_rekordbox_wiring and not activate:
@@ -586,10 +599,10 @@ def create_app(
             contract = AgentTransferContract(transfer)
             return contract.first_rekordbox_transfer(
                 FirstTransferGuideRequest(
-                    spotify_configured=request.spotify_configured,
-                    spotify_authenticated=request.spotify_authenticated,
-                    rekordbox_configured=request.rekordbox_configured,
-                    rekordbox_available=request.rekordbox_available,
+                    spotify_configured=readiness.spotify_configured,
+                    spotify_authenticated=readiness.spotify_authenticated,
+                    rekordbox_configured=readiness.rekordbox_configured,
+                    rekordbox_available=readiness.rekordbox_available,
                     playlist_reference=request.playlist_reference,
                     local_audio_identity=request.local_audio_identity,
                     action=request.action,
@@ -600,6 +613,11 @@ def create_app(
                     private_source=request.authorize_private_source,
                     spotify_write=request.authorize_spotify_write,
                 ),
+            )
+        except SpotifyOauthError:
+            return error_document(
+                "first_rekordbox_transfer",
+                "spotify_authentication_required",
             )
         except Exception:
             return error_document(

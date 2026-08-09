@@ -48,6 +48,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Qualification Approval now retains its aggregate outcome so repeated guide
   invocation is idempotent and does not repeat matching-authority writes.
+- First-transfer readiness is derived consistently by CLI and web without
+  opening token contents, and interrupted Approval fails closed for review
+  rather than repeating uncertain authority writes.
 - Rekordbox path configuration now lives in private platform application data,
   participates in versioned backup/restore, and requires an explicit restore
   choice on conflict.

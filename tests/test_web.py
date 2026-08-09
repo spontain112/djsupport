@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from djsupport.report import PlaylistReport, SyncReport
+from djsupport.readiness import FirstTransferReadiness
 from djsupport.rekordbox import Track
 from djsupport.local_audition import LocalSourceAudition
 from djsupport.transfer import (
@@ -63,13 +64,12 @@ def test_first_transfer_web_route_is_a_thin_agent_contract_rendering():
     )
     web = create_app(
         rekordbox_transfer_factory=lambda request, authorized: transfer,
+        first_transfer_readiness=lambda path, authorized: FirstTransferReadiness(
+            True, True, True, True, path,
+        ),
     )
 
     response = TestClient(web).post("/rekordbox/first-transfer", json={
-        "spotify_configured": True,
-        "spotify_authenticated": True,
-        "rekordbox_configured": True,
-        "rekordbox_available": True,
         "xml_path": "/private/library.xml",
         "playlist_reference": "Private/Selection",
     })
@@ -95,6 +95,27 @@ def test_first_transfer_web_route_is_a_thin_agent_contract_rendering():
     assert "Private/Selection" not in response.text
 
 
+def test_first_transfer_web_route_ignores_caller_asserted_readiness():
+    transfer = MagicMock()
+    web = create_app(
+        rekordbox_transfer_factory=lambda request, authorized: transfer,
+        first_transfer_readiness=lambda path, authorized: FirstTransferReadiness(
+            False, False, False, False, None,
+        ),
+    )
+
+    response = TestClient(web).post("/rekordbox/first-transfer", json={
+        "spotify_configured": True,
+        "spotify_authenticated": True,
+        "rekordbox_configured": True,
+        "rekordbox_available": True,
+        "playlist_reference": "Private/Selection",
+    })
+
+    assert response.json()["next_action"] == "configure_spotify"
+    transfer.assert_not_called()
+
+
 def test_first_transfer_web_route_forwards_only_explicit_authority():
     transfer = MagicMock()
     transfer.authorization_requirement.side_effect = (
@@ -117,12 +138,13 @@ def test_first_transfer_web_route_forwards_only_explicit_authority():
         calls.append((request, authorized))
         return transfer
 
-    web = create_app(rekordbox_transfer_factory=factory)
+    web = create_app(
+        rekordbox_transfer_factory=factory,
+        first_transfer_readiness=lambda path, authorized: FirstTransferReadiness(
+            True, True, True, True, path,
+        ),
+    )
     response = TestClient(web).post("/rekordbox/first-transfer", json={
-        "spotify_configured": True,
-        "spotify_authenticated": True,
-        "rekordbox_configured": True,
-        "rekordbox_available": True,
         "xml_path": "/private/library.xml",
         "playlist_reference": "Private/Selection",
         "local_audio_identity": False,

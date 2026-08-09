@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from uuid import uuid4
 
 import click
+from spotipy.exceptions import SpotifyOauthError
 
 from dotenv import load_dotenv
 
+from djsupport.agent import FirstTransferAction
 from djsupport.config import ConfigManager, validate_rekordbox_xml
 from djsupport.rekordbox import parse_xml
 from djsupport.report import (
@@ -61,52 +62,19 @@ def capabilities(as_json: bool) -> None:
     click.echo("Local audition available for explicitly authorized Rekordbox audio.")
 
 
-FIRST_TRANSFER_CALLBACK = "http://127.0.0.1:8888/callback"
-
-
 def _first_transfer_readiness(
     explicit_xml_path: str | None,
 ) -> tuple[bool, bool, bool, bool, str | None]:
     """Inspect only local setup state; never call Spotify or parse the XML."""
-    spotify_configured = (
-        "SPOTIPY_CLIENT_ID" in os.environ
-        and "SPOTIPY_CLIENT_SECRET" in os.environ
-        and os.environ.get("SPOTIPY_REDIRECT_URI") == FIRST_TRANSFER_CALLBACK
-    )
-    spotify_authenticated = False
-    if spotify_configured:
-        try:
-            from spotipy.oauth2 import SpotifyOAuth
-            from djsupport.spotify import SCOPES
+    from djsupport.readiness import inspect_first_transfer_readiness
 
-            manager = SpotifyOAuth(scope=SCOPES, open_browser=False)
-            token = manager.get_cached_token()
-            spotify_authenticated = bool(
-                token and not manager.is_token_expired(token)
-            )
-        except Exception:
-            spotify_authenticated = False
-
-    selected_path = explicit_xml_path
-    if selected_path is None:
-        config = ConfigManager()
-        config.load()
-        selected_path = config.get_rekordbox_xml_path()
-    configured = selected_path is not None
-    available = False
-    if selected_path is not None:
-        try:
-            path = Path(selected_path).expanduser()
-            available = path.exists() and path.is_file()
-            selected_path = str(path)
-        except OSError:
-            available = False
+    readiness = inspect_first_transfer_readiness(explicit_xml_path)
     return (
-        spotify_configured,
-        spotify_authenticated,
-        configured,
-        available,
-        selected_path,
+        readiness.spotify_configured,
+        readiness.spotify_authenticated,
+        readiness.rekordbox_configured,
+        readiness.rekordbox_available,
+        readiness.xml_path,
     )
 
 
@@ -171,10 +139,7 @@ def _first_transfer_contract(
 )
 @click.option(
     "--action",
-    type=click.Choice([
-        "preview", "qualify", "publish_and_link", "apply", "approve",
-        "resume", "abandon",
-    ]),
+    type=click.Choice([action.value for action in FirstTransferAction]),
     default=None,
 )
 @click.option("--transfer-id", default=None)
@@ -209,12 +174,13 @@ def first_transfer(
         rekordbox_available,
         selected_xml_path,
     ) = readiness
-    if (
-        authorize_private_source
-        and rekordbox_available
-        and selected_xml_path is not None
-    ):
-        rekordbox_available, _ = validate_rekordbox_xml(selected_xml_path)
+    if authorize_private_source:
+        from djsupport.readiness import inspect_first_transfer_readiness
+
+        authorized_readiness = inspect_first_transfer_readiness(
+            selected_xml_path, authorize_private_source=True,
+        )
+        rekordbox_available = authorized_readiness.rekordbox_available
     activate = bool(
         spotify_configured
         and spotify_authenticated
@@ -224,9 +190,10 @@ def first_transfer(
         and local_audio_identity is not None
         and authorize_private_source
     )
-    spotify_access = action in {
-        "preview", "qualify", "publish_and_link", "apply", "approve", "resume",
-    }
+    action_kind = FirstTransferAction(action) if action is not None else None
+    spotify_access = bool(
+        action_kind is not None and action_kind.needs_spotify_access
+    )
     try:
         contract = _first_transfer_contract(
             xml_path=selected_xml_path,
@@ -244,7 +211,7 @@ def first_transfer(
                 rekordbox_available=rekordbox_available,
                 playlist_reference=playlist_reference,
                 local_audio_identity=local_audio_identity,
-                action=action,
+                action=action_kind,
                 transfer_id=transfer_id,
                 draft_id=draft_id,
             ),
@@ -252,6 +219,12 @@ def first_transfer(
                 private_source=authorize_private_source,
                 spotify_write=authorize_spotify_write,
             ),
+        )
+    except SpotifyOauthError:
+        from djsupport.agent import error_document
+
+        document = error_document(
+            "first_rekordbox_transfer", "spotify_authentication_required",
         )
     except (OSError, PermissionError, ValueError):
         from djsupport.agent import error_document

@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from djsupport.cache import MatchCache
 from djsupport.agent import (
     AgentAuthorization,
     AgentTransferContract,
@@ -20,9 +21,14 @@ from djsupport.transfer import (
     BatchPlanRequest,
     FilePublicationStorage,
     FileTransferStorage,
+    LocalAudioObservation,
+    MatchCacheKnowledge,
     QualificationDecision,
+    QualificationDraftState,
     QualificationRequest,
+    QualificationStatus,
     SourceSelection,
+    SpotifyPlaylistReviewRequired,
     Transfer,
 )
 
@@ -289,6 +295,21 @@ class AvailableLocalAudio:
         )
 
 
+class FixedGuideLocalAudio(AvailableLocalAudio):
+    def preflight(self, track):
+        del track
+        return "eligible"
+
+    def observe(self, track):
+        del track
+        return LocalAudioObservation.available(
+            fingerprint="synthetic-guide-fingerprint",
+            algorithm="chromaprint",
+            algorithm_version="1.6.1",
+            duration=180,
+        )
+
+
 class AvailableAudition:
     def capability(self):
         return LocalAuditionCapability(available=True)
@@ -354,6 +375,7 @@ class BoundedSource(UntouchedSource):
             genre="",
             date_added="",
             duration=180,
+            location="file:///synthetic/selected.wav",
         )])
 
     def consume(self, reference):
@@ -1162,6 +1184,10 @@ def test_first_transfer_approval_is_a_final_explicit_authority_step(tmp_path):
             "corrections": 0,
         },
         "authority": "playlist_approval",
+        "effects": {
+            "spotify_writes_during_approval": 0,
+            "spotify_playlist_items": 1,
+        },
         "retained": {
             "approved_matches": 1,
             "corrections": 0,
@@ -1170,6 +1196,144 @@ def test_first_transfer_approval_is_a_final_explicit_authority_step(tmp_path):
         "next_action": None,
     }
     assert len(knowledge.approved) == 1
+    writes = spotify.playlist_writes
+
+    terminal_publish = contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(
+            **base, action="publish_and_link", draft_id=draft["draft_id"],
+        ),
+        spotify_write,
+    )
+    terminal_apply = contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(
+            **base, action="apply", draft_id=draft["draft_id"],
+        ),
+        spotify_write,
+    )
+
+    assert terminal_publish["status"] == "approved"
+    assert terminal_publish["next_action"] is None
+    assert terminal_apply["status"] == "approved"
+    assert terminal_apply["next_action"] is None
+    assert spotify.playlist_writes == writes
+
+
+def test_interrupted_approval_never_repeats_matching_authority(tmp_path):
+    storage = FileTransferStorage(tmp_path / "transfers.json")
+    storage.save_qualification("opaque-draft", QualificationDraftState(
+        draft_id="opaque-draft",
+        transfer_id="opaque-transfer",
+        batch_id=None,
+        source_reference="Private/Selection",
+        account_id="spotify-account-one",
+        playlist_id="provisional-one",
+        playlist_head="head-1",
+        manifest_digest="opaque-manifest",
+        selection_digest="opaque-selection",
+        include_all=True,
+        item_ids=[],
+        decisions={},
+        status=QualificationStatus.APPROVING,
+        created_at="2026-08-10T00:00:00",
+        updated_at="2026-08-10T00:00:00",
+    ))
+    knowledge = FirstTransferKnowledge()
+    transfer = Transfer(
+        source=BoundedSource(),
+        spotify=FirstTransferSpotify(),
+        matching_knowledge=knowledge,
+        publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
+        publication_storage=FilePublicationStorage(
+            tmp_path / "publications.json",
+        ),
+        transfer_storage=storage,
+    )
+
+    with pytest.raises(SpotifyPlaylistReviewRequired, match="interrupted"):
+        transfer.approve_qualification(
+            "opaque-draft", AgentAuthorization(private_source=True),
+        )
+
+    assert knowledge.approved == []
+
+
+def test_first_transfer_approved_fingerprint_reuses_after_metadata_change(
+    tmp_path,
+):
+    spotify = FirstTransferSpotify()
+    cache_path = tmp_path / "matching-knowledge.json"
+    source = BoundedSource()
+    local_audio = FixedGuideLocalAudio()
+    publication_path = tmp_path / "publications.json"
+    storage_path = tmp_path / "transfers.json"
+
+    def guide_contract():
+        cache = MatchCache(cache_path)
+        cache.load()
+        return AgentTransferContract(Transfer(
+            source=source,
+            spotify=spotify,
+            matching_knowledge=MatchCacheKnowledge(cache),
+            publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
+            publication_storage=FilePublicationStorage(publication_path),
+            transfer_storage=FileTransferStorage(storage_path),
+            local_audio=local_audio,
+        ))
+
+    base = dict(
+        spotify_configured=True,
+        spotify_authenticated=True,
+        rekordbox_configured=True,
+        rekordbox_available=True,
+        playlist_reference="Private/Selection",
+        local_audio_identity=True,
+    )
+    private = AgentAuthorization(private_source=True)
+    write = AgentAuthorization(private_source=True, spotify_write=True)
+    contract = guide_contract()
+    preview = contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(**base, action="preview"), private,
+    )
+    draft = contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(
+            **base, action="qualify", transfer_id=preview["transfer_id"],
+        ),
+        private,
+    )
+    contract.record_qualification(
+        draft["draft_id"], draft["current_item"]["item_id"],
+        QualificationDecision.KEEP_PROPOSAL, private,
+    )
+    published = contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(
+            **base, action="publish_and_link", draft_id=draft["draft_id"],
+        ),
+        write,
+    )
+    assert published["next_action"] == "apply", published
+    applied = contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(
+            **base, action="apply", draft_id=draft["draft_id"],
+        ),
+        write,
+    )
+    assert applied["status"] == "applied", applied
+    approval = contract.first_rekordbox_transfer(
+        FirstTransferGuideRequest(
+            **base, action="approve", draft_id=draft["draft_id"],
+        ),
+        private,
+    )
+    assert approval["status"] == "approved", json.dumps(approval, sort_keys=True)
+
+    source.title = "Metadata Changed Completely"
+    later = guide_contract().first_rekordbox_transfer(
+        FirstTransferGuideRequest(**base, action="preview"), private,
+    )
+
+    assert later["counts"]["local_audio_reused"] == 1
+    assert later["counts"]["spotify_api_lookups"] == 0
+    assert spotify.searches == 1
 
 
 def test_authorized_preview_executes_non_interactively_and_is_idempotent(tmp_path):

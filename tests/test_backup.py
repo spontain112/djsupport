@@ -180,6 +180,48 @@ class TestRestorePreview:
         assert preview.valid is True
         assert preview.contents == ("transfers.json",)
 
+    def test_schema_five_approval_outcome_restores_over_version_four(
+        self, tmp_path,
+    ):
+        source = tmp_path / "source"
+        target = tmp_path / "target"
+        _write_json(source / "transfers.json", {
+            "version": 5,
+            "transfers": {},
+            "batches": {},
+            "qualifications": {
+                "draft-approved": {
+                    "draft_id": "draft-approved",
+                    "status": "approved",
+                    "decisions": {},
+                    "approval_outcome": {
+                        "status": "approved",
+                        "approved": [],
+                        "rejected": [],
+                    },
+                },
+            },
+        })
+        _write_json(target / "transfers.json", {
+            "version": 4,
+            "transfers": {},
+            "batches": {},
+            "qualifications": {},
+        })
+        archive = LocalDataBackup(source).create(tmp_path / "backups")
+        service = LocalDataBackup(target)
+
+        preview = service.preview(archive)
+        restored = service.restore(archive)
+
+        assert preview.valid is True
+        assert restored.restored is True
+        state = json.loads((target / "transfers.json").read_text())
+        assert state["version"] == 5
+        assert state["qualifications"]["draft-approved"][
+            "approval_outcome"
+        ]["status"] == "approved"
+
     @pytest.mark.parametrize("damage", ["corrupt", "unsupported-backup", "unsupported-data"])
     def test_rejects_corrupt_or_unsupported_archive(self, tmp_path, damage):
         source = tmp_path / "source"

@@ -332,6 +332,10 @@ journey without treating ordinary human input as a command failure. JSON mode
 never prompts, truncates private facts into prose, or mixes diagnostics into
 the document.
 
+Readiness inspects only local configuration and file presence. Spotify token
+contents are verified only when you explicitly continue into a Spotify phase;
+an expired or invalid login then returns authentication as the next safe step.
+
 Advanced clients can also use the lower-level public seams. Inspect optional
 capabilities without reading private source data:
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import ipaddress
 from dataclasses import dataclass
+from enum import Enum
 from urllib.parse import urlsplit
 
 from djsupport.transfer import (
@@ -24,6 +25,28 @@ AGENT_CONTRACT_VERSION = 2
 AgentAuthorization = TransferAuthorization
 
 
+class FirstTransferAction(str, Enum):
+    PREVIEW = "preview"
+    QUALIFY = "qualify"
+    PUBLISH_AND_LINK = "publish_and_link"
+    APPLY = "apply"
+    APPROVE = "approve"
+    RESUME = "resume"
+    ABANDON = "abandon"
+
+    @property
+    def needs_spotify_access(self) -> bool:
+        return self != FirstTransferAction.ABANDON
+
+    @property
+    def publishes(self) -> bool:
+        return self in {
+            FirstTransferAction.PUBLISH_AND_LINK,
+            FirstTransferAction.APPLY,
+            FirstTransferAction.APPROVE,
+        }
+
+
 @dataclass(frozen=True)
 class FirstTransferGuideRequest:
     """Explicit setup facts for the first Rekordbox Transfer guide."""
@@ -34,7 +57,7 @@ class FirstTransferGuideRequest:
     rekordbox_available: bool = False
     playlist_reference: str | None = None
     local_audio_identity: bool | None = None
-    action: str | None = None
+    action: FirstTransferAction | str | None = None
     transfer_id: str | None = None
     draft_id: str | None = None
 
@@ -241,11 +264,12 @@ class AgentTransferContract:
                 "required_authorization": "private_source",
             }
         else:
-            allowed_actions = {
-                None, "preview", "qualify", "publish_and_link", "apply",
-                "approve", "resume", "abandon",
-            }
-            if request.action not in allowed_actions:
+            try:
+                action = (
+                    FirstTransferAction(request.action)
+                    if request.action is not None else None
+                )
+            except ValueError:
                 return {
                     "contract_version": AGENT_CONTRACT_VERSION,
                     "phase": "first_rekordbox_transfer",
@@ -258,24 +282,15 @@ class AgentTransferContract:
                 preview=True,
                 local_audio_identity=request.local_audio_identity,
             )
-            if request.action == "resume":
+            if action == FirstTransferAction.RESUME:
                 if request.transfer_id is None:
                     raise ValueError("Resume requires a Transfer identity")
                 outcome = self.execute_batch(
                     batch_request, authorization,
                     transfer_id=request.transfer_id,
                 )
-                next_actions = outcome.pop("next_actions", None) or ["qualify"]
-                next_action = next_actions[0]
-                outcome.update({
-                    "phase": "first_rekordbox_transfer",
-                    "next_action": next_action,
-                    "required_input": {
-                        "kind": "action_confirmation", "action": next_action,
-                    },
-                })
-                return outcome
-            if request.action == "abandon":
+                return self._first_guide_step(outcome, default_action="qualify")
+            if action == FirstTransferAction.ABANDON:
                 if request.transfer_id is None:
                     raise ValueError("Abandonment requires a Transfer identity")
                 self._transfer.abandon(request.transfer_id)
@@ -286,18 +301,39 @@ class AgentTransferContract:
                     "transfer_id": request.transfer_id,
                     "next_action": None,
                 }
-            if request.action == "approve":
+            if action == FirstTransferAction.APPROVE:
                 if request.draft_id is None:
                     raise ValueError(
                         "Approval requires a Qualification Draft identity"
                     )
+                progress = self.qualification_progress(
+                    request.draft_id, authorization,
+                )
+                progress_actions = progress.get("next_actions", [])
+                if (
+                    progress.get("status") != "approved"
+                    and (
+                        not progress_actions
+                        or progress_actions[0] != "approve"
+                    )
+                ):
+                    return self._first_guide_step(progress)
                 approved = self.approve_qualification(
                     request.draft_id, authorization,
                 )
-                approved.pop("next_actions", None)
+                next_actions = approved.pop("next_actions", None) or []
+                if "counts" not in approved:
+                    approved["next_actions"] = next_actions
+                    return self._first_guide_step(approved)
                 counts = approved["counts"]
                 approved.update({
                     "phase": "first_rekordbox_transfer",
+                    "effects": {
+                        "spotify_writes_during_approval": 0,
+                        "spotify_playlist_items": (
+                            counts["approved"] + counts["corrections"]
+                        ),
+                    },
                     "retained": {
                         "approved_matches": counts["approved"],
                         "corrections": counts["corrections"],
@@ -306,11 +342,26 @@ class AgentTransferContract:
                     "next_action": None,
                 })
                 return approved
-            if request.action == "apply":
+            if action == FirstTransferAction.APPLY:
                 if request.draft_id is None:
                     raise ValueError(
                         "Draft application requires a Qualification identity"
                     )
+                progress = self.qualification_progress(
+                    request.draft_id, authorization,
+                )
+                progress_actions = progress.get("next_actions", [])
+                if (
+                    progress.get("status") == "approved"
+                    or not progress_actions
+                    or progress_actions[0] not in {"apply", "approve"}
+                ):
+                    return self._first_guide_step(progress)
+                if (
+                    progress_actions[0] == "approve"
+                    and not authorization.spotify_write
+                ):
+                    return self._first_guide_step(progress)
                 if not authorization.spotify_write:
                     return {
                         "contract_version": AGENT_CONTRACT_VERSION,
@@ -324,17 +375,8 @@ class AgentTransferContract:
                 applied = self.apply_qualification(
                     request.draft_id, authorization,
                 )
-                applied.pop("next_actions", None)
-                applied.update({
-                    "phase": "first_rekordbox_transfer",
-                    "next_action": "approve",
-                    "required_input": {
-                        "kind": "authority_confirmation",
-                        "authority": "playlist_approval",
-                    },
-                })
-                return applied
-            if request.action == "publish_and_link":
+                return self._first_guide_step(applied)
+            if action == FirstTransferAction.PUBLISH_AND_LINK:
                 if request.draft_id is None:
                     raise ValueError(
                         "Publication requires a Qualification Draft identity"
@@ -342,17 +384,9 @@ class AgentTransferContract:
                 progress = self.qualification_progress(
                     request.draft_id, authorization,
                 )
-                progress_actions = progress["next_actions"]
-                if progress_actions[0] == "apply":
-                    progress.pop("next_actions")
-                    progress.update({
-                        "phase": "first_rekordbox_transfer",
-                        "next_action": "apply",
-                        "required_input": {
-                            "kind": "action_confirmation", "action": "apply",
-                        },
-                    })
-                    return progress
+                progress_actions = progress.get("next_actions", [])
+                if not progress_actions or progress_actions[0] != "publish_and_link":
+                    return self._first_guide_step(progress)
                 if not authorization.spotify_write:
                     return {
                         "contract_version": AGENT_CONTRACT_VERSION,
@@ -371,29 +405,19 @@ class AgentTransferContract:
                 published = self.execute_batch(
                     publishing_request, authorization,
                 )
+                if published.get("status") != "completed":
+                    return self._first_guide_step(published)
                 linked = self.link_qualification(
                     request.draft_id, published["transfer_id"], authorization,
                 )
-                linked.pop("next_actions", None)
-                linked.update({
-                    "phase": "first_rekordbox_transfer",
-                    "next_action": "apply",
-                    "required_input": {
-                        "kind": "action_confirmation", "action": "apply",
-                    },
-                })
-                return linked
-            if request.draft_id is not None and request.action is None:
+                return self._first_guide_step(linked)
+            if request.draft_id is not None and action is None:
                 qualification = self.qualification_progress(
                     request.draft_id, authorization,
                 )
-                next_actions = qualification.pop("next_actions")
+                next_actions = qualification.get("next_actions", [])
                 if not next_actions:
-                    qualification.update({
-                        "phase": "first_rekordbox_transfer",
-                        "next_action": None,
-                    })
-                    return qualification
+                    return self._first_guide_step(qualification)
                 primary_action = next_actions[0]
                 if (
                     primary_action in {"publish_and_link", "apply"}
@@ -408,29 +432,11 @@ class AgentTransferContract:
                         "next_action": "authorize_spotify_write",
                         "required_authorization": "spotify_write",
                     }
-                qualification.update({
-                    "phase": "first_rekordbox_transfer",
-                    "next_action": primary_action,
-                    "required_input": {
-                        "kind": "action_confirmation",
-                        "action": primary_action,
-                    },
-                })
-                return qualification
-            if request.transfer_id is not None and request.action is None:
+                return self._first_guide_step(qualification)
+            if request.transfer_id is not None and action is None:
                 progress = self.progress(request.transfer_id, authorization)
-                next_actions = progress.pop("next_actions", None) or []
-                next_action = next_actions[0] if next_actions else None
-                progress.update({
-                    "phase": "first_rekordbox_transfer",
-                    "next_action": next_action,
-                })
-                if next_action is not None:
-                    progress["required_input"] = {
-                        "kind": "action_confirmation", "action": next_action,
-                    }
-                return progress
-            if request.action == "qualify":
+                return self._first_guide_step(progress)
+            if action == FirstTransferAction.QUALIFY:
                 if request.transfer_id is None:
                     raise ValueError("Qualification requires a Transfer identity")
                 qualification = self.qualification_draft(
@@ -441,28 +447,12 @@ class AgentTransferContract:
                     ),
                     authorization,
                 )
-                next_actions = qualification.pop("next_actions")
-                qualification.update({
-                    "phase": "first_rekordbox_transfer",
-                    "next_action": next_actions[0],
-                    "required_input": {
-                        "kind": "local_qualification_review",
-                        "review_url": qualification["review_url"],
-                    },
-                })
-                return qualification
-            if request.action == "preview":
+                return self._first_guide_step(qualification)
+            if action == FirstTransferAction.PREVIEW:
                 outcome = self.execute_batch(batch_request, authorization)
-                next_actions = outcome.pop("next_actions", None) or ["qualify"]
-                next_action = next_actions[0]
-                outcome.update({
-                    "phase": "first_rekordbox_transfer",
-                    "next_action": next_action,
-                    "required_input": {
-                        "kind": "action_confirmation", "action": next_action,
-                    },
-                })
-                return outcome
+                return self._first_guide_step(
+                    outcome, default_action="qualify",
+                )
             plan_document = self.plan_batch(batch_request, authorization)
             plan_document.pop("next_actions", None)
             plan_document.update({
@@ -480,6 +470,35 @@ class AgentTransferContract:
             "next_action": next_action,
             "required_input": required_input,
         }
+
+    @staticmethod
+    def _first_guide_step(
+        document: dict, *, default_action: str | None = None,
+    ) -> dict:
+        """Render one truthful primary action from an existing policy result."""
+        actions = document.pop("next_actions", None) or []
+        next_action = actions[0] if actions else default_action
+        document.update({
+            "phase": "first_rekordbox_transfer",
+            "next_action": next_action,
+        })
+        if next_action is None:
+            document.pop("required_input", None)
+        elif next_action == "review" and document.get("review_url"):
+            document["required_input"] = {
+                "kind": "local_qualification_review",
+                "review_url": document["review_url"],
+            }
+        elif next_action == "approve":
+            document["required_input"] = {
+                "kind": "authority_confirmation",
+                "authority": "playlist_approval",
+            }
+        else:
+            document["required_input"] = {
+                "kind": "action_confirmation", "action": next_action,
+            }
+        return document
 
     def plan_batch(
         self, request: BatchPlanRequest, authorization: AgentAuthorization,

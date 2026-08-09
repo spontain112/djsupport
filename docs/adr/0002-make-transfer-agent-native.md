@@ -56,9 +56,20 @@ successful structured state. JSON clients are non-interactive, stdout remains
 machine-readable, and `required_input` acts as runtime schema discovery for the
 next invocation.
 
+Readiness checks only configuration-key and local file presence. They do not
+open or validate Spotipy's token cache; expired, malformed, declined, or
+wrong-account authentication is reported when an explicitly requested Spotify
+phase verifies it. CLI and web derive these facts through the same local probe;
+callers cannot assert their own readiness booleans.
+
 The guide may order existing operations and translate their reason codes into
 plain language. It cannot estimate work outside Transfer, select a playlist,
 broaden a Batch, read private input, open authentication, write Spotify, apply a
 draft, or create Approval without the exact input and authorization owned by
 that phase. CLI and local web routes are equivalent thin renderings of the
 versioned agent document.
+
+Before applying matching authority, Transfer durably marks a Qualification
+Approval as in progress. If the process stops before its aggregate outcome is
+retained, later invocations require review instead of repeating uncertain
+authority writes. A completed outcome is retained and replayed idempotently.

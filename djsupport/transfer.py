@@ -362,6 +362,7 @@ class QualificationStatus(str, Enum):
     APPLYING = "applying"
     PAUSED = "paused"
     APPLIED = "applied"
+    APPROVING = "approving"
     APPROVED = "approved"
     REVIEW_REQUIRED = "review_required"
     DISCARDED = "discarded"
@@ -494,6 +495,8 @@ class QualificationView:
         """Return policy-owned lifecycle actions for thin clients."""
         if self.status == QualificationStatus.APPROVED:
             return ()
+        if self.status == QualificationStatus.APPROVING:
+            return ("review",)
         if self.status == QualificationStatus.APPLIED:
             return ("approve",)
         if self.status == QualificationStatus.DISCARDED:
@@ -517,6 +520,7 @@ class QualificationView:
             QualificationStatus.APPLYING,
             QualificationStatus.PAUSED,
             QualificationStatus.APPLIED,
+            QualificationStatus.APPROVING,
             QualificationStatus.APPROVED,
             QualificationStatus.DISCARDED,
         }:
@@ -2768,6 +2772,7 @@ class Transfer:
                     QualificationStatus.APPLYING,
                     QualificationStatus.PAUSED,
                     QualificationStatus.APPLIED,
+                    QualificationStatus.APPROVING,
                     QualificationStatus.APPROVED,
                     QualificationStatus.DISCARDED,
                 }
@@ -2793,6 +2798,7 @@ class Transfer:
                 QualificationStatus.APPLYING,
                 QualificationStatus.PAUSED,
                 QualificationStatus.APPLIED,
+                QualificationStatus.APPROVING,
                 QualificationStatus.APPROVED,
                 QualificationStatus.DISCARDED,
             }:
@@ -2873,6 +2879,7 @@ class Transfer:
                 QualificationStatus.APPLYING,
                 QualificationStatus.PAUSED,
                 QualificationStatus.APPLIED,
+                QualificationStatus.APPROVING,
                 QualificationStatus.APPROVED,
                 QualificationStatus.DISCARDED,
             }:
@@ -2993,6 +3000,7 @@ class Transfer:
                 if candidate.draft_id != draft_id
                 and candidate.status not in {
                     QualificationStatus.APPLIED,
+                    QualificationStatus.APPROVING,
                     QualificationStatus.APPROVED,
                     QualificationStatus.DISCARDED,
                 }
@@ -3346,6 +3354,7 @@ class Transfer:
                     QualificationStatus.APPLYING,
                     QualificationStatus.PAUSED,
                     QualificationStatus.APPLIED,
+                    QualificationStatus.APPROVING,
                     QualificationStatus.APPROVED,
                     QualificationStatus.DISCARDED,
                 }
@@ -3534,6 +3543,7 @@ class Transfer:
             QualificationStatus.APPLYING,
             QualificationStatus.PAUSED,
             QualificationStatus.APPLIED,
+            QualificationStatus.APPROVING,
             QualificationStatus.APPROVED,
             QualificationStatus.DISCARDED,
         } or (
@@ -3725,6 +3735,7 @@ class Transfer:
             QualificationStatus.APPLYING,
             QualificationStatus.PAUSED,
             QualificationStatus.APPLIED,
+            QualificationStatus.APPROVING,
             QualificationStatus.APPROVED,
         }:
             raise ValueError(
@@ -3890,22 +3901,41 @@ class Transfer:
         draft = self._transfer_storage.load_qualification(draft_id)
         if draft is None:
             raise ValueError(f"Unknown Qualification Draft: {draft_id}")
-        if (
-            draft.status == QualificationStatus.APPROVED
-            and draft.approval_outcome is not None
-        ):
+        if draft.approval_outcome is not None:
             return self._approval_from_stored(draft.approval_outcome)
+        if draft.status == QualificationStatus.APPROVING:
+            raise SpotifyPlaylistReviewRequired(
+                "Qualification Approval was interrupted; review retained "
+                "authority before any retry",
+                draft_id=draft_id,
+            )
+        if draft.status != QualificationStatus.APPLIED:
+            raise SpotifyPlaylistReviewRequired(
+                "Qualification Draft must be applied before Approval",
+                draft_id=draft_id,
+            )
+        draft.status = QualificationStatus.APPROVING
+        draft.updated_at = datetime.now().isoformat()
+        self._transfer_storage.save_qualification(draft_id, draft)
         outcome = self._approve(
             None, qualification_draft_id=draft_id,
         )
-        if outcome.status == ApprovalStatus.APPROVED:
-            draft = self._transfer_storage.load_qualification(draft_id)
-            if draft is None:
-                raise ValueError(f"Unknown Qualification Draft: {draft_id}")
-            draft.status = QualificationStatus.APPROVED
-            draft.approval_outcome = self._stored_approval(outcome)
-            draft.updated_at = datetime.now().isoformat()
-            self._transfer_storage.save_qualification(draft_id, draft)
+        draft = self._transfer_storage.load_qualification(draft_id)
+        if draft is None:
+            raise ValueError(f"Unknown Qualification Draft: {draft_id}")
+        draft.status = (
+            QualificationStatus.APPROVED
+            if outcome.status == ApprovalStatus.APPROVED
+            else QualificationStatus.REVIEW_REQUIRED
+        )
+        draft.review_reason = (
+            None
+            if outcome.status == ApprovalStatus.APPROVED
+            else "approval_needs_review"
+        )
+        draft.approval_outcome = self._stored_approval(outcome)
+        draft.updated_at = datetime.now().isoformat()
+        self._transfer_storage.save_qualification(draft_id, draft)
         return outcome
 
     def apply_qualification(
@@ -3939,6 +3969,11 @@ class Transfer:
                 )
             if draft.status == QualificationStatus.DISCARDED:
                 raise ValueError("A discarded Qualification Draft cannot be applied")
+            if draft.status == QualificationStatus.APPROVING:
+                raise SpotifyPlaylistReviewRequired(
+                    "Qualification Approval was interrupted; review required",
+                    draft_id=draft_id,
+                )
             if draft.status in {
                 QualificationStatus.APPLIED,
                 QualificationStatus.APPROVED,
@@ -4480,7 +4515,10 @@ class Transfer:
                 if (
                     qualification_draft is None
                     or qualification_draft.status
-                    != QualificationStatus.APPLIED
+                    not in {
+                        QualificationStatus.APPLIED,
+                        QualificationStatus.APPROVING,
+                    }
                 ):
                     raise SpotifyPlaylistReviewRequired(
                         "Qualification Draft must be applied before Approval"
@@ -4514,11 +4552,17 @@ class Transfer:
                 )
                 applied_drafts = [
                     draft for draft in playlist_drafts
-                    if draft.status == QualificationStatus.APPLIED
+                    if draft.status in {
+                        QualificationStatus.APPLIED,
+                        QualificationStatus.APPROVING,
+                    }
                 ]
                 unapplied = []
                 for draft in playlist_drafts:
-                    if draft.status == QualificationStatus.APPLIED:
+                    if draft.status in {
+                        QualificationStatus.APPLIED,
+                        QualificationStatus.APPROVING,
+                    }:
                         continue
                     if (
                         draft.status == QualificationStatus.DISCARDED
@@ -5434,6 +5478,13 @@ class Transfer:
                         lambda: self._spotify.match(track, request.threshold)
                     )
                     playlist.api_lookups += 1
+                    if result is not None and "alternatives" not in result:
+                        result = {
+                            **result,
+                            **self._availability_facts(
+                                result, source="spotify_or_retained_result",
+                            ),
+                        }
                     self._knowledge.retain(
                         track, request.threshold,
                         None if result and "alternatives" in result else result,
