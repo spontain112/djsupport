@@ -22,25 +22,16 @@ directory:
 | Linux | `$XDG_DATA_HOME/djsupport`, otherwise `~/.local/share/djsupport` |
 | Windows | `%LOCALAPPDATA%/djsupport` |
 
-Two current exceptions are important:
-
-- Rekordbox path configuration defaults to `.djsupport_config.json` in the
-  process working directory.
-- Spotify environment configuration and Spotipy's token cache are managed by
-  the process environment/Spotipy rather than DJ Support's versioned
-  application-data schemas.
-
-Both are private and ignored by the repository, but the Rekordbox configuration
-location does not yet match ADR-0001's intended platform application-data
-placement. This document records the executable behavior; it does not silently
-relocate or migrate user state. The runtime correction and migration decision
-is tracked separately in [issue #110](https://github.com/spontain112/djsupport/issues/110).
+Rekordbox path configuration lives in the same private root as other versioned
+DJ Support data. Spotify environment configuration and Spotipy's token cache
+remain managed by the process environment/Spotipy rather than DJ Support's
+versioned application-data schemas.
 
 ## Current schema owners
 
 | Category | Default file | Current schema | Owning implementation | Contents and authority |
 | --- | --- | --- | --- | --- |
-| Configuration | `.djsupport_config.json` | `1` | [`ConfigManager`](../djsupport/config.py) | Selected Rekordbox XML path and update time; private reference, not source-read authority |
+| Configuration | `config.json` | `1` | [`ConfigManager`](../djsupport/config.py) | Selected Rekordbox XML path and update time; private reference, not source-read authority |
 | Matching knowledge | `matching-knowledge.json` | `3` | [`MatchCache`](../djsupport/cache.py) through `MatchingKnowledge` | Proposals, failures, Approved/Rejected Matches, Corrections, conflicts, private fingerprint observations and account-scoped associations |
 | Publication state | `publication-manifests.json` | `6` | [`FilePublicationStorage`](../djsupport/transfer.py) | Publication manifests, Approval outcomes, and Mirror relationships |
 | Transfer state | `publication-manifests.transfers.json` | `4` | [`FileTransferStorage`](../djsupport/transfer.py) | Transfers, Batches, checkpoints, and Qualification Drafts |
@@ -55,13 +46,14 @@ so a version bump cannot silently leave the inventory behind.
 
 ```mermaid
 flowchart TB
-    CONFIG[".djsupport_config.json<br/>selected XML reference"]
+    CONFIG["config.json<br/>selected XML reference"]
     MATCH["matching-knowledge.json<br/>proposals and approved knowledge"]
     TRANSFERS["publication-manifests.transfers.json<br/>Transfers, Batches, Qualification Drafts"]
     PUBLICATIONS["publication-manifests.json<br/>manifests, Approvals, Mirrors"]
     BACKUP["versioned local backup"]
 
     CONFIG --> T["Transfer"]
+    CONFIG --> BACKUP
     MATCH <--> T
     TRANSFERS <--> T
     PUBLICATIONS <--> T
@@ -84,6 +76,7 @@ schema versions:
 
 | File | Supported reader versions |
 | --- | --- |
+| `config.json` | `1` |
 | `matching-knowledge.json` | `1`, `2`, `3` |
 | `transfers.json` | `1`, `2`, `3`, `4` |
 | `publication-manifests.transfers.json` | `1`, `2`, `3`, `4` |
@@ -94,8 +87,8 @@ schema versions:
 
 `transfers.json` and `playlist-state.json` remain in the supported archive set
 for compatibility with earlier layouts. Their presence does not make them the
-default current write targets. Configuration and Spotify credentials/token
-caches are not currently members of the versioned backup archive.
+default current write targets. Spotify credentials and token caches are not
+members of the versioned backup archive.
 
 ## File contents by category
 
@@ -135,10 +128,14 @@ reading these files directly.
 ### Configuration and credentials
 
 The Rekordbox configuration file contains a private source path. Selecting or
-storing that path does not authorize reading the XML. Spotify client values are
-loaded from environment variables, optionally through `.env`; OAuth token
-storage is delegated to Spotipy. Secrets are never included in DJ Support's
-backup manifest and are explicitly excluded from repository content.
+storing that path does not authorize reading the XML. A legacy
+`.djsupport_config.json` is detected only at the exact process working
+directory and moves only through `djsupport library migrate-config --apply`.
+Migration never scans for, deletes, or silently chooses between configuration
+files. Spotify client values are loaded from environment variables, optionally
+through `.env`; OAuth token storage is delegated to Spotipy. Secrets are never
+included in DJ Support's backup manifest and are explicitly excluded from
+repository content.
 
 ## Write and concurrency behavior
 
@@ -148,7 +145,7 @@ backup manifest and are explicitly excluded from repository content.
 | Publication state | Writes a sibling temporary file and atomically replaces the target | Account publishing guards constrain publication work; the file itself has no per-entity revision contract |
 | Transfer state | Writes the complete document through a temporary file and atomic replace | Process/thread file locking plus per-entity revisions reject stale saves; resume reloads authoritative state |
 | Backup restore | Validates hashes and schemas, stages merged content, then replaces members | On failure, already replaced files are restored from staged originals |
-| Configuration | Rewrites the small versioned document | No concurrent revision contract; it is human setup state rather than Transfer progress |
+| Configuration | Writes a sibling temporary file, flushes it, and atomically replaces `config.json` | No concurrent revision contract; conflicts during migration or restore require an explicit user choice |
 
 Atomic replacement prevents a reader from observing a half-written publication
 or Transfer document. It does not make separate files one transaction. Transfer
@@ -163,6 +160,9 @@ explicitly and represents incomplete ordering as recoverable durable state.
   legacy data through a Preview-first flow and leaves the source unchanged.
 - [`FoundationMigration`](../djsupport/migration.py) binds retained state to a
   stable Spotify account identity only after creating a verified backup.
+- [`ConfigManager`](../djsupport/config.py) previews the exact current-directory
+  legacy configuration and copies it only on explicit apply; the source remains
+  unchanged and a differing canonical file is never selected automatically.
 - Migration marker files record idempotent completion; they do not contain
   credentials or authorize playlist effects.
 - A schema change must keep its supported reader window or ship an explicit,
@@ -172,11 +172,11 @@ explicitly and represents incomplete ordering as recoverable durable state.
 ## Backup boundary
 
 `djsupport backup` creates a local ZIP whose manifest records each supported
-member's relative path, SHA-256 hash, and schema version. Reports beneath the
-application-data report directory are included only when they use supported
-extensions and contain no recognized secret fields. Restore is Preview-first,
-validates paths and hashes, merges supported categories, and requires explicit
-conflict choices.
+member's relative path, SHA-256 hash, and schema version, including
+`config.json` when present. Reports beneath the application-data report
+directory are included only when they use supported extensions and contain no
+recognized secret fields. Restore is Preview-first, validates paths and hashes,
+merges supported categories, and requires explicit conflict choices.
 
 A backup is still private user data. Keep it outside the repository and do not
 attach it to an issue or Agent Client conversation.

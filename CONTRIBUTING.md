@@ -36,6 +36,8 @@ djsupport/
   matcher.py     Spotify candidate scoring and selection
   spotify.py     Typed Spotify API boundary
   cache.py       Durable matching knowledge
+  paths.py       Canonical private application-data locations
+  config.py      Versioned Rekordbox path configuration and migration
   report.py      Terminal, Markdown, and review CSV reports
   backup.py      Versioned local-data backup and restore
   migration.py   Explicit legacy-data migration

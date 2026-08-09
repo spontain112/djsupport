@@ -119,6 +119,18 @@ djsupport library set /path/to/library.xml
 djsupport library show
 ```
 
+The saved reference lives in private operating-system application data. If an
+older checkout has `.djsupport_config.json` in its current directory, preview
+and then explicitly apply the non-destructive migration:
+
+```bash
+djsupport library migrate-config
+djsupport library migrate-config --apply
+```
+
+Migration leaves the legacy file untouched and refuses to choose when current
+and legacy configurations differ.
+
 List the available playlists:
 
 ```bash

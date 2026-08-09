@@ -128,6 +128,39 @@ def library_show():
         click.echo(f"Status: INVALID ({error})")
 
 
+@library.command("migrate-config")
+@click.option(
+    "--apply", is_flag=True,
+    help="Copy valid legacy configuration into private application data.",
+)
+def library_migrate_config(apply: bool) -> None:
+    """Preview or apply migration of the current-directory legacy config."""
+    result = ConfigManager().migrate_legacy(apply=apply)
+    if result.status == "not_found":
+        click.echo("No legacy Rekordbox configuration found in this directory.")
+    elif result.status == "invalid":
+        raise click.ClickException(
+            "Legacy Rekordbox configuration is invalid and was not migrated."
+        )
+    elif result.status == "conflict":
+        raise click.ClickException(
+            "Current and legacy Rekordbox configurations differ. "
+            "Choose explicitly with `djsupport library set`."
+        )
+    elif result.status == "already_current":
+        click.echo("Private Rekordbox configuration already matches the legacy file.")
+    elif result.status == "migrated":
+        click.echo(
+            "Rekordbox configuration migrated to private application data. "
+            "The legacy file was left unchanged."
+        )
+    else:
+        click.echo(
+            "Legacy Rekordbox configuration is ready to migrate. "
+            "Run `djsupport library migrate-config --apply` to copy it."
+        )
+
+
 @cli.command("backup")
 @click.option(
     "--destination", type=click.Path(file_okay=False), default=None,

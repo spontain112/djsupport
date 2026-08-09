@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Preview-first migration of legacy current-directory Rekordbox configuration,
+  with explicit apply and no source-file deletion.
 - Least-privilege GitHub Actions CI for pull requests and `main`, covering the
   offline suite on Python 3.10 and 3.14 plus deterministic package validation.
 - A canonical maintainer checklist that keeps release preparation, CI, tags,
@@ -37,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Rekordbox path configuration now lives in private platform application data,
+  participates in versioned backup/restore, and requires an explicit restore
+  choice on conflict.
 - `main` now identifies as `0.6.0.dev0`, while installation guidance keeps
   `v0.5.0` as the Latest stable release and limits previews to exact candidates.
 - Transfer checkpoints completed local observations and aggregate API/local
