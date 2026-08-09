@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- A harness-neutral First Rekordbox Transfer guide with one structured next
+  action at a time across readiness, bounded Preview, Qualification,
+  publication, draft application, and separate playlist-scoped Approval.
+- Thin `first-transfer --json` and `/rekordbox/first-transfer` adapters with
+  deterministic non-interactive behavior and runtime input shapes.
 - Preview-first migration of legacy current-directory Rekordbox configuration,
   with explicit apply and no source-file deletion.
 - Least-privilege GitHub Actions CI for pull requests and `main`, covering the
@@ -36,9 +41,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Transfer-state schema 4 for durable local-audio opt-in, evidence checkpoints,
   stable aggregate outcomes, and Qualification Drafts; schemas 1–3 remain
   readable.
+- Transfer-state schema 5 for idempotent retained Qualification Approval
+  outcomes; schemas 1–4 remain readable.
 
 ### Changed
 
+- Qualification Approval now retains its aggregate outcome so repeated guide
+  invocation is idempotent and does not repeat matching-authority writes.
+- First-transfer readiness is derived consistently by CLI and web without
+  opening token contents, and interrupted Approval fails closed for review
+  rather than repeating uncertain authority writes.
 - Rekordbox path configuration now lives in private platform application data,
   participates in versioned backup/restore, and requires an explicit restore
   choice on conflict.

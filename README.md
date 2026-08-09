@@ -111,8 +111,28 @@ clients.
 
 ## Your first Rekordbox Transfer
 
-Export your collection from Rekordbox with **File → Export Collection in xml
-format**, then save its location:
+DJ Support is designed to be operated through a local AI harness. Start with a
+plain request such as:
+
+> Help me transfer my first Rekordbox playlist.
+
+The harness calls `djsupport first-transfer --json` and receives exactly one
+safe next action. It guides you through Spotify setup, the Rekordbox XML export,
+one explicit playlist, the optional local-audio identity decision, Preview,
+local Qualification, draft application, and separate Approval. Missing input
+is a successful machine-readable result, not an interactive prompt or an
+error. The harness cannot infer authorization from conversation.
+
+The journey always starts with Preview and never selects the whole library.
+Preview can retain private matching knowledge and a resumable checkpoint, but
+cannot create or update a Spotify playlist. After review, applying the
+Qualification Draft requires explicit Spotify-write authorization; Approval is
+a later decision and is the only step that makes matches authoritative. That
+Approval records local authority only; it does not perform another Spotify
+mutation.
+
+When prompted for the Rekordbox source, export your collection from Rekordbox
+with **File → Export Collection in xml format**, then save its location:
 
 ```bash
 djsupport library set /path/to/library.xml
@@ -131,7 +151,11 @@ djsupport library migrate-config --apply
 Migration leaves the legacy file untouched and refuses to choose when current
 and legacy configurations differ.
 
-List the available playlists:
+The selected path is private operating-system application data and is never
+returned in an agent document. Listing or reading it requires explicit
+private-source authorization.
+
+For direct expert use, list the available playlists:
 
 ```bash
 djsupport list
@@ -144,8 +168,12 @@ djsupport sync --playlist "Deep House" --dry-run
 ```
 
 Preview may retain local matching knowledge and a resumable Transfer checkpoint.
-When the report looks right, run the same bounded selection without
-`--dry-run`:
+These lower-level commands remain available for experts. The first-transfer
+guide instead routes Preview into the Qualification Workspace and keeps
+publication, draft application, and Approval as distinct steps.
+
+When using the direct workflow and the report looks right, run the same bounded
+selection without `--dry-run`:
 
 ```bash
 djsupport sync --playlist "Deep House"
@@ -293,7 +321,25 @@ automatically triggers this calculation.
 ## AI-agent use
 
 Codex and other harnesses are first-class clients of the same Transfer policy.
-Inspect capabilities without reading private source data:
+For a first Rekordbox journey, begin with:
+
+```bash
+djsupport first-transfer --json
+```
+
+The response is stable structured output with a single `next_action` and, when
+needed, an exact `required_input` shape. An `input_required` or
+`decision_required` response exits successfully so an agent can continue the
+journey without treating ordinary human input as a command failure. JSON mode
+never prompts, truncates private facts into prose, or mixes diagnostics into
+the document.
+
+Readiness inspects only local configuration and file presence. Spotify token
+contents are verified only when you explicitly continue into a Spotify phase;
+an expired or invalid login then returns authentication as the next safe step.
+
+Advanced clients can also use the lower-level public seams. Inspect optional
+capabilities without reading private source data:
 
 ```bash
 djsupport capabilities --json

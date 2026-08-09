@@ -28,6 +28,7 @@ every flag.
 djsupport/
   transfer.py    Durable Transfer policy, planning, checkpoints, and publication
   agent.py       Versioned, harness-neutral Transfer contract rendering
+  readiness.py   Shared presence-only readiness for CLI and web adapters
   cli.py         Thin Click command-line adapter
   web.py         Optional thin FastAPI adapter and static web application
   rekordbox.py   Rekordbox XML intake

@@ -180,6 +180,58 @@ class TestRestorePreview:
         assert preview.valid is True
         assert preview.contents == ("transfers.json",)
 
+    def test_schema_five_approval_outcome_restores_over_version_four(
+        self, tmp_path,
+    ):
+        source = tmp_path / "source"
+        target = tmp_path / "target"
+        _write_json(source / "transfers.json", {
+            "version": 5,
+            "transfers": {},
+            "batches": {},
+            "qualifications": {
+                "draft-approved": {
+                    "draft_id": "draft-approved",
+                    "status": "approved",
+                    "decisions": {},
+                    "approval_outcome": {
+                        "status": "approved",
+                        "reviewed_at": "2026-08-10T00:00:00",
+                        "approved_count": 1,
+                        "rejected_count": 0,
+                        "collision_count": 0,
+                        "correction_count": 1,
+                        "conflict_count": 0,
+                    },
+                },
+            },
+        })
+        _write_json(target / "transfers.json", {
+            "version": 4,
+            "transfers": {},
+            "batches": {},
+            "qualifications": {},
+        })
+        archive = LocalDataBackup(source).create(tmp_path / "backups")
+        service = LocalDataBackup(target)
+
+        preview = service.preview(archive)
+        restored = service.restore(archive)
+
+        assert preview.valid is True
+        assert restored.restored is True
+        state = json.loads((target / "transfers.json").read_text())
+        assert state["version"] == 5
+        assert state["qualifications"]["draft-approved"][
+            "approval_outcome"
+        ]["status"] == "approved"
+        retained = state["qualifications"]["draft-approved"][
+            "approval_outcome"
+        ]
+        assert retained["approved_count"] == 1
+        assert retained["correction_count"] == 1
+        assert "approved" not in retained
+
     @pytest.mark.parametrize("damage", ["corrupt", "unsupported-backup", "unsupported-data"])
     def test_rejects_corrupt_or_unsupported_archive(self, tmp_path, damage):
         source = tmp_path / "source"

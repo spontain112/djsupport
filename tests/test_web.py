@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from djsupport.report import PlaylistReport, SyncReport
+from djsupport.readiness import FirstTransferReadiness
 from djsupport.rekordbox import Track
 from djsupport.local_audition import LocalSourceAudition
 from djsupport.transfer import (
@@ -54,6 +55,110 @@ def test_web_outcome_exposes_aggregate_local_audio_counts():
     assert rendered["local_audio_observed"] == 2
     assert rendered["local_audio_unavailable"] == 1
     assert rendered["local_audio_reused"] == 1
+
+
+def test_first_transfer_web_route_is_a_thin_agent_contract_rendering():
+    transfer = MagicMock()
+    transfer.local_audio_capability.return_value = MagicMock(
+        available=False,
+    )
+    web = create_app(
+        rekordbox_transfer_factory=lambda request, authorized: transfer,
+        first_transfer_readiness=lambda path, authorized: FirstTransferReadiness(
+            True, True, True, True, path,
+        ),
+    )
+
+    response = TestClient(web).post("/rekordbox/first-transfer", json={
+        "xml_path": "/private/library.xml",
+        "playlist_reference": "Private/Selection",
+    })
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "contract_version": 2,
+        "phase": "first_rekordbox_transfer",
+        "status": "decision_required",
+        "next_action": "choose_local_audio_identity",
+        "required_input": {"kind": "boolean", "default": False},
+        "local_audio_identity": {
+            "available": False,
+            "scope": "selected_tracks_only",
+            "uploads": "none",
+            "file_changes": "none",
+            "first_run_spotify_search_reduction": False,
+            "future_reuse": "exact_approved_match_after_approval",
+            "approval_authority": "none",
+            "audition": "separate",
+        },
+    }
+    assert "Private/Selection" not in response.text
+
+
+def test_first_transfer_web_route_ignores_caller_asserted_readiness():
+    transfer = MagicMock()
+    web = create_app(
+        rekordbox_transfer_factory=lambda request, authorized: transfer,
+        first_transfer_readiness=lambda path, authorized: FirstTransferReadiness(
+            False, False, False, False, None,
+        ),
+    )
+
+    response = TestClient(web).post("/rekordbox/first-transfer", json={
+        "spotify_configured": True,
+        "spotify_authenticated": True,
+        "rekordbox_configured": True,
+        "rekordbox_available": True,
+        "playlist_reference": "Private/Selection",
+    })
+
+    assert response.json()["next_action"] == "configure_spotify"
+    transfer.assert_not_called()
+
+
+def test_first_transfer_web_route_forwards_only_explicit_authority():
+    transfer = MagicMock()
+    transfer.authorization_requirement.side_effect = (
+        lambda request, authorization, phase: Transfer.authorization_requirement(
+            request, authorization, phase=phase,
+        )
+    )
+    transfer.plan_batch.return_value = BatchPlan((PlaylistPreflight(
+        name="Private Selection",
+        reference="Private/Selection",
+        total_tracks=2,
+        approved_match_hits=1,
+        cache_hits=0,
+        expected_uncached_lookups=1,
+        selection_token="opaque",
+    ),), preview=True)
+    calls = []
+
+    def factory(request, authorized):
+        calls.append((request, authorized))
+        return transfer
+
+    web = create_app(
+        rekordbox_transfer_factory=factory,
+        first_transfer_readiness=lambda path, authorized: FirstTransferReadiness(
+            True, True, True, True, path,
+        ),
+    )
+    response = TestClient(web).post("/rekordbox/first-transfer", json={
+        "xml_path": "/private/library.xml",
+        "playlist_reference": "Private/Selection",
+        "local_audio_identity": False,
+        "authorize_private_source": True,
+    })
+
+    assert response.status_code == 200
+    assert response.json()["next_action"] == "preview"
+    assert calls[0][0].whole_library is False
+    assert calls[0][0].playlists == ["Private/Selection"]
+    assert calls[0][0].authorize_private_source is True
+    assert calls[0][0].authorize_spotify_write is False
+    assert calls[0][1] is False
+    assert "Private/Selection" not in response.text
 
 
 def _agent_web_transfer(plan, report=None):

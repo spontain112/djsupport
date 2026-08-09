@@ -7,9 +7,11 @@ from pathlib import Path
 from uuid import uuid4
 
 import click
+from spotipy.exceptions import SpotifyOauthError
 
 from dotenv import load_dotenv
 
+from djsupport.agent import FirstTransferAction
 from djsupport.config import ConfigManager, validate_rekordbox_xml
 from djsupport.rekordbox import parse_xml
 from djsupport.report import (
@@ -58,6 +60,182 @@ def capabilities(as_json: bool) -> None:
     else:
         click.echo("Local audio identity unavailable; install fpcalc to enable it.")
     click.echo("Local audition available for explicitly authorized Rekordbox audio.")
+
+
+def _first_transfer_readiness(
+    explicit_xml_path: str | None,
+) -> tuple[bool, bool, bool, bool, str | None]:
+    """Inspect only local setup state; never call Spotify or parse the XML."""
+    from djsupport.readiness import inspect_first_transfer_readiness
+
+    readiness = inspect_first_transfer_readiness(explicit_xml_path)
+    return (
+        readiness.spotify_configured,
+        readiness.spotify_authenticated,
+        readiness.rekordbox_configured,
+        readiness.rekordbox_available,
+        readiness.xml_path,
+    )
+
+
+def _first_transfer_contract(
+    *,
+    xml_path: str | None,
+    activate: bool,
+    spotify_access: bool,
+    local_audio_identity: bool | None,
+    cache_path: str,
+    state_path: str,
+):
+    """Build the public contract only as deeply as the current phase needs."""
+    from djsupport.agent import AgentTransferContract
+    from djsupport.cache import MatchCache
+    from djsupport.local_audio import ChromaprintLocalAudio
+    from djsupport.transfer import (
+        EphemeralMatchingKnowledge,
+        FilePublicationStorage,
+        FileTransferStorage,
+        MatchCacheKnowledge,
+        RekordboxPlaylistSource,
+        SpotifyMatcher,
+        Transfer,
+    )
+
+    local_audio = ChromaprintLocalAudio()
+    if not activate:
+        return AgentTransferContract(Transfer(
+            source=object(),
+            spotify=object(),
+            matching_knowledge=EphemeralMatchingKnowledge(),
+            publishing_guards=AccountPublishingGuards(),
+            local_audio=local_audio,
+        ))
+
+    if xml_path is None:
+        raise ValueError("Rekordbox XML is unavailable")
+    cache = MatchCache(cache_path)
+    cache.load()
+    publication_path = Path(state_path)
+    return AgentTransferContract(Transfer(
+        source=RekordboxPlaylistSource(
+            xml_path, include_locations=bool(local_audio_identity),
+        ),
+        spotify=(SpotifyMatcher(get_client()) if spotify_access else object()),
+        matching_knowledge=MatchCacheKnowledge(cache),
+        publishing_guards=AccountPublishingGuards(),
+        publication_storage=FilePublicationStorage(publication_path),
+        transfer_storage=FileTransferStorage(
+            publication_path.with_suffix(".transfers.json")
+        ),
+        local_audio=(local_audio if local_audio_identity else None),
+    ))
+
+
+@cli.command("first-transfer")
+@click.option("--xml-path", type=click.Path(), default=None)
+@click.option("--playlist", "playlist_reference", default=None)
+@click.option(
+    "--local-audio-identity/--no-local-audio-identity", default=None,
+)
+@click.option(
+    "--action",
+    type=click.Choice([action.value for action in FirstTransferAction]),
+    default=None,
+)
+@click.option("--transfer-id", default=None)
+@click.option("--draft-id", default=None)
+@click.option("--authorize-private-source", is_flag=True)
+@click.option("--authorize-spotify-write", is_flag=True)
+@click.option("--cache-path", default=DEFAULT_MATCHING_KNOWLEDGE_PATH)
+@click.option("--state-path", default=DEFAULT_PUBLICATION_MANIFEST_PATH)
+@click.option("--json", "as_json", is_flag=True)
+def first_transfer(
+    xml_path: str | None,
+    playlist_reference: str | None,
+    local_audio_identity: bool | None,
+    action: str | None,
+    transfer_id: str | None,
+    draft_id: str | None,
+    authorize_private_source: bool,
+    authorize_spotify_write: bool,
+    cache_path: str,
+    state_path: str,
+    as_json: bool,
+) -> None:
+    """Return the next safe step for one first Rekordbox Transfer."""
+    from djsupport.agent import FirstTransferGuideRequest
+    from djsupport.transfer import TransferAuthorization
+
+    readiness = _first_transfer_readiness(xml_path)
+    (
+        spotify_configured,
+        spotify_authenticated,
+        rekordbox_configured,
+        rekordbox_available,
+        selected_xml_path,
+    ) = readiness
+    if authorize_private_source:
+        from djsupport.readiness import inspect_first_transfer_readiness
+
+        authorized_readiness = inspect_first_transfer_readiness(
+            selected_xml_path, authorize_private_source=True,
+        )
+        rekordbox_available = authorized_readiness.rekordbox_available
+    activate = bool(
+        spotify_configured
+        and spotify_authenticated
+        and rekordbox_configured
+        and rekordbox_available
+        and playlist_reference is not None
+        and local_audio_identity is not None
+        and authorize_private_source
+    )
+    action_kind = FirstTransferAction(action) if action is not None else None
+    spotify_access = bool(
+        action_kind is not None and action_kind.needs_spotify_access
+    )
+    try:
+        contract = _first_transfer_contract(
+            xml_path=selected_xml_path,
+            activate=activate,
+            spotify_access=spotify_access,
+            local_audio_identity=local_audio_identity,
+            cache_path=cache_path,
+            state_path=state_path,
+        )
+        document = contract.first_rekordbox_transfer(
+            FirstTransferGuideRequest(
+                spotify_configured=spotify_configured,
+                spotify_authenticated=spotify_authenticated,
+                rekordbox_configured=rekordbox_configured,
+                rekordbox_available=rekordbox_available,
+                playlist_reference=playlist_reference,
+                local_audio_identity=local_audio_identity,
+                action=action_kind,
+                transfer_id=transfer_id,
+                draft_id=draft_id,
+            ),
+            TransferAuthorization(
+                private_source=authorize_private_source,
+                spotify_write=authorize_spotify_write,
+            ),
+        )
+    except SpotifyOauthError:
+        from djsupport.agent import error_document
+
+        document = error_document(
+            "first_rekordbox_transfer", "spotify_authentication_required",
+        )
+    except (OSError, PermissionError, ValueError):
+        from djsupport.agent import error_document
+
+        document = error_document(
+            "first_rekordbox_transfer", "transfer_failed",
+        )
+    if as_json:
+        click.echo(json.dumps(document, sort_keys=True))
+        return
+    click.echo(f"Next: {document.get('next_action') or 'complete'}")
 
 
 def _resolve_xml_path(explicit_xml_path: str | None) -> str:

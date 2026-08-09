@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import ipaddress
+from dataclasses import dataclass
+from enum import Enum
 from urllib.parse import urlsplit
 
 from djsupport.transfer import (
@@ -21,6 +23,43 @@ AGENT_CONTRACT_VERSION = 2
 
 
 AgentAuthorization = TransferAuthorization
+
+
+class FirstTransferAction(str, Enum):
+    PREVIEW = "preview"
+    QUALIFY = "qualify"
+    PUBLISH_AND_LINK = "publish_and_link"
+    APPLY = "apply"
+    APPROVE = "approve"
+    RESUME = "resume"
+    ABANDON = "abandon"
+
+    @property
+    def needs_spotify_access(self) -> bool:
+        return self != FirstTransferAction.ABANDON
+
+    @property
+    def publishes(self) -> bool:
+        return self in {
+            FirstTransferAction.PUBLISH_AND_LINK,
+            FirstTransferAction.APPLY,
+            FirstTransferAction.APPROVE,
+        }
+
+
+@dataclass(frozen=True)
+class FirstTransferGuideRequest:
+    """Explicit setup facts for the first Rekordbox Transfer guide."""
+
+    spotify_configured: bool = False
+    spotify_authenticated: bool = False
+    rekordbox_configured: bool = False
+    rekordbox_available: bool = False
+    playlist_reference: str | None = None
+    local_audio_identity: bool | None = None
+    action: FirstTransferAction | str | None = None
+    transfer_id: str | None = None
+    draft_id: str | None = None
 
 
 def _loopback_review_origin(value: str) -> str:
@@ -151,6 +190,313 @@ class AgentTransferContract:
             self._transfer.local_audio_capability(),
             self._transfer.local_audition_capability(),
         )
+
+    def first_rekordbox_transfer(
+        self,
+        request: FirstTransferGuideRequest,
+        authorization: AgentAuthorization,
+    ) -> dict:
+        """Return the next safe decision in a first Rekordbox journey."""
+        if not request.spotify_configured:
+            next_action = "configure_spotify"
+            required_input = {
+                "kind": "spotify_configuration",
+                "redirect_uri": "http://127.0.0.1:8888/callback",
+                "callback_policy": "add_without_replacing_existing",
+            }
+        elif not request.spotify_authenticated:
+            next_action = "authenticate_spotify"
+            required_input = {"kind": "spotify_authentication"}
+        elif not request.rekordbox_configured:
+            next_action = "select_rekordbox_xml"
+            required_input = {
+                "kind": "rekordbox_xml", "selection": "exact_file",
+            }
+        elif not request.rekordbox_available:
+            next_action = "repair_rekordbox_xml"
+            required_input = {
+                "kind": "rekordbox_xml", "selection": "exact_file",
+            }
+        elif request.playlist_reference is None:
+            next_action = "select_playlist"
+            required_input = {
+                "kind": "rekordbox_playlist",
+                "selection": "one_explicit_playlist",
+                "whole_library": False,
+            }
+        elif request.local_audio_identity is None:
+            capability = self._transfer.local_audio_capability()
+            return {
+                "contract_version": AGENT_CONTRACT_VERSION,
+                "phase": "first_rekordbox_transfer",
+                "status": "decision_required",
+                "next_action": "choose_local_audio_identity",
+                "required_input": {"kind": "boolean", "default": False},
+                "local_audio_identity": {
+                    "available": capability.available,
+                    "scope": "selected_tracks_only",
+                    "uploads": "none",
+                    "file_changes": "none",
+                    "first_run_spotify_search_reduction": False,
+                    "future_reuse": "exact_approved_match_after_approval",
+                    "approval_authority": "none",
+                    "audition": "separate",
+                },
+            }
+        elif (
+            request.local_audio_identity
+            and not self._transfer.local_audio_capability().available
+        ):
+            return {
+                "contract_version": AGENT_CONTRACT_VERSION,
+                "phase": "first_rekordbox_transfer",
+                "status": "decision_required",
+                "next_action": "continue_without_local_audio_identity",
+                "required_input": {"kind": "boolean", "value": False},
+                "reason": {"code": "local_audio_identity_unavailable"},
+            }
+        elif not authorization.private_source:
+            return {
+                "contract_version": AGENT_CONTRACT_VERSION,
+                "phase": "first_rekordbox_transfer",
+                "status": "authorization_required",
+                "next_action": "authorize_private_source",
+                "required_authorization": "private_source",
+            }
+        else:
+            try:
+                action = (
+                    FirstTransferAction(request.action)
+                    if request.action is not None else None
+                )
+            except ValueError:
+                return {
+                    "contract_version": AGENT_CONTRACT_VERSION,
+                    "phase": "first_rekordbox_transfer",
+                    "status": "error",
+                    "error": {"code": "unsupported_action"},
+                    "next_action": "review_request",
+                }
+            batch_request = BatchPlanRequest(
+                playlist_references=(request.playlist_reference,),
+                preview=True,
+                local_audio_identity=request.local_audio_identity,
+            )
+            if action == FirstTransferAction.RESUME:
+                if request.transfer_id is None:
+                    raise ValueError("Resume requires a Transfer identity")
+                outcome = self.execute_batch(
+                    batch_request, authorization,
+                    transfer_id=request.transfer_id,
+                )
+                return self._first_guide_step(outcome, default_action="qualify")
+            if action == FirstTransferAction.ABANDON:
+                if request.transfer_id is None:
+                    raise ValueError("Abandonment requires a Transfer identity")
+                self._transfer.abandon(request.transfer_id)
+                return {
+                    "contract_version": AGENT_CONTRACT_VERSION,
+                    "phase": "first_rekordbox_transfer",
+                    "status": "abandoned",
+                    "transfer_id": request.transfer_id,
+                    "next_action": None,
+                }
+            if action == FirstTransferAction.APPROVE:
+                if request.draft_id is None:
+                    raise ValueError(
+                        "Approval requires a Qualification Draft identity"
+                    )
+                progress = self.qualification_progress(
+                    request.draft_id, authorization,
+                )
+                progress_actions = progress.get("next_actions", [])
+                if (
+                    progress.get("status") != "approved"
+                    and (
+                        not progress_actions
+                        or progress_actions[0] != "approve"
+                    )
+                ):
+                    return self._first_guide_step(progress)
+                approved = self.approve_qualification(
+                    request.draft_id, authorization,
+                )
+                next_actions = approved.pop("next_actions", None) or []
+                if "counts" not in approved:
+                    approved["next_actions"] = next_actions
+                    return self._first_guide_step(approved)
+                counts = approved["counts"]
+                approved.update({
+                    "phase": "first_rekordbox_transfer",
+                    "effects": {
+                        "spotify_writes_during_approval": 0,
+                        "spotify_playlist_items": counts["approved"],
+                    },
+                    "retained": {
+                        "approved_matches": counts["approved"],
+                        "corrections": counts["corrections"],
+                        "rejected_matches": counts["rejected"],
+                    },
+                    "next_action": None,
+                })
+                return approved
+            if action == FirstTransferAction.APPLY:
+                if request.draft_id is None:
+                    raise ValueError(
+                        "Draft application requires a Qualification identity"
+                    )
+                progress = self.qualification_progress(
+                    request.draft_id, authorization,
+                )
+                progress_actions = progress.get("next_actions", [])
+                if (
+                    progress.get("status") == "approved"
+                    or not progress_actions
+                    or progress_actions[0] not in {"apply", "approve"}
+                ):
+                    return self._first_guide_step(progress)
+                if (
+                    progress_actions[0] == "approve"
+                    and not authorization.spotify_write
+                ):
+                    return self._first_guide_step(progress)
+                if not authorization.spotify_write:
+                    return {
+                        "contract_version": AGENT_CONTRACT_VERSION,
+                        "phase": "first_rekordbox_transfer",
+                        "status": "authorization_required",
+                        "draft_id": request.draft_id,
+                        "authority": "none",
+                        "next_action": "authorize_spotify_write",
+                        "required_authorization": "spotify_write",
+                    }
+                applied = self.apply_qualification(
+                    request.draft_id, authorization,
+                )
+                return self._first_guide_step(applied)
+            if action == FirstTransferAction.PUBLISH_AND_LINK:
+                if request.draft_id is None:
+                    raise ValueError(
+                        "Publication requires a Qualification Draft identity"
+                    )
+                progress = self.qualification_progress(
+                    request.draft_id, authorization,
+                )
+                progress_actions = progress.get("next_actions", [])
+                if not progress_actions or progress_actions[0] != "publish_and_link":
+                    return self._first_guide_step(progress)
+                if not authorization.spotify_write:
+                    return {
+                        "contract_version": AGENT_CONTRACT_VERSION,
+                        "phase": "first_rekordbox_transfer",
+                        "status": "authorization_required",
+                        "draft_id": request.draft_id,
+                        "authority": "none",
+                        "next_action": "authorize_spotify_write",
+                        "required_authorization": "spotify_write",
+                    }
+                publishing_request = BatchPlanRequest(
+                    playlist_references=(request.playlist_reference,),
+                    preview=False,
+                    local_audio_identity=request.local_audio_identity,
+                )
+                published = self.execute_batch(
+                    publishing_request, authorization,
+                )
+                if published.get("status") != "completed":
+                    return self._first_guide_step(published)
+                linked = self.link_qualification(
+                    request.draft_id, published["transfer_id"], authorization,
+                )
+                return self._first_guide_step(linked)
+            if request.draft_id is not None and action is None:
+                qualification = self.qualification_progress(
+                    request.draft_id, authorization,
+                )
+                next_actions = qualification.get("next_actions", [])
+                if not next_actions:
+                    return self._first_guide_step(qualification)
+                primary_action = next_actions[0]
+                if (
+                    primary_action in {"publish_and_link", "apply"}
+                    and not authorization.spotify_write
+                ):
+                    return {
+                        "contract_version": AGENT_CONTRACT_VERSION,
+                        "phase": "first_rekordbox_transfer",
+                        "status": "authorization_required",
+                        "draft_id": request.draft_id,
+                        "authority": "none",
+                        "next_action": "authorize_spotify_write",
+                        "required_authorization": "spotify_write",
+                    }
+                return self._first_guide_step(qualification)
+            if request.transfer_id is not None and action is None:
+                progress = self.progress(request.transfer_id, authorization)
+                return self._first_guide_step(progress)
+            if action == FirstTransferAction.QUALIFY:
+                if request.transfer_id is None:
+                    raise ValueError("Qualification requires a Transfer identity")
+                qualification = self.qualification_draft(
+                    QualificationRequest(
+                        transfer_id=request.transfer_id,
+                        playlist_reference=request.playlist_reference,
+                        include_all=True,
+                    ),
+                    authorization,
+                )
+                return self._first_guide_step(qualification)
+            if action == FirstTransferAction.PREVIEW:
+                outcome = self.execute_batch(batch_request, authorization)
+                return self._first_guide_step(
+                    outcome, default_action="qualify",
+                )
+            plan_document = self.plan_batch(batch_request, authorization)
+            plan_document.pop("next_actions", None)
+            plan_document.update({
+                "phase": "first_rekordbox_transfer",
+                "next_action": "preview",
+                "required_input": {
+                    "kind": "action_confirmation", "action": "preview",
+                },
+            })
+            return plan_document
+        return {
+            "contract_version": AGENT_CONTRACT_VERSION,
+            "phase": "first_rekordbox_transfer",
+            "status": "input_required",
+            "next_action": next_action,
+            "required_input": required_input,
+        }
+
+    @staticmethod
+    def _first_guide_step(
+        document: dict, *, default_action: str | None = None,
+    ) -> dict:
+        """Render one truthful primary action from an existing policy result."""
+        actions = document.pop("next_actions", None) or []
+        next_action = actions[0] if actions else default_action
+        document.update({
+            "phase": "first_rekordbox_transfer",
+            "next_action": next_action,
+        })
+        if next_action is None:
+            document.pop("required_input", None)
+        elif next_action == "review" and document.get("review_url"):
+            document["required_input"] = {
+                "kind": "local_qualification_review",
+                "review_url": document["review_url"],
+            }
+        elif next_action == "approve":
+            document["required_input"] = {
+                "kind": "authority_confirmation",
+                "authority": "playlist_approval",
+            }
+        else:
+            document["required_input"] = {
+                "kind": "action_confirmation", "action": next_action,
+            }
+        return document
 
     def plan_batch(
         self, request: BatchPlanRequest, authorization: AgentAuthorization,
@@ -571,10 +917,10 @@ class AgentTransferContract:
             "status": outcome.status.value.replace(" ", "_"),
             "draft_id": draft_id,
             "counts": {
-                "approved": len(outcome.approved),
-                "rejected": len(outcome.rejected),
-                "collisions": len(outcome.collisions),
-                "corrections": len(outcome.corrections),
+                "approved": outcome.approved_count,
+                "rejected": outcome.rejected_count,
+                "collisions": outcome.collision_count,
+                "corrections": outcome.correction_count,
             },
             "authority": (
                 "playlist_approval"

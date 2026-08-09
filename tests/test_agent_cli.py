@@ -1,10 +1,143 @@
 """Thin CLI mapping for the harness-neutral agent contract."""
 
 import json
+from unittest.mock import MagicMock
 
 from click.testing import CliRunner
 
 from djsupport.cli import cli
+from djsupport.readiness import inspect_first_transfer_readiness
+
+
+def test_first_transfer_readiness_does_not_open_or_validate_token_cache(
+    monkeypatch, tmp_path,
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SPOTIPY_CLIENT_ID", "synthetic-client")
+    monkeypatch.setenv("SPOTIPY_CLIENT_SECRET", "synthetic-secret")
+    monkeypatch.setenv(
+        "SPOTIPY_REDIRECT_URI", "http://127.0.0.1:8888/callback",
+    )
+    xml_path = tmp_path / "selected.xml"
+    xml_path.write_text("private content must remain unread")
+
+    readiness = inspect_first_transfer_readiness(str(xml_path))
+
+    assert readiness.spotify_configured is True
+    assert readiness.spotify_authenticated is False
+    assert readiness.rekordbox_available is True
+
+
+def test_first_transfer_readiness_only_checks_cache_presence(
+    monkeypatch, tmp_path,
+):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SPOTIPY_CLIENT_ID", "synthetic-client")
+    monkeypatch.setenv("SPOTIPY_CLIENT_SECRET", "synthetic-secret")
+    monkeypatch.setenv(
+        "SPOTIPY_REDIRECT_URI", "http://127.0.0.1:8888/callback",
+    )
+    (tmp_path / ".cache").write_text("not a token and never parsed")
+    xml_path = tmp_path / "selected.xml"
+    xml_path.write_text("private content must remain unread")
+
+    readiness = inspect_first_transfer_readiness(str(xml_path))
+
+    assert readiness.spotify_authenticated is True
+
+
+def test_first_transfer_json_renders_one_input_required_action(monkeypatch):
+    transfer = MagicMock()
+    monkeypatch.setattr(
+        "djsupport.cli._first_transfer_readiness",
+        lambda xml_path: (False, False, False, False, None),
+    )
+    monkeypatch.setattr(
+        "djsupport.cli._first_transfer_contract",
+        lambda **kwargs: __import__(
+            "djsupport.agent", fromlist=["AgentTransferContract"]
+        ).AgentTransferContract(transfer),
+    )
+
+    result = CliRunner().invoke(cli, ["first-transfer", "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output) == {
+        "contract_version": 2,
+        "phase": "first_rekordbox_transfer",
+        "status": "input_required",
+        "next_action": "configure_spotify",
+        "required_input": {
+            "kind": "spotify_configuration",
+            "redirect_uri": "http://127.0.0.1:8888/callback",
+            "callback_policy": "add_without_replacing_existing",
+        },
+    }
+    transfer.assert_not_called()
+
+
+def test_first_transfer_cli_maps_explicit_inputs_to_public_contract(monkeypatch):
+    contract = MagicMock()
+    contract.first_rekordbox_transfer.return_value = {
+        "contract_version": 2,
+        "phase": "first_rekordbox_transfer",
+        "status": "ready",
+        "next_action": "preview",
+        "required_input": {
+            "kind": "action_confirmation", "action": "preview",
+        },
+    }
+    monkeypatch.setattr(
+        "djsupport.cli._first_transfer_readiness",
+        lambda xml_path: (True, True, True, True, "/private/library.xml"),
+    )
+    monkeypatch.setattr(
+        "djsupport.cli._first_transfer_contract",
+        lambda **kwargs: contract,
+    )
+
+    result = CliRunner().invoke(cli, [
+        "first-transfer", "--playlist", "Private/Selection",
+        "--no-local-audio-identity", "--authorize-private-source", "--json",
+    ])
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.output)["next_action"] == "preview"
+    request, authorization = contract.first_rekordbox_transfer.call_args.args
+    assert request.playlist_reference == "Private/Selection"
+    assert request.local_audio_identity is False
+    assert request.spotify_configured is True
+    assert request.spotify_authenticated is True
+    assert authorization.private_source is True
+    assert authorization.spotify_write is False
+
+
+def test_first_transfer_json_never_prompts_and_input_required_is_success(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "djsupport.cli._first_transfer_readiness",
+        lambda xml_path: (True, True, True, True, "/private/library.xml"),
+    )
+    contract = MagicMock()
+    contract.first_rekordbox_transfer.return_value = {
+        "contract_version": 2,
+        "phase": "first_rekordbox_transfer",
+        "status": "decision_required",
+        "next_action": "choose_local_audio_identity",
+        "required_input": {"kind": "boolean", "default": False},
+    }
+    monkeypatch.setattr(
+        "djsupport.cli._first_transfer_contract", lambda **kwargs: contract,
+    )
+
+    result = CliRunner().invoke(cli, [
+        "first-transfer", "--playlist", "Private/Selection", "--json",
+    ], input="this must never be consumed\n")
+
+    assert result.exit_code == 0
+    assert "[y/N]" not in result.output
+    assert json.loads(result.output)["status"] == "decision_required"
 
 
 def test_capabilities_json_does_not_require_xml_or_spotify(monkeypatch):
