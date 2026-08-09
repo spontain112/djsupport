@@ -12,6 +12,30 @@ publication, and later playlist changes.
 | Beatport chart | **Snapshot** | Spotify, then Approval | Capturing a chart once; opt into a Mirror only when it should be maintained |
 | Beatport label | **Snapshot** | Spotify, then Approval | Capturing a label selection once; opt into a Mirror only when it should be maintained |
 
+### How it fits together
+
+Every client uses the same public Transfer policy. Source data enters only for
+an explicitly selected operation; retained knowledge and recovery state stay in
+private local storage; Spotify changes require separate authority.
+
+```mermaid
+flowchart LR
+    R["Rekordbox XML"] --> T
+    B["Beatport chart or label"] --> T
+    C["CLI"] --> T["Transfer<br/>policy authority"]
+    W["Local web interface"] --> T
+    A["Agent Client"] --> T
+    T --> L["Private local state"]
+    T --> S["Spotify"]
+    S --> P["Provisional Playlist"]
+    P --> H["Human review and Approval"]
+    H --> L
+```
+
+This view intentionally omits recovery states and internal adapters. See the
+[architecture documentation](docs/architecture.md) for the full module map,
+data model, guarded lifecycles, and storage ownership.
+
 Every Transfer can be Previewed before Spotify is changed. Published matches
 are reviewable in Spotify, and explicit Approval turns accepted matches into
 reusable local matching knowledge. DJ Support never infers Approval,
@@ -312,6 +336,7 @@ is `$XDG_DATA_HOME/djsupport` or `~/.local/share/djsupport`.
 
 ## Documentation
 
+- [Documentation map](docs/index.md)
 - [Domain language](CONTEXT.md)
 - [Upgrade guide](docs/upgrading.md)
 - [Backup and restore](docs/backup-and-restore.md)

@@ -53,6 +53,10 @@ high-level behavior; CLI, web, and agent clients render the same public policy
 instead of implementing separate matching, Approval, persistence, or Spotify
 publication rules.
 
+See [Architecture](docs/architecture.md) for the canonical module and adapter
+map, then use the [documentation map](docs/index.md) for the conceptual domain,
+lifecycle, and private-storage models.
+
 ## Engineering conventions
 
 - The CLI entry point is `djsupport.cli:cli`.

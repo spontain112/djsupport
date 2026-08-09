@@ -4,9 +4,21 @@ This context describes how curated music selections are transferred from DJ-orie
 
 ## Language
 
+**Spotify Account**:
+The stable Spotify profile identity that scopes durable Transfer execution, publication state, Mirrors, and Local Audio Identity reuse. It does not scope ordinary metadata-based Approved Matches or Corrections, which are installation-local matching knowledge. A login or token change does not transfer Spotify effects or account-scoped evidence to another Spotify Account.
+_Avoid_: Current login, OAuth account
+
 **Transfer**:
 A complete attempt to move selections from one source into Spotify, including source intake, track matching, playlist publication, retained matching knowledge, playlist state when applicable, and an outcome report. A Transfer publishes either a Mirror or a Snapshot.
 _Avoid_: Sync, import, job, matching run
+
+**Source Selection**:
+The explicitly chosen, ordered source content consumed by one Transfer, such as one Rekordbox playlist, Beatport chart, or Beatport label selection. Its reference and content participate in the identity of the bounded work.
+_Avoid_: Import source, inferred selection
+
+**Source Occurrence**:
+One ordered appearance of a source track within a Source Selection. Repeated appearances remain distinct Source Occurrences even when their metadata or recording identity is equal.
+_Avoid_: Deduplicated track, unique recording
 
 **Mirror**:
 An ongoing relationship in which a managed Spotify playlist is updated on later Transfers to match the successfully matched selections currently present in its source. Rekordbox selections are Mirrors by default.
@@ -19,6 +31,14 @@ _Avoid_: Import, unmanaged sync
 **Provisional Playlist**:
 A Spotify playlist published for review whose source-to-Spotify matches have not yet been approved. Removing a track from this playlist before approval rejects the corresponding proposed match.
 _Avoid_: Draft playlist, temporary playlist
+
+**Publication Manifest**:
+The durable, ordered record of the exact source-to-Spotify proposals and source facts needed to review one Provisional Playlist later. It records what was proposed but carries no matching authority.
+_Avoid_: Approval record, review CSV, playlist state
+
+**Publication Item**:
+One ordered Source Occurrence and its proposed Spotify representation or unresolved outcome inside a Publication Manifest.
+_Avoid_: Cache entry, Approved Match
 
 **Approved Match**:
 A source-to-Spotify match explicitly accepted after review of a Provisional Playlist. An Approved Match is authoritative matching knowledge and is reused across source types by later Transfers when the source-track identity is sufficiently specific.
@@ -57,7 +77,7 @@ The playlist-scoped act that compares a Provisional Playlist with its publicatio
 _Avoid_: Transfer approval, cache confirmation
 
 **Batch**:
-An explicitly selected, bounded set of source playlists processed by one Transfer. Processing every playlist in a Rekordbox library is an opt-in Batch rather than the default.
+An explicitly selected, bounded set of source playlists coordinated as one operation, with one durable Transfer per selected playlist. Processing every playlist in a Rekordbox library is an opt-in Batch rather than the default.
 _Avoid_: Whole library, run
 
 **Playlist Drift**:
@@ -85,7 +105,7 @@ A complete matching and reporting attempt for a Transfer that may retain matchin
 _Avoid_: Dry run, test run
 
 **Local Audio Identity**:
-Opt-in, local-only Chromaprint evidence calculated for audio referenced by an explicitly selected Rekordbox Batch. It can recover an existing account-scoped Approved Match by exact equality but can never create Approval or identify an unknown recording from a catalog.
+Opt-in, local-only Chromaprint evidence calculated for audio referenced by an explicitly selected Rekordbox Batch. Through an exact Spotify-Account-scoped association, it can recover an existing Approved Match but can never create Approval or identify an unknown recording from a catalog.
 _Avoid_: Automatic identification, fingerprint approval, library scan
 
 **Qualification Workspace**:
