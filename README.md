@@ -26,20 +26,45 @@ Corrections, or destructive playlist intent.
 
 ## Install
 
-Install the command-line application:
+### Stable — recommended
+
+Ordinary users should follow the
+[Latest final GitHub Release](https://github.com/spontain112/djsupport/releases/latest).
+The current Latest release is
+[`v0.5.0`](https://github.com/spontain112/djsupport/releases/tag/v0.5.0).
+A newer release marked **Pre-release** is not stable.
+
+Install the command-line application from that exact final tag:
 
 ```bash
-python3 -m pip install djsupport
+python3 -m pip install "djsupport @ https://github.com/spontain112/djsupport/archive/refs/tags/v0.5.0.zip"
 ```
 
 Include the optional local web application with:
 
 ```bash
-python3 -m pip install "djsupport[web]"
+python3 -m pip install "djsupport[web] @ https://github.com/spontain112/djsupport/archive/refs/tags/v0.5.0.zip"
 ```
 
-For development from a source checkout, see
-[`CONTRIBUTING.md`](CONTRIBUTING.md).
+### Preview/testing
+
+Preview builds are opt-in release candidates for testing, not updates to the
+stable channel. Install only an exact candidate tag or artifact from a GitHub
+Release explicitly marked **Pre-release**. For example, after `v0.6.0rc1`
+exists as a pre-release, its exact tag can be installed with:
+
+```bash
+python3 -m pip install "djsupport @ https://github.com/spontain112/djsupport/archive/refs/tags/v0.6.0rc1.zip"
+```
+
+Expect instability. Before testing, back up DJ Support's local application data
+with `djsupport backup` and keep the backup outside the test environment. Use
+copies of any Rekordbox library and audio collection involved; never test a
+candidate against their only copy. Do not install the moving `main` branch as a
+preview release.
+
+Source checkouts, including `main`, are development software. Contributors can
+follow [`CONTRIBUTING.md`](CONTRIBUTING.md) for development setup.
 
 ## Spotify setup
 
@@ -291,6 +316,7 @@ is `$XDG_DATA_HOME/djsupport` or `~/.local/share/djsupport`.
 - [Upgrade guide](docs/upgrading.md)
 - [Backup and restore](docs/backup-and-restore.md)
 - [Release notes](docs/release-notes-0.5.0.md)
+- [Maintainer release checklist](docs/releasing.md)
 - [Changelog](CHANGELOG.md)
 - [Contributing](CONTRIBUTING.md)
 
