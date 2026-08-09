@@ -69,9 +69,9 @@ def test_documentation_has_rendered_and_plain_text_architecture_views() -> None:
     assert lifecycles.count("```mermaid") >= 4
     assert "## Transition tables" in lifecycles
 
-    portrait = DOCS / "assets" / "djsupport-architecture-mobile.png"
-    assert "(assets/djsupport-architecture-mobile.png)" in architecture
-    assert portrait.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
+    portrait = DOCS / "assets" / "djsupport-architecture-mobile.svg"
+    assert "(assets/djsupport-architecture-mobile.svg)" in architecture
+    assert portrait.read_text(encoding="utf-8").startswith("<svg ")
 
 
 def test_storage_document_follows_executable_schema_versions() -> None:

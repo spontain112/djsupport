@@ -18,7 +18,7 @@ This mobile-friendly portrait summarizes the authority path. It is a reading
 aid derived from the canonical model documented on this page; the Mermaid
 diagrams below remain the editable architecture views.
 
-![DJ Support authority architecture: sources and clients enter Transfer, effects remain reviewable, and only human review creates playlist-scoped Approval](assets/djsupport-architecture-mobile.png)
+![DJ Support authority architecture: sources and clients enter Transfer, effects remain reviewable, and only human review creates playlist-scoped Approval](assets/djsupport-architecture-mobile.svg)
 
 ## System context
 

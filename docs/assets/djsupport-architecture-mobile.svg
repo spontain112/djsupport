@@ -1,0 +1,139 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="2040" viewBox="0 0 1080 2040" role="img" aria-labelledby="title description">
+  <title id="title">DJ Support authority architecture</title>
+  <desc id="description">Selected Rekordbox and Beatport sources and thin clients enter the Transfer policy authority. Transfer may retain private local state and create reviewable Spotify effects. Human review is required before playlist-scoped Approval creates approved knowledge or an approved playlist outcome.</desc>
+  <defs>
+    <style>
+      .display { font-family: "Bricolage Grotesque", Arial, sans-serif; fill: #0a0a0a; }
+      .body { font-family: Figtree, Arial, sans-serif; fill: #5a5a5a; }
+      .mono { font-family: "Azeret Mono", Menlo, monospace; fill: #0d5e38; letter-spacing: 1.2px; }
+      .h1 { font-size: 62px; font-weight: 800; letter-spacing: -1.8px; }
+      .h2 { font-size: 42px; font-weight: 800; letter-spacing: -1px; }
+      .h3 { font-size: 29px; font-weight: 700; }
+      .body-lg { font-size: 25px; }
+      .body-md { font-size: 22px; }
+      .body-sm { font-size: 19px; }
+      .label { font-size: 16px; font-weight: 600; }
+      .label-sm { font-size: 14px; font-weight: 600; }
+      .card-shadow { fill: #f0f0ed; }
+      .card { fill: #ffffff; stroke: #e8e8e6; stroke-width: 2; }
+      .surface-card { fill: #f7f7f5; stroke: #e8e8e6; stroke-width: 2; }
+      .connector { fill: none; stroke: #b7b7b2; stroke-width: 4; stroke-linejoin: round; }
+      .hot-connector { fill: none; stroke: #1a7a50; stroke-width: 5; }
+    </style>
+    <marker id="arrow-gray" markerWidth="22" markerHeight="22" refX="11" refY="11" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M 2 2 L 20 11 L 2 20 Z" fill="#b7b7b2"/>
+    </marker>
+    <marker id="arrow-emerald" markerWidth="22" markerHeight="22" refX="11" refY="11" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M 2 2 L 20 11 L 2 20 Z" fill="#1a7a50"/>
+    </marker>
+  </defs>
+
+  <rect width="1080" height="2040" fill="#ffffff"/>
+
+  <!-- Editorial header -->
+  <rect x="70" y="64" width="32" height="5" fill="#1a7a50"/>
+  <text x="70" y="110" class="mono label" fill="#6e6e6e">SYSTEM MAP  /  DJ SUPPORT</text>
+  <text x="70" y="193" class="display h1">How authority moves</text>
+  <text x="70" y="230" class="body body-lg">One policy seam. Human approval stays explicit.</text>
+
+  <!-- 01 Sources and clients -->
+  <text x="70" y="290" class="mono label">01  /  SOURCES AND CLIENTS</text>
+  <rect x="70" y="305" width="32" height="4" fill="#0d5e38"/>
+
+  <rect x="72" y="328" width="450" height="165" rx="8" class="card-shadow"/>
+  <rect x="70" y="325" width="450" height="165" rx="8" class="card"/>
+  <text x="104" y="386" class="display h3">Selected sources</text>
+  <text x="104" y="428" class="body body-md">Rekordbox XML</text>
+  <text x="104" y="463" class="body body-md">Beatport chart or label</text>
+  <text x="104" y="485" class="body body-sm" fill="#6e6e6e">Optional selected local audio</text>
+
+  <rect x="562" y="328" width="450" height="165" rx="8" class="card-shadow"/>
+  <rect x="560" y="325" width="450" height="165" rx="8" class="card"/>
+  <text x="594" y="386" class="display h3">Thin clients</text>
+  <text x="594" y="428" class="body body-md">CLI · Local web · Agent Client</text>
+  <text x="594" y="461" class="display" font-size="20" font-weight="600">Present facts. Collect decisions.</text>
+  <text x="594" y="485" class="body body-sm" fill="#6e6e6e">Policy remains in Transfer.</text>
+
+  <path d="M 295 490 V 530 H 470 V 555" class="connector" marker-end="url(#arrow-gray)"/>
+  <path d="M 785 490 V 530 H 610 V 555" class="connector" marker-end="url(#arrow-gray)"/>
+
+  <!-- 02 Policy authority -->
+  <text x="70" y="585" class="mono label">02  /  POLICY AUTHORITY</text>
+  <rect x="70" y="600" width="32" height="4" fill="#0d5e38"/>
+
+  <rect x="72" y="623" width="940" height="260" rx="8" class="card-shadow"/>
+  <rect x="70" y="620" width="940" height="260" rx="8" fill="#e6f4ed" stroke="#1a7a50" stroke-width="3"/>
+  <rect x="70" y="620" width="8" height="260" fill="#1a7a50"/>
+  <text x="112" y="696" class="display h2">TRANSFER</text>
+  <text x="112" y="731" class="body body-md" font-weight="600">The public interface every client uses</text>
+
+  <rect x="112" y="756" width="856" height="64" rx="4" fill="#ffffff" stroke="#e8e8e6" stroke-width="2"/>
+  <line x1="283.2" y1="768" x2="283.2" y2="808" stroke="#e8e8e6" stroke-width="2"/>
+  <line x1="454.4" y1="768" x2="454.4" y2="808" stroke="#e8e8e6" stroke-width="2"/>
+  <line x1="625.6" y1="768" x2="625.6" y2="808" stroke="#e8e8e6" stroke-width="2"/>
+  <line x1="796.8" y1="768" x2="796.8" y2="808" stroke="#e8e8e6" stroke-width="2"/>
+  <text x="197.6" y="794" class="mono" text-anchor="middle" font-size="15" font-weight="600" fill="#0a0a0a">PLAN</text>
+  <text x="368.8" y="794" class="mono" text-anchor="middle" font-size="15" font-weight="600" fill="#0a0a0a">PREVIEW</text>
+  <text x="540" y="794" class="mono" text-anchor="middle" font-size="15" font-weight="600" fill="#0a0a0a">MATCH</text>
+  <text x="711.2" y="794" class="mono" text-anchor="middle" font-size="15" font-weight="600" fill="#0a0a0a">PUBLISH</text>
+  <text x="882.4" y="794" class="mono" text-anchor="middle" font-size="15" font-weight="600" fill="#0a0a0a">RECOVER</text>
+  <text x="112" y="862" class="mono" font-size="15" font-weight="500">OWNS  Qualification · Approval · Mirror · Drift policy</text>
+
+  <path d="M 295 880 V 915" class="connector" marker-end="url(#arrow-gray)"/>
+  <path d="M 785 880 V 915" class="connector" marker-end="url(#arrow-gray)"/>
+
+  <!-- 03 Effects and durable state -->
+  <text x="70" y="960" class="mono label">03  /  EFFECTS AND DURABLE STATE</text>
+  <rect x="70" y="975" width="32" height="4" fill="#0d5e38"/>
+
+  <rect x="72" y="998" width="450" height="200" rx="8" class="card-shadow"/>
+  <rect x="70" y="995" width="450" height="200" rx="8" class="surface-card"/>
+  <text x="104" y="1057" class="display h3">Private local data</text>
+  <text x="104" y="1098" class="body body-md">Matching knowledge</text>
+  <text x="104" y="1133" class="body body-md">Transfer checkpoints</text>
+  <text x="104" y="1168" class="body" font-size="20">Drafts · manifests · Mirrors</text>
+  <text x="104" y="1184" class="mono label-sm" fill="#6e6e6e">Never repository content</text>
+
+  <rect x="562" y="998" width="450" height="200" rx="8" class="card-shadow"/>
+  <rect x="560" y="995" width="450" height="200" rx="8" class="surface-card"/>
+  <text x="594" y="1057" class="display h3">Spotify</text>
+  <text x="594" y="1098" class="body body-md">Search and playlist effects</text>
+  <text x="594" y="1133" class="body body-md">Provisional Playlist</text>
+  <text x="594" y="1168" class="body" font-size="20">Reviewable — not Approved</text>
+  <text x="594" y="1184" class="mono label-sm" fill="#6e6e6e">Write authority stays separate</text>
+
+  <path d="M 295 1195 V 1235 H 540" class="connector"/>
+  <path d="M 785 1195 V 1235 H 540" class="connector"/>
+  <path d="M 540 1235 V 1275" class="connector" marker-end="url(#arrow-gray)"/>
+
+  <!-- 04 Human authority -->
+  <rect x="0" y="1290" width="1080" height="245" fill="#f7f7f5"/>
+  <line x1="70" y1="1290" x2="1010" y2="1290" stroke="#e8e8e6" stroke-width="2"/>
+  <text x="70" y="1340" class="mono label">04  /  HUMAN AUTHORITY</text>
+  <rect x="70" y="1355" width="32" height="4" fill="#0d5e38"/>
+  <text x="70" y="1417" class="display" font-size="38" font-weight="800">Human review</text>
+  <text x="70" y="1460" class="mono" font-size="15" font-weight="600">REKORDBOX</text>
+  <text x="230" y="1460" class="display" font-size="22" font-weight="500">Qualification Workspace</text>
+  <text x="70" y="1505" class="mono" font-size="15" font-weight="600">BEATPORT</text>
+  <text x="230" y="1505" class="display" font-size="22" font-weight="500">Review directly in Spotify</text>
+
+  <path d="M 540 1535 V 1580" class="hot-connector" marker-end="url(#arrow-emerald)"/>
+
+  <!-- Explicit approval and outcomes -->
+  <rect x="192" y="1598" width="700" height="130" rx="8" class="card-shadow"/>
+  <rect x="190" y="1595" width="700" height="130" rx="8" class="card"/>
+  <rect x="224" y="1620" width="32" height="5" fill="#1a7a50"/>
+  <text x="540" y="1675" class="display" font-size="31" font-weight="800" text-anchor="middle">Playlist-scoped Approval</text>
+  <text x="540" y="1713" class="body" font-size="21" text-anchor="middle">The only matching-authority transition</text>
+
+  <path d="M 370 1725 V 1770" class="connector" marker-end="url(#arrow-gray)"/>
+  <path d="M 710 1725 V 1770" class="connector" marker-end="url(#arrow-gray)"/>
+  <text x="370" y="1835" class="display" font-size="26" font-weight="700" text-anchor="middle">Approved knowledge</text>
+  <text x="370" y="1870" class="body" font-size="18" text-anchor="middle">Matches · Corrections · Rejections</text>
+  <text x="710" y="1835" class="display" font-size="26" font-weight="700" text-anchor="middle">Playlist outcome</text>
+  <text x="710" y="1870" class="body" font-size="18" text-anchor="middle">Mirror or reviewed Snapshot</text>
+
+  <line x1="70" y1="1890" x2="1010" y2="1890" stroke="#e8e8e6" stroke-width="2"/>
+  <text x="70" y="1930" class="mono" font-size="15" font-weight="600" fill="#0a0a0a">PREVIEW ≠ WRITE   ·   QUALIFICATION ≠ APPROVAL</text>
+  <text x="70" y="1965" class="mono" font-size="15" font-weight="600">CONVERSATION ≠ AUTHORIZATION</text>
+</svg>
