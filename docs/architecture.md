@@ -12,6 +12,14 @@ This document is the canonical conceptual module and adapter map. The
 [private storage](storage.md) explains serialized local data. The
 [glossary](../CONTEXT.md) remains the source for canonical terms.
 
+## Authority overview
+
+This mobile-friendly portrait summarizes the authority path. It is a reading
+aid derived from the canonical model documented on this page; the Mermaid
+diagrams below remain the editable architecture views.
+
+![DJ Support authority architecture: sources and clients enter Transfer, effects remain reviewable, and only human review creates playlist-scoped Approval](assets/djsupport-architecture-mobile.png)
+
 ## System context
 
 ```mermaid
