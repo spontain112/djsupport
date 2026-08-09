@@ -128,6 +128,9 @@ temporary environment for CLI/import smoke tests. Live Spotify and Beatport
 checks are separate, explicitly authorized workflows and are never part of the
 offline release gate.
 
+Follow the canonical [maintainer release checklist](docs/releasing.md) for the
+separate validation, candidate, final-release, and return-to-development gates.
+
 When a persistent schema changes, keep its reader compatible with documented
 older versions or provide an explicit migration. Add a synthetic backup/restore
 test that covers the current schema and the supported upgrade boundary. Never

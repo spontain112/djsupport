@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Least-privilege GitHub Actions CI for pull requests and `main`, covering the
+  offline suite on Python 3.10 and 3.14 plus deterministic package validation.
+- A canonical maintainer checklist that keeps release preparation, CI, tags,
+  GitHub Releases, and package publication as separate gated operations.
 - Rekordbox-only, attention-led Qualification Workspace with durable,
   non-authoritative drafts; explicit draft application remains separate from
   playlist-scoped Approval.
@@ -33,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `main` now identifies as `0.6.0.dev0`, while installation guidance keeps
+  `v0.5.0` as the Latest stable release and limits previews to exact candidates.
 - Transfer checkpoints completed local observations and aggregate API/local
   evidence counts so resumed and repeated agent outcomes remain stable.
 - Rekordbox XML intake retains each selected track's private `Location` solely
