@@ -330,9 +330,7 @@ class AgentTransferContract:
                     "phase": "first_rekordbox_transfer",
                     "effects": {
                         "spotify_writes_during_approval": 0,
-                        "spotify_playlist_items": (
-                            counts["approved"] + counts["corrections"]
-                        ),
+                        "spotify_playlist_items": counts["approved"],
                     },
                     "retained": {
                         "approved_matches": counts["approved"],
@@ -919,10 +917,10 @@ class AgentTransferContract:
             "status": outcome.status.value.replace(" ", "_"),
             "draft_id": draft_id,
             "counts": {
-                "approved": len(outcome.approved),
-                "rejected": len(outcome.rejected),
-                "collisions": len(outcome.collisions),
-                "corrections": len(outcome.corrections),
+                "approved": outcome.approved_count,
+                "rejected": outcome.rejected_count,
+                "collisions": outcome.collision_count,
+                "corrections": outcome.correction_count,
             },
             "authority": (
                 "playlist_approval"

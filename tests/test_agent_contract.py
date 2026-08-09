@@ -259,7 +259,8 @@ def test_qualification_approval_is_explicit_without_spotify_write_authority():
     )
     transfer.approve_qualification.return_value = SimpleNamespace(
         status=SimpleNamespace(value="approved"),
-        approved=(), rejected=(), collisions=(), corrections=(),
+        approved_count=0, rejected_count=0, collision_count=0,
+        correction_count=0,
     )
     contract = AgentTransferContract(transfer)
     authorization = AgentAuthorization(private_source=True)
@@ -603,6 +604,7 @@ class FirstTransferSpotify(PreviewSpotify):
         self.playlists = {}
         self.heads = {}
         self.playlist_writes = 0
+        self.description_writes = 0
 
     def create_playlist(self, name, description):
         del name, description
@@ -643,6 +645,7 @@ class FirstTransferSpotify(PreviewSpotify):
 
     def set_playlist_description(self, playlist_id, description):
         del playlist_id, description
+        self.description_writes += 1
 
     def provisional_playlist_track_uris(self, playlist_id):
         return list(self.playlists[playlist_id])
@@ -1150,7 +1153,8 @@ def test_first_transfer_approval_is_a_final_explicit_authority_step(tmp_path):
     )
     contract.record_qualification(
         draft["draft_id"], draft["current_item"]["item_id"],
-        QualificationDecision.KEEP_PROPOSAL, private_source,
+        QualificationDecision.CORRECTION, private_source,
+        spotify_reference="spotify:track:replacement00000000000",
     )
     contract.first_rekordbox_transfer(
         FirstTransferGuideRequest(
@@ -1167,6 +1171,7 @@ def test_first_transfer_approval_is_a_final_explicit_authority_step(tmp_path):
     approval = FirstTransferGuideRequest(
         **base, action="approve", draft_id=draft["draft_id"],
     )
+    description_writes_before_approval = spotify.description_writes
 
     first = contract.first_rekordbox_transfer(approval, private_source)
     repeated = contract.first_rekordbox_transfer(approval, private_source)
@@ -1181,7 +1186,7 @@ def test_first_transfer_approval_is_a_final_explicit_authority_step(tmp_path):
             "approved": 1,
             "rejected": 0,
             "collisions": 0,
-            "corrections": 0,
+            "corrections": 1,
         },
         "authority": "playlist_approval",
         "effects": {
@@ -1190,12 +1195,13 @@ def test_first_transfer_approval_is_a_final_explicit_authority_step(tmp_path):
         },
         "retained": {
             "approved_matches": 1,
-            "corrections": 0,
+            "corrections": 1,
             "rejected_matches": 0,
         },
         "next_action": None,
     }
-    assert len(knowledge.approved) == 1
+    assert len(knowledge.corrected) == 1
+    assert spotify.description_writes == description_writes_before_approval
     writes = spotify.playlist_writes
 
     terminal_publish = contract.first_rekordbox_transfer(

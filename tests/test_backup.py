@@ -196,8 +196,12 @@ class TestRestorePreview:
                     "decisions": {},
                     "approval_outcome": {
                         "status": "approved",
-                        "approved": [],
-                        "rejected": [],
+                        "reviewed_at": "2026-08-10T00:00:00",
+                        "approved_count": 1,
+                        "rejected_count": 0,
+                        "collision_count": 0,
+                        "correction_count": 1,
+                        "conflict_count": 0,
                     },
                 },
             },
@@ -221,6 +225,12 @@ class TestRestorePreview:
         assert state["qualifications"]["draft-approved"][
             "approval_outcome"
         ]["status"] == "approved"
+        retained = state["qualifications"]["draft-approved"][
+            "approval_outcome"
+        ]
+        assert retained["approved_count"] == 1
+        assert retained["correction_count"] == 1
+        assert "approved" not in retained
 
     @pytest.mark.parametrize("damage", ["corrupt", "unsupported-backup", "unsupported-data"])
     def test_rejects_corrupt_or_unsupported_archive(self, tmp_path, damage):

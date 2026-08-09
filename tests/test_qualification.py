@@ -482,7 +482,7 @@ def test_duplicate_source_occurrences_remain_ordered_facts_through_approval(
     )
 
     assert outcome.status.value == "approved"
-    assert outcome.collisions == ()
+    assert outcome.collision_count == 0
     assert spotify.playlists[report.playlists[0].spotify_playlist_id] == [
         _proposal("repeat")["uri"], _proposal("repeat")["uri"],
     ]

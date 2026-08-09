@@ -827,6 +827,19 @@ class ApprovalOutcome:
 
 
 @dataclass(frozen=True)
+class QualificationApprovalOutcome:
+    """Privacy-minimal, replayable summary of Qualification Approval."""
+
+    reviewed_at: datetime
+    status: ApprovalStatus
+    approved_count: int
+    rejected_count: int
+    collision_count: int
+    correction_count: int
+    conflict_count: int
+
+
+@dataclass(frozen=True)
 class ApprovalConflict:
     source_artist: str
     source_title: str
@@ -3891,7 +3904,7 @@ class Transfer:
         self,
         draft_id: str,
         authorization: TransferAuthorization,
-    ) -> ApprovalOutcome:
+    ) -> QualificationApprovalOutcome:
         """Approve an applied draft as a distinct playlist-scoped operation."""
         required = self.private_source_authorization_requirement(authorization)
         if required:
@@ -3917,9 +3930,10 @@ class Transfer:
         draft.status = QualificationStatus.APPROVING
         draft.updated_at = datetime.now().isoformat()
         self._transfer_storage.save_qualification(draft_id, draft)
-        outcome = self._approve(
+        approval = self._approve(
             None, qualification_draft_id=draft_id,
         )
+        outcome = self._qualification_approval_outcome(approval)
         draft = self._transfer_storage.load_qualification(draft_id)
         if draft is None:
             raise ValueError(f"Unknown Qualification Draft: {draft_id}")
@@ -4243,36 +4257,34 @@ class Transfer:
         })
 
     @staticmethod
-    def _stored_approval(outcome: ApprovalOutcome) -> dict:
-        stored = asdict(outcome)
-        stored["reviewed_at"] = outcome.reviewed_at.isoformat()
-        stored["status"] = outcome.status.value
-        return stored
+    def _stored_approval(outcome: QualificationApprovalOutcome) -> dict:
+        return {
+            **asdict(outcome),
+            "reviewed_at": outcome.reviewed_at.isoformat(),
+            "status": outcome.status.value,
+        }
 
     @staticmethod
-    def _approval_from_stored(stored: dict) -> ApprovalOutcome:
-        return ApprovalOutcome(**{
+    def _approval_from_stored(stored: dict) -> QualificationApprovalOutcome:
+        return QualificationApprovalOutcome(**{
             **stored,
             "reviewed_at": datetime.fromisoformat(stored["reviewed_at"]),
             "status": ApprovalStatus(stored["status"]),
-            "approved": tuple(
-                PublicationItem(**item) for item in stored.get("approved", ())
-            ),
-            "rejected": tuple(
-                PublicationItem(**item) for item in stored.get("rejected", ())
-            ),
-            "collisions": tuple(
-                PublicationItem(**item)
-                for item in stored.get("collisions", ())
-            ),
-            "corrections": tuple(
-                PublicationItem(**item)
-                for item in stored.get("corrections", ())
-            ),
-            "conflicts": tuple(
-                ApprovalConflict(**item) for item in stored.get("conflicts", ())
-            ),
         })
+
+    @staticmethod
+    def _qualification_approval_outcome(
+        outcome: ApprovalOutcome,
+    ) -> QualificationApprovalOutcome:
+        return QualificationApprovalOutcome(
+            reviewed_at=outcome.reviewed_at,
+            status=outcome.status,
+            approved_count=len(outcome.approved),
+            rejected_count=len(outcome.rejected),
+            collision_count=len(outcome.collisions),
+            correction_count=len(outcome.corrections),
+            conflict_count=len(outcome.conflicts),
+        )
 
     @classmethod
     def _publication_digest(cls, manifest: PublicationManifest) -> str:
@@ -4892,15 +4904,6 @@ class Transfer:
                         spotify_playlist_name=manifest.spotify_playlist_name,
                         approved_at=outcome.reviewed_at,
                     ))
-                if (
-                    outcome.status == ApprovalStatus.APPROVED
-                    and hasattr(self._spotify, "set_playlist_description")
-                ):
-                    self._retry_policy.run(
-                        lambda: self._spotify.set_playlist_description(
-                            playlist_id, self._approved_description(manifest),
-                        )
-                    )
             self._publication_storage.retain_approval(outcome)
             if (
                 outcome.status == ApprovalStatus.ABANDONED
@@ -4920,19 +4923,6 @@ class Transfer:
                         qualification_draft.transfer_id
                     )
             return outcome
-
-    @staticmethod
-    def _approved_description(manifest: PublicationManifest) -> str:
-        relationship = (
-            "managed Mirror relationship" if manifest.mode == TransferMode.MIRROR
-            else "approved Snapshot provenance"
-        )
-        chart = manifest.chart_title or manifest.source_label
-        curator = f" by {manifest.curator}" if manifest.curator else ""
-        return (
-            f"{chart}{curator}; {relationship}. Source: "
-            f"{manifest.source_reference}"
-        )
 
     def _read_corrections(
         self, corrections: str | Path | None, manifest: PublicationManifest,

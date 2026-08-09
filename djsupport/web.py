@@ -1032,10 +1032,10 @@ def create_app(
                 if outcome.status.value == "approved" else "none"
             ),
             "counts": {
-                "approved": len(outcome.approved),
-                "rejected": len(outcome.rejected),
-                "collisions": len(outcome.collisions),
-                "corrections": len(outcome.corrections),
+                "approved": outcome.approved_count,
+                "rejected": outcome.rejected_count,
+                "collisions": outcome.collision_count,
+                "corrections": outcome.correction_count,
             },
             "next_actions": (
                 ["review"] if outcome.status.value == "needs review" else []

@@ -73,3 +73,6 @@ Before applying matching authority, Transfer durably marks a Qualification
 Approval as in progress. If the process stops before its aggregate outcome is
 retained, later invocations require review instead of repeating uncertain
 authority writes. A completed outcome is retained and replayed idempotently.
+Approval itself is authority-only and does not mutate Spotify; playlist
+publication and Qualification application remain separately authorized Spotify
+write phases.

@@ -127,7 +127,9 @@ The journey always starts with Preview and never selects the whole library.
 Preview can retain private matching knowledge and a resumable checkpoint, but
 cannot create or update a Spotify playlist. After review, applying the
 Qualification Draft requires explicit Spotify-write authorization; Approval is
-a later decision and is the only step that makes matches authoritative.
+a later decision and is the only step that makes matches authoritative. That
+Approval records local authority only; it does not perform another Spotify
+mutation.
 
 When prompted for the Rekordbox source, export your collection from Rekordbox
 with **File → Export Collection in xml format**, then save its location:
