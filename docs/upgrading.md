@@ -6,6 +6,29 @@ Create a local-data backup before an upgrade that changes retained schemas:
 djsupport backup
 ```
 
+## Move legacy Rekordbox configuration
+
+DJ Support now stores the saved Rekordbox XML reference in private platform
+application data as `config.json`. From the directory containing an older
+`.djsupport_config.json`, preview the exact migration candidate:
+
+```bash
+djsupport library migrate-config
+```
+
+Apply only after reviewing the status:
+
+```bash
+djsupport library migrate-config --apply
+```
+
+The command checks only the current directory, never prints the saved XML path,
+and leaves the legacy file unchanged. If both files exist and differ, migration
+stops; use `djsupport library set` to choose the intended XML explicitly.
+`config.json` is included in later `djsupport backup` archives, and a differing
+configuration during restore requires an explicit `current` or `archive`
+choice.
+
 ## To 0.5.0
 
 Spotify authorization now includes `playlist-read-private` so DJ Support can

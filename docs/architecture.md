@@ -144,6 +144,7 @@ rendering.
 | Candidate matching and knowledge | [`matcher.py`](../djsupport/matcher.py) and [`cache.py`](../djsupport/cache.py) |
 | Local Audio Identity and Local Audition | [`local_audio.py`](../djsupport/local_audio.py) and [`local_audition.py`](../djsupport/local_audition.py) |
 | Transfer and file-backed persistence adapters | [`transfer.py`](../djsupport/transfer.py) |
+| Private application-data paths, configuration, backup, and migration | [`paths.py`](../djsupport/paths.py), [`config.py`](../djsupport/config.py), [`backup.py`](../djsupport/backup.py), and [`migration.py`](../djsupport/migration.py) |
 
 ### Plain-text module map
 

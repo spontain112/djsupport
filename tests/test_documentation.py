@@ -5,7 +5,7 @@ from pathlib import Path
 
 from djsupport.backup import BACKUP_VERSION, SUPPORTED_SCHEMAS
 from djsupport.cache import CACHE_VERSION
-from djsupport.config import CONFIG_VERSION, DEFAULT_CONFIG_PATH
+from djsupport.config import CONFIG_FILENAME, CONFIG_VERSION
 from djsupport.transfer import (
     PUBLICATION_MANIFEST_VERSION,
     TRANSFER_STATE_VERSION,
@@ -81,7 +81,7 @@ def test_storage_document_follows_executable_schema_versions() -> None:
     ).name
 
     expected_lines = {
-        f"| Configuration | `{DEFAULT_CONFIG_PATH}` | `{CONFIG_VERSION}` |",
+        f"| Configuration | `{CONFIG_FILENAME}` | `{CONFIG_VERSION}` |",
         f"| Matching knowledge | `matching-knowledge.json` | `{CACHE_VERSION}` |",
         (
             "| Publication state | `publication-manifests.json` | "

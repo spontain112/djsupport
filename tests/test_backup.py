@@ -30,6 +30,11 @@ class TestBackup:
         _write_json(app_data / "playlist-state.json", {
             "version": 2, "entries": {"playlist": {"spotify_id": "playlist-1"}},
         })
+        _write_json(app_data / "config.json", {
+            "version": 1,
+            "rekordbox_xml_path": "/synthetic/library.xml",
+            "last_set_at": "2026-08-09T10:00:00",
+        })
         (app_data / "reports").mkdir()
         (app_data / "reports" / "transfer-1.md").write_text("# Transfer report")
 
@@ -43,7 +48,7 @@ class TestBackup:
             assert set(bundle.namelist()) == {
                 "backup-manifest.json", "matching-knowledge.json",
                 "transfers.json", "publication-manifests.json",
-                "playlist-state.json", "reports/transfer-1.md",
+                "playlist-state.json", "config.json", "reports/transfer-1.md",
             }
 
     def test_excludes_credentials_tokens_secrets_and_unrelated_files(self, tmp_path):
@@ -194,6 +199,42 @@ class TestRestorePreview:
 
 
 class TestRestore:
+    def test_different_configuration_requires_explicit_restore_resolution(
+        self, tmp_path,
+    ):
+        source = tmp_path / "source"
+        target = tmp_path / "target"
+        _write_json(source / "config.json", {
+            "version": 1,
+            "rekordbox_xml_path": "/synthetic/archive.xml",
+            "last_set_at": "2026-08-09T11:00:00",
+        })
+        current = {
+            "version": 1,
+            "rekordbox_xml_path": "/synthetic/current.xml",
+            "last_set_at": "2026-08-09T10:00:00",
+        }
+        _write_json(target / "config.json", current)
+        archive = LocalDataBackup(source).create(tmp_path / "backups")
+        service = LocalDataBackup(target)
+
+        preview = service.preview(archive)
+        result = service.restore(archive)
+
+        assert preview.conflicts[0].kind == "configuration"
+        assert preview.conflicts[0].path == "config.json"
+        assert result.restored is False
+        assert json.loads((target / "config.json").read_text()) == current
+
+        resolved = service.restore(archive, resolutions={
+            preview.conflicts[0].conflict_id: "archive",
+        })
+
+        assert resolved.restored is True
+        assert json.loads((target / "config.json").read_text())[
+            "rekordbox_xml_path"
+        ] == "/synthetic/archive.xml"
+
     def test_merges_non_conflicting_data_and_preserves_existing_knowledge(self, tmp_path):
         source = tmp_path / "source"
         target = tmp_path / "target"

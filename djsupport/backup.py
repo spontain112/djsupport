@@ -14,9 +14,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+from djsupport.paths import default_app_data_path
+
 
 BACKUP_VERSION = 1
 SUPPORTED_SCHEMAS = {
+    "config.json": (1,),
     "matching-knowledge.json": (1, 2, 3),
     "transfers.json": (1, 2, 3, 4),
     "publication-manifests.transfers.json": (1, 2, 3, 4),
@@ -254,7 +257,19 @@ class LocalDataBackup:
 
     def _merge_json(self, path, current, incoming, changes, conflicts, resolutions):
         combined = json.loads(json.dumps(current))
-        if path == "matching-knowledge.json":
+        if path == "config.json":
+            if current != incoming:
+                holder = {"configuration": combined}
+                self._resolve_conflict(
+                    holder, "configuration", incoming, "configuration", path,
+                    conflicts, resolutions,
+                )
+                combined = holder["configuration"]
+                if resolutions.get(
+                    "configuration:config.json:configuration"
+                ) == "archive":
+                    changes.append("replace configuration")
+        elif path == "matching-knowledge.json":
             combined["version"] = max(
                 current.get("version", 1), incoming.get("version", 1),
             )
@@ -459,10 +474,3 @@ class LocalDataBackup:
                     else:
                         target.unlink(missing_ok=True)
                 raise
-
-
-def default_app_data_path() -> Path:
-    """Return the ADR-0001 application-data directory."""
-    from djsupport.transfer import default_matching_knowledge_path
-
-    return default_matching_knowledge_path().parent

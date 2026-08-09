@@ -1,9 +1,9 @@
 # Backup and restore
 
 `djsupport backup` creates a versioned archive in private application storage.
-It includes matching knowledge, Transfer and publication state, migration
-records, and privacy-screened reports. Credentials and unrelated files are not
-included.
+It includes Rekordbox path configuration, matching knowledge, Transfer and
+publication state, migration records, and privacy-screened reports. Credentials
+and unrelated files are not included.
 
 Matching-knowledge schema 3 includes private local-audio observations,
 account-scoped Approved Match associations, and retained Spotify review facts.
@@ -13,7 +13,8 @@ and private Qualification Drafts.
 Both are backed up and restored as private application data. Audition handles,
 audio, paths, filenames, and fingerprints are never part of a Qualification
 Draft. A differing copy of the same draft requires an explicit restore choice;
-neither draft silently wins. Conflicting local-audio authority requires
+neither draft silently wins. A differing Rekordbox configuration also requires
+an explicit `current` or `archive` restore choice. Conflicting local-audio authority requires
 an explicit restore choice identified by a privacy-safe hashed label; reports
 and archive manifests do not print fingerprints or source paths.
 
