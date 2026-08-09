@@ -56,8 +56,15 @@ class ConfigManager:
             data = json.loads(path.read_text())
         except (json.JSONDecodeError, OSError):
             return None
+        if not isinstance(data, dict):
+            return None
         if data.get("version") != CONFIG_VERSION:
             return None
+        for field in ("rekordbox_xml_path", "last_set_at"):
+            if data.get(field) is not None and not isinstance(
+                data.get(field), str
+            ):
+                return None
         return AppConfig(
             rekordbox_xml_path=data.get("rekordbox_xml_path"),
             last_set_at=data.get("last_set_at"),

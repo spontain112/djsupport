@@ -7,16 +7,26 @@ import sys
 from pathlib import Path
 
 
+def _absolute_environment_path(name: str, fallback: Path) -> Path:
+    """Return an absolute configured root, or a known private fallback."""
+    value = os.environ.get(name)
+    if value:
+        candidate = Path(value)
+        if candidate.is_absolute():
+            return candidate
+    return fallback
+
+
 def default_app_data_path() -> Path:
     """Return the private, user-local application-data directory."""
     if sys.platform == "darwin":
         root = Path.home() / "Library" / "Application Support"
-    elif os.name == "nt":
-        root = Path(
-            os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")
+    elif sys.platform == "win32":
+        root = _absolute_environment_path(
+            "LOCALAPPDATA", Path.home() / "AppData" / "Local",
         )
     else:
-        root = Path(
-            os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")
+        root = _absolute_environment_path(
+            "XDG_DATA_HOME", Path.home() / ".local" / "share",
         )
     return root / "djsupport"

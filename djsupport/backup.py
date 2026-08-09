@@ -14,12 +14,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+from djsupport.config import CONFIG_FILENAME, CONFIG_VERSION
 from djsupport.paths import default_app_data_path
 
 
 BACKUP_VERSION = 1
 SUPPORTED_SCHEMAS = {
-    "config.json": (1,),
+    CONFIG_FILENAME: (CONFIG_VERSION,),
     "matching-knowledge.json": (1, 2, 3),
     "transfers.json": (1, 2, 3, 4),
     "publication-manifests.transfers.json": (1, 2, 3, 4),
@@ -257,7 +258,7 @@ class LocalDataBackup:
 
     def _merge_json(self, path, current, incoming, changes, conflicts, resolutions):
         combined = json.loads(json.dumps(current))
-        if path == "config.json":
+        if path == CONFIG_FILENAME:
             if current != incoming:
                 holder = {"configuration": combined}
                 self._resolve_conflict(
@@ -266,7 +267,7 @@ class LocalDataBackup:
                 )
                 combined = holder["configuration"]
                 if resolutions.get(
-                    "configuration:config.json:configuration"
+                    f"configuration:{CONFIG_FILENAME}:configuration"
                 ) == "archive":
                     changes.append("replace configuration")
         elif path == "matching-knowledge.json":

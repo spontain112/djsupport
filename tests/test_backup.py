@@ -6,7 +6,8 @@ from datetime import datetime
 
 import pytest
 
-from djsupport.backup import LocalDataBackup
+from djsupport.backup import LocalDataBackup, SUPPORTED_SCHEMAS
+from djsupport.config import CONFIG_FILENAME, CONFIG_VERSION
 
 
 def _write_json(path, value):
@@ -15,6 +16,9 @@ def _write_json(path, value):
 
 
 class TestBackup:
+    def test_backup_uses_the_canonical_configuration_schema(self):
+        assert SUPPORTED_SCHEMAS[CONFIG_FILENAME] == (CONFIG_VERSION,)
+
     def test_creates_one_timestamped_archive_with_all_local_data(self, tmp_path):
         app_data = tmp_path / "app-data"
         _write_json(app_data / "matching-knowledge.json", {

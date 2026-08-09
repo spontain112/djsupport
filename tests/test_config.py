@@ -9,6 +9,7 @@ from click.testing import CliRunner
 from djsupport.backup import default_app_data_path
 from djsupport.cli import cli
 from djsupport.config import ConfigManager, validate_rekordbox_xml, CONFIG_VERSION
+from djsupport import paths
 
 
 @pytest.fixture
@@ -19,6 +20,26 @@ def cfg(tmp_path):
 class TestConfigManager:
     def test_default_path_is_private_platform_application_data(self):
         assert ConfigManager().path == default_app_data_path() / "config.json"
+
+    @pytest.mark.parametrize(
+        ("platform", "environment", "value", "fallback"),
+        (
+            ("linux", "XDG_DATA_HOME", "", Path(".local/share")),
+            ("linux", "XDG_DATA_HOME", "relative-data", Path(".local/share")),
+            ("win32", "LOCALAPPDATA", "", Path("AppData/Local")),
+            ("win32", "LOCALAPPDATA", "relative-data", Path("AppData/Local")),
+        ),
+    )
+    def test_empty_or_relative_platform_data_root_uses_absolute_fallback(
+        self, monkeypatch, platform, environment, value, fallback,
+    ):
+        monkeypatch.setattr(paths.sys, "platform", platform)
+        monkeypatch.setenv(environment, value)
+
+        result = paths.default_app_data_path()
+
+        assert result == Path.home() / fallback / "djsupport"
+        assert result.is_absolute()
 
     def test_default_xml_path_is_none(self, cfg):
         assert cfg.get_rekordbox_xml_path() is None
@@ -166,6 +187,29 @@ class TestConfigManager:
         assert result.applied is False
         assert not canonical.exists()
 
+    @pytest.mark.parametrize(
+        "legacy_data",
+        (
+            [],
+            {"version": CONFIG_VERSION, "rekordbox_xml_path": 42},
+            {"version": CONFIG_VERSION, "last_set_at": ["not", "text"]},
+        ),
+    )
+    def test_legacy_migration_rejects_structurally_invalid_configuration(
+        self, tmp_path, monkeypatch, legacy_data,
+    ):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / ".djsupport_config.json").write_text(
+            json.dumps(legacy_data)
+        )
+        canonical = tmp_path / "app-data" / "config.json"
+
+        result = ConfigManager(path=canonical).migrate_legacy(apply=True)
+
+        assert result.status == "invalid"
+        assert result.applied is False
+        assert not canonical.exists()
+
     def test_legacy_migration_never_chooses_between_different_configs(
         self, tmp_path, monkeypatch,
     ):
@@ -192,6 +236,25 @@ class TestConfigManager:
 
 
 class TestConfigMigrationCli:
+    def test_structurally_invalid_legacy_config_returns_safe_cli_error(
+        self, tmp_path, monkeypatch,
+    ):
+        app_data = tmp_path / "app-data"
+        monkeypatch.setattr(
+            "djsupport.config.default_app_data_path", lambda: app_data,
+        )
+        runner = CliRunner()
+        with runner.isolated_filesystem(temp_dir=tmp_path):
+            Path(".djsupport_config.json").write_text("[]")
+
+            result = runner.invoke(
+                cli, ["library", "migrate-config", "--apply"],
+            )
+
+        assert result.exit_code == 1
+        assert "invalid and was not migrated" in result.output
+        assert not (app_data / "config.json").exists()
+
     def test_preview_is_path_private_and_explains_explicit_apply(
         self, tmp_path, monkeypatch,
     ):
