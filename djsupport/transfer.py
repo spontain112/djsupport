@@ -38,6 +38,7 @@ from djsupport.local_audition import LocalAuditionResult
 from djsupport.matcher import match_track_with_alternatives
 from djsupport.paths import default_app_data_path
 from djsupport.rekordbox import Track
+from djsupport.source_facts import SourceOccurrence
 from djsupport.report import (
     AlternativeCandidate,
     MatchCollision,
@@ -755,9 +756,8 @@ class PublicationItem:
     source_name: str
     source_artist: str
     source_title: str
-    occurrence_id: str = ""
+    source_occurrence: SourceOccurrence | dict | None = None
     source_index: int = 0
-    source_position: int = 0
     source_release: str = ""
     source_label: str = ""
     source_version: str = ""
@@ -777,10 +777,36 @@ class PublicationItem:
     availability_checked_at: str | None = None
     availability_source: str | None = None
     qualification_outcome: str | None = None
-    source_facts: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "score_reasons", tuple(self.score_reasons))
+        if isinstance(self.source_occurrence, dict):
+            object.__setattr__(
+                self,
+                "source_occurrence",
+                SourceOccurrence.from_storage(self.source_occurrence),
+            )
+
+    @property
+    def occurrence_id(self) -> str:
+        return (
+            self.source_occurrence.occurrence_id
+            if isinstance(self.source_occurrence, SourceOccurrence) else ""
+        )
+
+    @property
+    def source_position(self) -> int:
+        return (
+            self.source_occurrence.position
+            if isinstance(self.source_occurrence, SourceOccurrence) else 0
+        )
+
+    @property
+    def source_facts(self) -> dict:
+        occurrence = self.source_occurrence
+        if not isinstance(occurrence, SourceOccurrence) or occurrence.facts is None:
+            return {}
+        return occurrence.facts.to_review_facts()
 
 
 @dataclass(frozen=True)
@@ -1441,15 +1467,21 @@ class BeatportExportSource:
             raise BeatportExportError("Could not read the selected Beatport export") from exc
         self._digest = digest
         self.selection_reference = f"beatport-export-v2:{digest}"
-
-    def consume(self, reference: str) -> SourceSelection:
         from djsupport.beatport_export import read_beatport_export
 
-        if reference != self.selection_reference:
-            raise SourceNotFound("Beatport export selection does not match")
-        parsed = read_beatport_export(
+        self._parsed = read_beatport_export(
             self._path, expected_sha256=self._digest,
         )
+
+    def validate(self, reference: str) -> None:
+        """Validate the exact selected bytes before any live-service access."""
+        if reference != self.selection_reference:
+            raise SourceNotFound("Beatport export selection does not match")
+
+    def consume(self, reference: str) -> SourceSelection:
+        if reference != self.selection_reference:
+            raise SourceNotFound("Beatport export selection does not match")
+        parsed = self._parsed
         return SourceSelection(
             name=parsed.name,
             reference=parsed.reference,
@@ -2281,9 +2313,10 @@ class Transfer:
             "date_added": track.date_added,
             "duration": track.duration,
             "version": track.version,
-            "occurrence_id": track.occurrence_id,
-            "source_position": track.source_position,
-            "source_facts": track.source_facts,
+            "source_occurrence": (
+                asdict(track.source_occurrence)
+                if track.source_occurrence is not None else None
+            ),
         }
         if include_location:
             stored["location"] = track.location
@@ -3209,6 +3242,7 @@ class Transfer:
             "date_added": "",
             "duration": 0,
             "version": "",
+            "source_occurrence": None,
         }
         private_safe = {
             "reference": selection.get("reference"),
@@ -5098,6 +5132,9 @@ class Transfer:
 
     def execute(self, request: TransferRequest) -> SyncReport:
         """Execute at most one publishing Transfer per Spotify account."""
+        source_validator = getattr(self._source, "validate", None)
+        if source_validator is not None:
+            source_validator(request.source)
         if request.preview:
             if request.mirror_disposition is not None:
                 raise ValueError("Mirror dispositions are not available in Preview")
@@ -5477,9 +5514,10 @@ class Transfer:
                             source_name=track.display,
                             source_artist=track.artist,
                             source_title=track.name,
-                            occurrence_id=occurrence_id,
+                            source_occurrence=self._review_source_occurrence(
+                                track, occurrence_id, index + 1,
+                            ),
                             source_index=index,
-                            source_position=track.source_position or index + 1,
                             source_release=track.album,
                             source_label=track.label,
                             source_version=track.version,
@@ -5496,7 +5534,6 @@ class Transfer:
                             source_duration=track.duration,
                             authoritative=True,
                             local_evidence_id=local_evidence_id,
-                            source_facts=self._review_source_facts(track),
                             **self._availability_facts(
                                 result, source="spotify_track_lookup",
                             ),
@@ -5534,15 +5571,15 @@ class Transfer:
                             source_name=track.display,
                             source_artist=track.artist,
                             source_title=track.name,
-                            occurrence_id=occurrence_id,
+                            source_occurrence=self._review_source_occurrence(
+                                track, occurrence_id, index + 1,
+                            ),
                             source_index=index,
-                            source_position=track.source_position or index + 1,
                             source_release=track.album,
                             source_label=track.label,
                             source_version=track.version,
                             source_duration=track.duration,
                             local_evidence_id=local_evidence_id,
-                            source_facts=self._review_source_facts(track),
                         ))
                     candidates = tuple(
                         AlternativeCandidate(
@@ -5585,9 +5622,10 @@ class Transfer:
                             source_name=track.display,
                             source_artist=track.artist,
                             source_title=track.name,
-                            occurrence_id=occurrence_id,
+                            source_occurrence=self._review_source_occurrence(
+                                track, occurrence_id, index + 1,
+                            ),
                             source_index=index,
-                            source_position=track.source_position or index + 1,
                             source_release=track.album,
                             source_label=track.label,
                             source_version=track.version,
@@ -5604,7 +5642,6 @@ class Transfer:
                             source_duration=track.duration,
                             authoritative=bool(result.get("authoritative")),
                             local_evidence_id=local_evidence_id,
-                            source_facts=self._review_source_facts(track),
                             **self._availability_facts(
                                 result, source="spotify_or_retained_result",
                             ),
@@ -6084,8 +6121,7 @@ class Transfer:
             ReviewTrack(
                 source_track_id=item.source_track_id,
                 source_name=item.source_name,
-                occurrence_id=item.occurrence_id,
-                source_position=item.source_position,
+                source_occurrence=item.source_occurrence,
                 source_artist=item.source_artist,
                 source_title=item.source_title,
                 source_release=item.source_release,
@@ -6103,7 +6139,6 @@ class Transfer:
                 authority_status=(
                     "approved" if item.authoritative else "proposal"
                 ),
-                source_facts=dict(item.source_facts),
             )
             for item in items
         ]
@@ -6116,12 +6151,13 @@ class Transfer:
         return hashlib.sha256(material.encode()).hexdigest()
 
     @staticmethod
-    def _review_source_facts(track: Track) -> dict:
-        """Return public typed facts while excluding retained raw records."""
-        return {
-            key: value for key, value in track.source_facts.items()
-            if key != "raw_public_facts"
-        }
+    def _review_source_occurrence(
+        track: Track, occurrence_id: str, fallback_position: int,
+    ) -> SourceOccurrence:
+        """Return one typed occurrence without opaque private evidence."""
+        if track.source_occurrence is not None:
+            return track.source_occurrence.for_public_review()
+        return SourceOccurrence(occurrence_id, fallback_position)
 
     @staticmethod
     def _is_new_reviewable_occurrence(

@@ -3,13 +3,31 @@
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
+import math
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from functools import lru_cache
+from importlib.resources import files
 from pathlib import Path
+from urllib.parse import urlparse
+
+from jsonschema import Draft202012Validator, FormatChecker
 
 from djsupport.rekordbox import Track
+from djsupport.source_facts import (
+    SourceAvailability,
+    SourceCommerce,
+    SourceDates,
+    SourceDuration,
+    SourceEntity,
+    SourceMusicalKey,
+    SourceOccurrence,
+    SourcePrice,
+    SourcePreview,
+    SourceTrackFacts,
+)
 
 
 class BeatportExportError(ValueError):
@@ -25,34 +43,6 @@ class ParsedBeatportExport:
     curator: str | None = None
 
 
-TOP_LEVEL_FIELDS = {
-    "schema_version", "source", "extracted_at", "track_count", "occurrences",
-}
-SOURCE_FIELDS = {"kind", "beatport_id", "canonical_url", "name", "curator"}
-ENTITY_FIELDS = {"entity_id", "beatport_id", "name", "slug"}
-OCCURRENCE_FIELDS = {"position", "occurrence_id", "track"}
-TRACK_FIELDS = {
-    "entity_id", "beatport_id", "canonical_url", "title", "slug",
-    "mix_name", "artists", "remixers", "duration", "isrc", "bpm",
-    "genre", "subgenre", "key", "release", "label", "catalog_number",
-    "label_track_identifier", "dates", "availability", "commerce",
-    "preview", "artwork", "raw_public_facts",
-}
-TRACK_REQUIRED = {
-    "entity_id", "beatport_id", "canonical_url", "title", "duration",
-    "dates", "availability", "commerce", "preview",
-}
-NESTED_FIELDS = {
-    "duration": {"display", "milliseconds"},
-    "dates": {"published", "released"},
-    "availability": {
-        "worldwide", "streaming", "pre_order", "enabled", "hidden",
-        "exclusive", "explicit", "classic",
-    },
-    "commerce": {"price", "currency", "sale_type", "status"},
-    "preview": {"url", "start_ms", "end_ms"},
-    "key": {"id", "name", "camelot_letter", "camelot_number"},
-}
 SOURCE_URL = re.compile(
     r"^https://www\.beatport\.com/(track|chart|release|label)/[^/]+/([1-9][0-9]*)$"
 )
@@ -66,140 +56,100 @@ def _invalid(message: str) -> BeatportExportError:
     return BeatportExportError(f"Invalid Beatport V2 export: {message}")
 
 
-def _object(
-    value: object, *, label: str, allowed: set[str], required: set[str] = frozenset(),
-) -> dict:
-    if not isinstance(value, dict):
-        raise _invalid(f"{label} must be an object")
-    unknown = set(value) - allowed
-    missing = required - set(value)
-    if unknown:
-        raise _invalid(f"{label} contains unsupported fields")
-    if missing:
-        raise _invalid(f"{label} is missing required fields")
-    return value
-
-
-def _positive_int(value: object, label: str) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise _invalid(f"{label} must be a positive integer")
-    return value
-
-
-def _non_empty_string(value: object, label: str) -> str:
-    if not isinstance(value, str) or not value:
-        raise _invalid(f"{label} must be a non-empty string")
-    return value
+@lru_cache(maxsize=1)
+def _schema_validator() -> Draft202012Validator:
+    schema_path = files("djsupport").joinpath(
+        "contracts/beatport.export.v2.schema.json"
+    )
+    schema = json.loads(schema_path.read_text())
+    Draft202012Validator.check_schema(schema)
+    return Draft202012Validator(schema, format_checker=FormatChecker())
 
 
 def _validate_entity(value: object, label: str) -> dict:
-    entity = _object(
-        value, label=label, allowed=ENTITY_FIELDS,
-        required={"entity_id", "beatport_id", "name"},
-    )
-    beatport_id = _positive_int(entity["beatport_id"], f"{label}.beatport_id")
-    entity_id = _non_empty_string(entity["entity_id"], f"{label}.entity_id")
+    entity = value
+    beatport_id = entity["beatport_id"]
+    entity_id = entity["entity_id"]
     matched = ENTITY_ID.fullmatch(entity_id)
     if matched is None or int(matched.group(1)) != beatport_id:
         raise _invalid(f"{label}.entity_id does not match its Beatport ID")
-    _non_empty_string(entity["name"], f"{label}.name")
-    if "slug" in entity:
-        _non_empty_string(entity["slug"], f"{label}.slug")
     return entity
 
 
+def _validate_public_reference(value: str, label: str) -> None:
+    parsed = urlparse(value)
+    hostname = parsed.hostname or ""
+    private_host = (
+        hostname.casefold() == "localhost"
+        or hostname.casefold().endswith((".localhost", ".local"))
+    )
+    try:
+        private_host = private_host or not ipaddress.ip_address(hostname).is_global
+    except ValueError:
+        pass
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not hostname
+        or private_host
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise _invalid(f"{label} must contain only public web references")
+
+
 def _validate_track(value: object, position: int) -> dict:
-    track = _object(
-        value, label=f"occurrence {position} track", allowed=TRACK_FIELDS,
-        required=TRACK_REQUIRED,
-    )
-    beatport_id = _positive_int(
-        track["beatport_id"], f"occurrence {position} track.beatport_id",
-    )
+    track = value
+    beatport_id = track["beatport_id"]
     if track["entity_id"] != f"beatport:track:{beatport_id}":
         raise _invalid(f"occurrence {position} track entity ID is inconsistent")
-    url = _non_empty_string(
-        track["canonical_url"], f"occurrence {position} track.canonical_url",
-    )
+    url = track["canonical_url"]
     matched_url = TRACK_URL.fullmatch(url)
     if matched_url is None or int(matched_url.group(1)) != beatport_id:
         raise _invalid(f"occurrence {position} track URL is not canonical")
-    _non_empty_string(track["title"], f"occurrence {position} track.title")
-    for field in ("slug", "mix_name", "isrc", "catalog_number", "label_track_identifier"):
-        if field in track and not isinstance(track[field], str):
-            raise _invalid(f"occurrence {position} track.{field} must be a string")
     for field in ("artists", "remixers"):
-        if field in track:
-            if not isinstance(track[field], list):
-                raise _invalid(f"occurrence {position} track.{field} must be a list")
-            for index, entity in enumerate(track[field], start=1):
-                _validate_entity(entity, f"occurrence {position} {field} {index}")
+        for index, entity in enumerate(track.get(field, ()), start=1):
+            _validate_entity(entity, f"occurrence {position} {field} {index}")
     for field in ("genre", "subgenre", "release", "label"):
         if field in track:
             _validate_entity(track[field], f"occurrence {position} track.{field}")
-    for field in ("duration", "dates", "availability", "commerce", "preview", "key"):
-        if field not in track:
-            continue
-        nested = _object(
-            track[field], label=f"occurrence {position} track.{field}",
-            allowed=NESTED_FIELDS[field],
+    preview_url = track["preview"].get("url")
+    if preview_url is not None:
+        _validate_public_reference(
+            preview_url, f"occurrence {position} track.preview.url"
         )
-        if field == "availability" and any(
-            not isinstance(item, bool) for item in nested.values()
-        ):
-            raise _invalid(f"occurrence {position} availability must be boolean")
-        if field == "duration" and "milliseconds" in nested and (
-            isinstance(nested["milliseconds"], bool)
-            or not isinstance(nested["milliseconds"], int)
-            or nested["milliseconds"] < 0
-        ):
-            raise _invalid(f"occurrence {position} duration is invalid")
-    if "raw_public_facts" in track and not isinstance(
-        track["raw_public_facts"], dict,
-    ):
-        raise _invalid(f"occurrence {position} raw public facts must be an object")
     return track
 
 
 def _validate_document(document: object) -> dict:
-    value = _object(
-        document, label="document", allowed=TOP_LEVEL_FIELDS,
-        required=TOP_LEVEL_FIELDS,
-    )
-    if value["schema_version"] != "beatport.export/v2":
+    if not isinstance(document, dict) or document.get(
+        "schema_version"
+    ) != "beatport.export/v2":
         raise BeatportExportError("Beatport export schema must be beatport.export/v2")
-    extracted_at = _non_empty_string(value["extracted_at"], "extracted_at")
-    try:
-        datetime.fromisoformat(extracted_at.replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise _invalid("extracted_at must be an ISO date-time") from exc
-    source = _object(
-        value["source"], label="source", allowed=SOURCE_FIELDS,
-        required={"kind", "beatport_id", "canonical_url", "name"},
+    errors = sorted(
+        _schema_validator().iter_errors(document),
+        key=lambda error: tuple(str(part) for part in error.absolute_path),
     )
+    if errors:
+        raise _invalid("document does not satisfy the normative V2 schema")
+    value = document
+    source = value["source"]
     kind = source["kind"]
-    if kind not in {"track", "chart", "release", "label"}:
-        raise _invalid("source kind is unsupported")
-    source_id = _positive_int(source["beatport_id"], "source.beatport_id")
-    source_url = _non_empty_string(source["canonical_url"], "source.canonical_url")
+    source_id = source["beatport_id"]
+    source_url = source["canonical_url"]
     matched_source = SOURCE_URL.fullmatch(source_url)
     if (
         matched_source is None or matched_source.group(1) != kind
         or int(matched_source.group(2)) != source_id
     ):
         raise _invalid("source URL is not canonical")
-    _non_empty_string(source["name"], "source.name")
     if "curator" in source:
         _validate_entity(source["curator"], "source.curator")
-    track_count = _positive_int(value["track_count"], "track_count")
+    track_count = value["track_count"]
     occurrences = value["occurrences"]
-    if not isinstance(occurrences, list) or len(occurrences) != track_count:
+    if len(occurrences) != track_count:
         raise _invalid("track_count does not match occurrences")
     for index, raw_occurrence in enumerate(occurrences, start=1):
-        occurrence = _object(
-            raw_occurrence, label=f"occurrence {index}",
-            allowed=OCCURRENCE_FIELDS, required=OCCURRENCE_FIELDS,
-        )
+        occurrence = raw_occurrence
         if occurrence["position"] != index:
             raise _invalid("occurrence positions must be contiguous and one-based")
         expected_id = f"beatport:{kind}:{source_id}:{index}"
@@ -209,23 +159,93 @@ def _validate_document(document: object) -> dict:
     return value
 
 
-def _entity_name(value: object) -> str:
-    return value.get("name", "") if isinstance(value, dict) else ""
+def _entity(value: dict | None) -> SourceEntity | None:
+    if value is None:
+        return None
+    return SourceEntity(
+        entity_id=value["entity_id"],
+        provider_id=value["beatport_id"],
+        name=value["name"],
+        slug=value.get("slug"),
+    )
+
+
+def _facts(track: dict) -> SourceTrackFacts:
+    key = track.get("key")
+    commerce = track["commerce"]
+    raw_price = commerce.get("price")
+    typed_price = None
+    opaque_price = None
+    price_code = raw_price.get("code") if isinstance(raw_price, dict) else None
+    price_value = raw_price.get("value") if isinstance(raw_price, dict) else None
+    if (
+        isinstance(raw_price, dict)
+        and set(raw_price) <= {"code", "value"}
+        and (price_code is None or re.fullmatch(r"[A-Z]{3}", price_code))
+        and not isinstance(price_value, bool)
+        and isinstance(price_value, (int, float, type(None)))
+        and (price_value is None or (price_value >= 0 and math.isfinite(price_value)))
+    ):
+        typed_price = SourcePrice(
+            code=price_code, value=price_value,
+        )
+    elif raw_price is not None:
+        opaque_price = raw_price
+    return SourceTrackFacts(
+        provider="beatport",
+        entity_id=track["entity_id"],
+        provider_item_id=track["beatport_id"],
+        canonical_url=track["canonical_url"],
+        title=track["title"],
+        slug=track.get("slug"),
+        version_name=track.get("mix_name"),
+        artists=tuple(_entity(item) for item in track.get("artists", ())),
+        remixers=tuple(_entity(item) for item in track.get("remixers", ())),
+        duration=SourceDuration(**track["duration"]),
+        recording_code=track.get("isrc"),
+        tempo_bpm=track.get("bpm"),
+        genre=_entity(track.get("genre")),
+        subgenre=_entity(track.get("subgenre")),
+        musical_key=(
+            SourceMusicalKey(
+                provider_id=key.get("id"),
+                name=key.get("name"),
+                camelot_letter=key.get("camelot_letter"),
+                camelot_number=key.get("camelot_number"),
+            )
+            if key is not None else None
+        ),
+        release=_entity(track.get("release")),
+        label=_entity(track.get("label")),
+        catalog_number=track.get("catalog_number"),
+        label_track_identifier=track.get("label_track_identifier"),
+        dates=SourceDates(**track["dates"]),
+        availability=SourceAvailability(**track["availability"]),
+        commerce=SourceCommerce(
+            price=typed_price,
+            opaque_price_evidence=opaque_price,
+            currency=commerce.get("currency"),
+            sale_type=commerce.get("sale_type"),
+            status=commerce.get("status"),
+        ),
+        preview=SourcePreview(**track["preview"]),
+        artwork=track.get("artwork"),
+        raw_evidence=track.get("raw_public_facts"),
+    )
 
 
 def _track_from_occurrence(occurrence: dict) -> Track:
     track = occurrence["track"]
+    facts = _facts(track)
     mix_name = track.get("mix_name", "")
     title = track["title"]
     if mix_name and mix_name not in {"Original", "Original Mix"}:
         title = f"{title} ({mix_name})"
     artists = ", ".join(
-        _entity_name(artist) for artist in track.get("artists", [])
-        if _entity_name(artist)
+        artist.name for artist in facts.artists if artist.name
     )
     remixers = ", ".join(
-        _entity_name(remixer) for remixer in track.get("remixers", [])
-        if _entity_name(remixer)
+        remixer.name for remixer in facts.remixers if remixer.name
     )
     dates = track.get("dates", {})
     duration = track.get("duration", {})
@@ -234,16 +254,18 @@ def _track_from_occurrence(occurrence: dict) -> Track:
         track_id=track["entity_id"],
         name=title,
         artist=artists,
-        album=_entity_name(track.get("release")),
+        album=facts.release.name if facts.release is not None else "",
         remixer=remixers,
-        label=_entity_name(track.get("label")),
-        genre=_entity_name(track.get("genre")),
+        label=facts.label.name if facts.label is not None else "",
+        genre=facts.genre.name if facts.genre is not None else "",
         date_added=dates.get("released", dates.get("published", "")),
         duration=int(milliseconds) // 1000,
         version=mix_name,
-        occurrence_id=occurrence["occurrence_id"],
-        source_position=occurrence["position"],
-        source_facts=dict(track),
+        source_occurrence=SourceOccurrence(
+            occurrence_id=occurrence["occurrence_id"],
+            position=occurrence["position"],
+            facts=facts,
+        ),
     )
 
 
@@ -268,11 +290,11 @@ def read_beatport_export(
     source = document["source"]
     occurrences = document["occurrences"]
     tracks = [_track_from_occurrence(item) for item in occurrences]
-    curator_name = _entity_name(source.get("curator"))
+    curator = _entity(source.get("curator"))
     return ParsedBeatportExport(
         name=source["name"],
         reference=source["canonical_url"],
         tracks=tracks,
         source_kind=source["kind"],
-        curator=curator_name or None,
+        curator=(curator.name if curator is not None else None),
     )

@@ -8,6 +8,19 @@ import pytest
 
 from djsupport.backup import LocalDataBackup, SUPPORTED_SCHEMAS
 from djsupport.config import CONFIG_FILENAME, CONFIG_VERSION
+from djsupport.rekordbox import Track
+from djsupport.source_facts import SourceOccurrence, SourceTrackFacts
+from djsupport.transfer import (
+    FilePublicationStorage,
+    FileTransferStorage,
+    PublicationItem,
+    PublicationManifest,
+    PUBLICATION_MANIFEST_VERSION,
+    TRANSFER_STATE_VERSION,
+    TransferMode,
+    TransferState,
+    TransferStatus,
+)
 
 
 def _write_json(path, value):
@@ -145,7 +158,7 @@ class TestRestorePreview:
     def test_accepts_current_publication_manifest_schema(self, tmp_path):
         source = tmp_path / "source"
         _write_json(source / "publication-manifests.json", {
-            "version": 4,
+            "version": PUBLICATION_MANIFEST_VERSION,
             "manifests": [],
             "approvals": [],
             "mirrors": [],
@@ -156,6 +169,59 @@ class TestRestorePreview:
 
         assert preview.valid is True
         assert preview.contents == ("publication-manifests.json",)
+
+    def test_current_publication_state_restores_over_previous_schema(self, tmp_path):
+        source = tmp_path / "source"
+        target = tmp_path / "target"
+        state_name = "publication-manifests.json"
+        facts = SourceTrackFacts(
+            provider="beatport",
+            entity_id="beatport:track:101",
+            provider_item_id=101,
+            canonical_url="https://www.beatport.com/track/synthetic/101",
+            title="Synthetic Track",
+            tempo_bpm=128,
+        )
+        item = PublicationItem(
+            source_track_id="beatport:track:101",
+            source_name="Synthetic Artist - Synthetic Track",
+            source_artist="Synthetic Artist",
+            source_title="Synthetic Track",
+            source_occurrence=SourceOccurrence(
+                "beatport:chart:4242:1", 1, facts,
+            ),
+        )
+        FilePublicationStorage(source / state_name).retain_publication(
+            PublicationManifest(
+                account_id="synthetic-account",
+                spotify_playlist_id="synthetic-playlist",
+                spotify_playlist_name="Synthetic Playlist",
+                source_label="Beatport",
+                source_reference=(
+                    "https://www.beatport.com/chart/synthetic/4242"
+                ),
+                created_at=datetime(2026, 8, 10),
+                items=(item,),
+                mode=TransferMode.SNAPSHOT,
+            )
+        )
+        _write_json(target / "publication-manifests.json", {
+            "version": PUBLICATION_MANIFEST_VERSION - 1,
+            "manifests": [], "approvals": [], "mirrors": [],
+        })
+        archive = LocalDataBackup(source).create(tmp_path / "backups")
+
+        restored = LocalDataBackup(target).restore(archive)
+
+        assert restored.restored is True
+        restored_manifest = FilePublicationStorage(
+            target / state_name
+        ).publication_for_playlist("synthetic-account", "synthetic-playlist")
+        assert restored_manifest is not None
+        restored_occurrence = restored_manifest.items[0].source_occurrence
+        assert restored_occurrence.occurrence_id == "beatport:chart:4242:1"
+        assert isinstance(restored_occurrence.facts, SourceTrackFacts)
+        assert restored_occurrence.facts.tempo_bpm == 128
 
     def test_accepts_version_four_transfer_state_with_qualification_drafts(
         self, tmp_path,
@@ -231,6 +297,71 @@ class TestRestorePreview:
         assert retained["approved_count"] == 1
         assert retained["correction_count"] == 1
         assert "approved" not in retained
+
+    def test_current_transfer_state_restores_over_previous_schema(self, tmp_path):
+        source = tmp_path / "source"
+        target = tmp_path / "target"
+        state_name = "publication-manifests.transfers.json"
+        selection = {
+            "name": "Synthetic chart",
+            "reference": "https://www.beatport.com/chart/synthetic/4242",
+            "tracks": [{
+                "track_id": "beatport:track:101",
+                "name": "Synthetic Track",
+                "artist": "Synthetic Artist",
+                "album": "Synthetic Release",
+                "remixer": "",
+                "label": "Synthetic Label",
+                "genre": "Techno",
+                "date_added": "2026-08-10",
+                "duration": 364,
+                "version": "Original Mix",
+                "source_occurrence": {
+                    "occurrence_id": "beatport:chart:4242:1",
+                    "position": 1,
+                    "facts": {
+                        "provider": "beatport",
+                        "entity_id": "beatport:track:101",
+                        "provider_item_id": 101,
+                        "canonical_url": (
+                            "https://www.beatport.com/track/synthetic/101"
+                        ),
+                        "title": "Synthetic Track",
+                        "tempo_bpm": 128,
+                    },
+                },
+            }],
+        }
+        FileTransferStorage(source / state_name).save_transfer(
+            "beatport-v2",
+            TransferState(
+                status=TransferStatus.PAUSED,
+                source="beatport-export-v2:synthetic",
+                account_id="synthetic-account",
+                request={"source": "beatport-export-v2:synthetic"},
+                selection=selection,
+                created_at="2026-08-10T00:00:00",
+                next_track_index=0,
+                matched=[], unmatched=[], publication_items=[], alternatives=[],
+            ),
+        )
+        _write_json(target / state_name, {
+            "version": TRANSFER_STATE_VERSION - 1,
+            "transfers": {}, "batches": {}, "qualifications": {},
+        })
+        archive = LocalDataBackup(source).create(tmp_path / "backups")
+
+        restored = LocalDataBackup(target).restore(archive)
+
+        assert restored.restored is True
+        restored_state = FileTransferStorage(target / state_name).load_transfer(
+            "beatport-v2"
+        )
+        assert restored_state is not None
+        restored_track = Track(**restored_state.selection["tracks"][0])
+        assert restored_track.occurrence_id == "beatport:chart:4242:1"
+        assert isinstance(restored_track.source_occurrence.facts, SourceTrackFacts)
+        assert restored_track.source_occurrence.facts.tempo_bpm == 128
 
     @pytest.mark.parametrize("damage", ["corrupt", "unsupported-backup", "unsupported-data"])
     def test_rejects_corrupt_or_unsupported_archive(self, tmp_path, damage):

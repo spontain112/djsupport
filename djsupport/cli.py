@@ -1061,7 +1061,7 @@ def approve(
 @click.argument("url", required=False)
 @click.option(
     "--export-file",
-    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    type=click.Path(dir_okay=False, path_type=Path),
     help="Use an explicitly selected beatport.export/v2 JSON file.",
 )
 @click.option("--dry-run", is_flag=True, help="Preview without modifying Spotify.")

@@ -10,6 +10,7 @@ from djsupport.beatport_export import BeatportExportError
 from djsupport.cache import MatchCache
 from djsupport.cli import cli
 from djsupport.report import PlaylistReport, SyncReport
+from djsupport.source_facts import SourceOccurrence, SourceTrackFacts
 from djsupport.transfer import (
     AccountPublishingGuards,
     BeatportExportSource,
@@ -116,8 +117,12 @@ def test_v2_file_becomes_an_occurrence_safe_snapshot_selection(tmp_path):
         "Extended Mix",
     ]
     assert [track.duration for track in selection.tracks] == [364, 432]
-    assert selection.tracks[0].source_facts["isrc"] == "ZZAAA2600101"
-    assert selection.tracks[0].source_facts["availability"] == {"enabled": False}
+    assert isinstance(selection.tracks[0].source_occurrence, SourceOccurrence)
+    assert isinstance(selection.tracks[0].source_occurrence.facts, SourceTrackFacts)
+    assert selection.tracks[0].source_occurrence.facts.recording_code == (
+        "ZZAAA2600101"
+    )
+    assert selection.tracks[0].source_occurrence.facts.availability.enabled is False
 
 
 @pytest.mark.parametrize(
@@ -149,34 +154,117 @@ def test_invalid_exports_fail_closed_without_disclosing_the_selected_path(
     assert str(export_path) not in str(raised.value)
 
 
-def test_invalid_export_is_rejected_before_spotify_access(tmp_path):
-    document = _document()
-    document["track_count"] = 99
-    export_path = tmp_path / "selected-export.json"
-    export_path.write_text(json.dumps(document))
-    source = BeatportExportSource(export_path)
-
-    class NoSpotifyAccess:
-        def __getattr__(self, name):
-            raise AssertionError(f"Spotify must not be accessed: {name}")
-
-    transfer = Transfer(
-        source=source,
-        spotify=NoSpotifyAccess(),
-        matching_knowledge=MatchCacheKnowledge(
-            MatchCache(str(tmp_path / "matching-knowledge.json"))
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda value: value["occurrences"][0]["track"].update(bpm=True),
+        lambda value: value["occurrences"][0]["track"]["key"].update(
+            camelot_number=99
         ),
-        publishing_guards=AccountPublishingGuards(tmp_path / "locks"),
+        lambda value: value["occurrences"][0]["track"]["preview"].update(
+            start_ms=-1
+        ),
+        lambda value: value["occurrences"][0].update(position=True),
+        lambda value: value["occurrences"][0]["track"]["preview"].update(
+            url="/private/local-preview.mp3"
+        ),
+        lambda value: value.update(extracted_at="2026-08-10"),
+    ],
+)
+def test_every_normative_schema_failure_is_rejected(tmp_path, mutate):
+    document = _document()
+    mutate(document)
+    export_path = tmp_path / "schema-invalid.json"
+    export_path.write_text(json.dumps(document))
+
+    with pytest.raises(BeatportExportError, match="normative V2 schema"):
+        BeatportExportSource(export_path)
+
+
+@pytest.mark.parametrize(
+    "preview_url",
+    [
+        "file:///Users/private/local-preview.mp3",
+        "http://localhost/private-preview.mp3",
+        "http://127.0.0.1/private-preview.mp3",
+    ],
+)
+def test_schema_valid_non_public_preview_urls_are_rejected(tmp_path, preview_url):
+    document = _document()
+    track = document["occurrences"][0]["track"]
+    track["preview"]["url"] = preview_url
+    export_path = tmp_path / "public-facts-only.json"
+    export_path.write_text(json.dumps(document))
+
+    with pytest.raises(BeatportExportError, match="public web references"):
+        BeatportExportSource(export_path)
+
+
+@pytest.mark.parametrize(
+    "artwork",
+    [
+        {"path": "../private/cover.jpg"},
+        {"path": r"\\server\private\cover.jpg"},
+    ],
+)
+def test_opaque_artwork_is_private_checkpoint_evidence_not_review_facts(
+    tmp_path, artwork,
+):
+    document = _document()
+    document["occurrences"][0]["track"]["artwork"] = artwork
+    export_path = tmp_path / "opaque-artwork.json"
+    export_path.write_text(json.dumps(document))
+
+    source = BeatportExportSource(export_path)
+    track = source.consume(source.selection_reference).tracks[0]
+
+    assert track.source_occurrence.facts.artwork == artwork
+    assert "artwork" not in track.source_occurrence.facts.to_review_facts()
+    assert track.source_occurrence.for_public_review().facts.artwork is None
+
+
+def test_known_price_is_typed_while_opaque_price_remains_private(tmp_path):
+    document = _document()
+    document["occurrences"][0]["track"]["commerce"]["price"] = {
+        "path": "../private/price.json",
+        "token": "private-evidence",
+    }
+    export_path = tmp_path / "opaque-price.json"
+    export_path.write_text(json.dumps(document))
+
+    source = BeatportExportSource(export_path)
+    facts = source.consume(source.selection_reference).tracks[
+        0
+    ].source_occurrence.facts
+
+    assert facts.commerce.price is None
+    assert facts.commerce.opaque_price_evidence["token"] == "private-evidence"
+    review = facts.to_review_facts()
+    assert "opaque_price_evidence" not in review["commerce"]
+    assert "private-evidence" not in json.dumps(review)
+    assert facts.for_public_review().commerce.opaque_price_evidence is None
+
+
+def test_invalid_export_is_rejected_before_spotify_access(tmp_path, monkeypatch):
+    export_path = tmp_path / "selected-export.json"
+    invalid = _document()
+    invalid["track_count"] = 99
+    export_path.write_text(json.dumps(invalid))
+    monkeypatch.setattr(
+        "djsupport.cli.get_client",
+        lambda: (_ for _ in ()).throw(AssertionError("Spotify accessed")),
     )
 
-    with pytest.raises(BeatportExportError):
-        transfer.execute(TransferRequest(
-            source=source.selection_reference,
-            preview=True,
-        ))
+    result = CliRunner().invoke(cli, [
+        "beatport", "--export-file", str(export_path),
+    ])
+
+    assert result.exit_code != 0
+    assert "Spotify accessed" not in str(result.exception)
+    assert "track_count does not match occurrences" in result.output
 
 
-def test_selected_export_cannot_change_before_it_is_consumed(tmp_path):
+def test_selected_export_is_pinned_as_an_immutable_validated_snapshot(tmp_path):
     export_path = tmp_path / "selected-export.json"
     export_path.write_text(json.dumps(_document()))
     source = BeatportExportSource(export_path)
@@ -184,8 +272,10 @@ def test_selected_export_cannot_change_before_it_is_consumed(tmp_path):
     changed["source"]["name"] = "Changed After Selection"
     export_path.write_text(json.dumps(changed))
 
-    with pytest.raises(BeatportExportError, match="changed after selection"):
-        source.consume(source.selection_reference)
+    selection = source.consume(source.selection_reference)
+
+    assert selection.name == "Invented Chart"
+    assert selection.name != "Changed After Selection"
 
 
 class _MatchingSpotify:
@@ -257,17 +347,21 @@ def test_preview_checkpoints_occurrences_and_review_facts_without_path_leak(
         "beatport:chart:4242:2",
     ]
     first_facts = report.playlists[0].review_items[0].source_facts
-    assert first_facts["isrc"] == "ZZAAA2600101"
-    assert first_facts["bpm"] == 128
+    assert first_facts["recording_code"] == "ZZAAA2600101"
+    assert first_facts["tempo_bpm"] == 128
     assert first_facts["availability"] == {"enabled": False}
-    assert "raw_public_facts" not in first_facts
+    assert "raw_evidence" not in first_facts
     stored = json.loads(state_text)["transfers"]["beatport-v2-preview"]
-    assert stored["selection"]["tracks"][0]["occurrence_id"] == (
+    assert stored["selection"]["tracks"][0]["source_occurrence"][
+        "occurrence_id"
+    ] == (
         "beatport:chart:4242:1"
     )
-    assert stored["selection"]["tracks"][0]["source_facts"][
-        "raw_public_facts"
-    ] == {"id": 101, "enabled": False}
+    source_occurrence = stored["selection"]["tracks"][0]["source_occurrence"]
+    assert source_occurrence["facts"]["raw_evidence"] == {
+        "id": 101, "enabled": False,
+    }
+    assert "beatport_id" not in source_occurrence["facts"]
 
 
 def test_paused_v2_transfer_reloads_and_resumes_without_losing_occurrences(
@@ -353,6 +447,18 @@ def test_beatport_cli_selects_a_v2_file_without_passing_its_path_to_transfer(
     assert str(export_path) not in captured["request"].source
 
 
+def test_beatport_cli_missing_export_error_does_not_disclose_the_path(tmp_path):
+    missing = tmp_path / "private-missing-export.json"
+
+    result = CliRunner().invoke(cli, [
+        "beatport", "--export-file", str(missing), "--dry-run",
+    ])
+
+    assert result.exit_code != 0
+    assert str(missing) not in result.output
+    assert "Could not read the selected Beatport export" in result.output
+
+
 def test_exact_producer_golden_is_accepted_without_transformation():
     document = json.loads(PRODUCER_GOLDEN.read_text())
     source = BeatportExportSource(PRODUCER_GOLDEN)
@@ -363,13 +469,42 @@ def test_exact_producer_golden_is_accepted_without_transformation():
     assert [track.occurrence_id for track in selection.tracks] == [
         item["occurrence_id"] for item in document["occurrences"]
     ]
-    assert [track.source_facts for track in selection.tracks] == [
-        item["track"] for item in document["occurrences"]
+    assert all(
+        isinstance(track.source_occurrence.facts, SourceTrackFacts)
+        for track in selection.tracks
+    )
+    assert [track.source_occurrence.facts.provider_item_id for track in selection.tracks] == [
+        item["track"]["beatport_id"] for item in document["occurrences"]
     ]
     assert selection.tracks[0].track_id == selection.tracks[3].track_id
     assert selection.tracks[0].occurrence_id != selection.tracks[3].occurrence_id
-    assert selection.tracks[0].source_facts["availability"]["enabled"] is False
-    assert selection.tracks[1].source_facts["availability"] == {}
+    assert selection.tracks[0].source_occurrence.facts.availability.enabled is False
+    assert selection.tracks[1].source_occurrence.facts.availability.enabled is None
+    assert selection.tracks[0].source_occurrence.facts.commerce.price.code == "EUR"
+    assert selection.tracks[0].source_occurrence.facts.commerce.price.value == 1.49
+
+
+def test_qualification_digest_binds_occurrence_identity_and_all_source_facts(
+    tmp_path,
+):
+    export_path = tmp_path / "selected-export.json"
+    export_path.write_text(json.dumps(_document()))
+    source = BeatportExportSource(export_path)
+    selection = source.consume(source.selection_reference)
+    stored = {
+        "reference": selection.reference,
+        "tracks": [Transfer._stored_track(track, include_location=False)
+                   for track in selection.tracks],
+    }
+    original = Transfer._qualification_selection_digest(stored)
+
+    changed_identity = json.loads(json.dumps(stored))
+    changed_identity["tracks"][0]["source_occurrence"]["occurrence_id"] += "-changed"
+    changed_fact = json.loads(json.dumps(stored))
+    changed_fact["tracks"][0]["source_occurrence"]["facts"]["tempo_bpm"] = 129
+
+    assert Transfer._qualification_selection_digest(changed_identity) != original
+    assert Transfer._qualification_selection_digest(changed_fact) != original
 
 
 def test_v2_publication_is_an_occurrence_safe_path_redacted_snapshot(tmp_path):
@@ -402,8 +537,8 @@ def test_v2_publication_is_an_occurrence_safe_path_redacted_snapshot(tmp_path):
         "beatport:chart:4242:1",
         "beatport:chart:4242:2",
     ]
-    assert manifest_items[0].source_facts["isrc"] == "ZZAAA2600101"
-    assert "raw_public_facts" not in manifest_items[0].source_facts
+    assert manifest_items[0].source_facts["recording_code"] == "ZZAAA2600101"
+    assert "raw_evidence" not in manifest_items[0].source_facts
     publication_text = publication_path.read_text()
     transfer_text = transfer_path.read_text()
     assert str(export_path) not in publication_text
