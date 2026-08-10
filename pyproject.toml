@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 include = ["djsupport*"]
 
 [tool.setuptools.package-data]
-djsupport = ["static/*.html", "static/*.png"]
+djsupport = ["static/*.html", "static/*.png", "contracts/*.json"]
 
 [project]
 name = "djsupport"

@@ -1058,7 +1058,12 @@ def approve(
 
 
 @cli.command()
-@click.argument("url")
+@click.argument("url", required=False)
+@click.option(
+    "--export-file",
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
+    help="Use an explicitly selected beatport.export/v2 JSON file.",
+)
 @click.option("--dry-run", is_flag=True, help="Preview without modifying Spotify.")
 @click.option("--threshold", "-t", default=80, show_default=True, help="Minimum match confidence (0-100).")
 @click.option("--no-cache", is_flag=True, help="Bypass match cache.")
@@ -1077,7 +1082,8 @@ def approve(
 @click.option("--resume", "resume_id", default=None, help="Resume a durable Transfer ID.")
 @click.option("--abandon", "abandon_id", default=None, help="Explicitly abandon a durable Transfer ID.")
 def beatport(
-    url: str,
+    url: str | None,
+    export_file: Path | None,
     dry_run: bool,
     threshold: int,
     no_cache: bool,
@@ -1093,10 +1099,12 @@ def beatport(
     resume_id: str | None,
     abandon_id: str | None,
 ) -> None:
-    """Create a Spotify playlist from a Beatport DJ chart.
+    """Create a Spotify playlist from a Beatport selection.
 
-    URL is a Beatport chart page, e.g.:
+    URL may be a Beatport chart page, e.g.:
     https://www.beatport.com/chart/garage-go-tos/815070
+
+    Use --export-file for a local occurrence-safe Beatport CLI V2 export.
     """
     import requests
 
@@ -1104,10 +1112,12 @@ def beatport(
         BeatportParseError,
         InvalidBeatportURL,
     )
+    from djsupport.beatport_export import BeatportExportError
 
     from djsupport.cache import MatchCache
     from djsupport.transfer import (
         BeatportChartSource,
+        BeatportExportSource,
         EphemeralMatchingKnowledge,
         FilePublicationStorage,
         FileTransferStorage,
@@ -1116,6 +1126,22 @@ def beatport(
         Transfer,
         TransferMode,
         TransferRequest,
+    )
+
+    if url and export_file is not None:
+        raise click.UsageError("Use either URL or --export-file, not both.")
+    if not url and export_file is None and not abandon_id:
+        raise click.UsageError("Provide a Beatport URL or --export-file.")
+    try:
+        source = (
+            BeatportExportSource(export_file)
+            if export_file is not None else BeatportChartSource()
+        )
+    except BeatportExportError as exc:
+        raise click.ClickException(str(exc)) from exc
+    source_reference = (
+        source.selection_reference
+        if isinstance(source, BeatportExportSource) else (url or "")
     )
 
     cache = None if no_cache else MatchCache(cache_path)
@@ -1127,7 +1153,7 @@ def beatport(
         str(Path(state_path).with_suffix(".transfers.json"))
     )
     transfer = Transfer(
-        source=BeatportChartSource(),
+        source=source,
         spotify=SpotifyMatcher(get_client()),
         publishing_guards=AccountPublishingGuards(),
         matching_knowledge=(
@@ -1149,7 +1175,7 @@ def beatport(
     click.echo(f"Transfer ID: {transfer_id}")
     try:
         report = transfer.execute(TransferRequest(
-            source=url,
+            source=source_reference,
             mode=TransferMode.MIRROR if mirror else TransferMode.SNAPSHOT,
             preview=dry_run,
             threshold=threshold,
@@ -1162,6 +1188,8 @@ def beatport(
     except InvalidBeatportURL as e:
         raise click.ClickException(str(e))
     except BeatportParseError as e:
+        raise click.ClickException(str(e))
+    except BeatportExportError as e:
         raise click.ClickException(str(e))
     except requests.RequestException as e:
         if (

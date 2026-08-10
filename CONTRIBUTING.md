@@ -33,6 +33,7 @@ djsupport/
   web.py         Optional thin FastAPI adapter and static web application
   rekordbox.py   Rekordbox XML intake
   beatport.py    Beatport chart intake
+  beatport_export.py Strict local Beatport CLI V2 contract intake
   label.py       Beatport label discovery and intake
   matcher.py     Spotify candidate scoring and selection
   spotify.py     Typed Spotify API boundary

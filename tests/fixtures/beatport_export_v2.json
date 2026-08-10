@@ -1,0 +1,124 @@
+{
+  "schema_version": "beatport.export/v2",
+  "source": {
+    "kind": "chart",
+    "beatport_id": 4242,
+    "canonical_url": "https://www.beatport.com/chart/invented-night-drive/4242",
+    "name": "Invented Night Drive",
+    "curator": {
+      "entity_id": "beatport:curator:77",
+      "beatport_id": 77,
+      "name": "Invented Selector",
+      "slug": "invented-selector"
+    }
+  },
+  "extracted_at": "2026-08-10T12:00:00Z",
+  "track_count": 4,
+  "occurrences": [
+    {
+      "position": 1,
+      "occurrence_id": "beatport:chart:4242:1",
+      "track": {
+        "entity_id": "beatport:track:101",
+        "beatport_id": 101,
+        "canonical_url": "https://www.beatport.com/track/paper-sun/101",
+        "title": "Paper Sun",
+        "slug": "paper-sun",
+        "mix_name": "Original Mix",
+        "artists": [{"entity_id":"beatport:artist:11","beatport_id":11,"name":"Invented Artist","slug":"invented-artist"}],
+        "remixers": [],
+        "duration": {"display":"6:04","milliseconds":364000},
+        "isrc": "ZZAAA2600001",
+        "bpm": 128,
+        "genre": {"entity_id":"beatport:genre:5","beatport_id":5,"name":"Techno","slug":"techno"},
+        "subgenre": {"entity_id":"beatport:genre:6","beatport_id":6,"name":"Raw Techno","slug":"raw-techno"},
+        "key": {"id":1,"name":"A Minor","camelot_letter":"A","camelot_number":8},
+        "release": {"entity_id":"beatport:release:501","beatport_id":501,"name":"Paper Signals","slug":"paper-signals"},
+        "label": {"entity_id":"beatport:label:601","beatport_id":601,"name":"Invented Audio","slug":"invented-audio"},
+        "catalog_number": "IA001",
+        "label_track_identifier": "IA001-01",
+        "dates": {"published":"2026-07-01","released":"2026-07-08"},
+        "availability": {"worldwide":true,"streaming":true,"pre_order":false,"enabled":false,"hidden":false,"exclusive":false,"explicit":false,"classic":false},
+        "commerce": {"price":{"code":"EUR","value":1.49},"currency":"EUR","sale_type":"download","status":"published"},
+        "preview": {"url":"https://example.invalid/audio/paper-sun.mp3","start_ms":45000,"end_ms":105000},
+        "artwork": {"url":"https://example.invalid/art/paper-signals.jpg"},
+        "raw_public_facts": {"id":101,"enabled":false,"source":"invented-fixture"}
+      }
+    },
+    {
+      "position": 2,
+      "occurrence_id": "beatport:chart:4242:2",
+      "track": {
+        "entity_id": "beatport:track:202",
+        "beatport_id": 202,
+        "canonical_url": "https://www.beatport.com/track/paper-sun/202",
+        "title": "Paper Sun",
+        "slug": "paper-sun",
+        "mix_name": "Extended Mix",
+        "artists": [{"entity_id":"beatport:artist:11","beatport_id":11,"name":"Invented Artist","slug":"invented-artist"}],
+        "duration": {"display":"7:12","milliseconds":432000},
+        "isrc": "ZZAAA2600002",
+        "bpm": 130,
+        "genre": {"entity_id":"beatport:genre:5","beatport_id":5,"name":"Techno","slug":"techno"},
+        "key": {"id":2,"name":"E Minor","camelot_letter":"A","camelot_number":9},
+        "release": {"entity_id":"beatport:release:501","beatport_id":501,"name":"Paper Signals","slug":"paper-signals"},
+        "label": {"entity_id":"beatport:label:601","beatport_id":601,"name":"Invented Audio","slug":"invented-audio"},
+        "catalog_number": "IA001",
+        "label_track_identifier": "IA001-02",
+        "dates": {"published":"2026-07-01","released":"2026-07-08"},
+        "availability": {},
+        "commerce": {"price":{"code":"EUR","value":1.79},"currency":"EUR","sale_type":"download","status":"published"},
+        "preview": {},
+        "raw_public_facts": {"id":202,"source":"invented-fixture"}
+      }
+    },
+    {
+      "position": 3,
+      "occurrence_id": "beatport:chart:4242:3",
+      "track": {
+        "entity_id": "beatport:track:303",
+        "beatport_id": 303,
+        "canonical_url": "https://www.beatport.com/track/quiet-current/303",
+        "title": "Quiet Current",
+        "slug": "quiet-current",
+        "mix_name": "Club Mix",
+        "artists": [{"entity_id":"beatport:artist:22","beatport_id":22,"name":"Synthetic Duo","slug":"synthetic-duo"}],
+        "remixers": [{"entity_id":"beatport:artist:23","beatport_id":23,"name":"Fixture Remixer","slug":"fixture-remixer"}],
+        "duration": {"display":"5:30","milliseconds":330000},
+        "isrc": "ZZAAA2600003",
+        "bpm": 126,
+        "genre": {"entity_id":"beatport:genre:8","beatport_id":8,"name":"House","slug":"house"},
+        "key": {"id":3,"name":"C Minor","camelot_letter":"A","camelot_number":5},
+        "release": {"entity_id":"beatport:release:502","beatport_id":502,"name":"Quiet Current","slug":"quiet-current"},
+        "label": {"entity_id":"beatport:label:602","beatport_id":602,"name":"Fixture Records","slug":"fixture-records"},
+        "catalog_number": "FR010",
+        "dates": {"published":"2026-07-15","released":"2026-07-22"},
+        "availability": {"enabled":true},
+        "commerce": {"currency":"EUR","status":"published"},
+        "preview": {},
+        "raw_public_facts": {"id":303,"enabled":true,"source":"invented-fixture"}
+      }
+    },
+    {
+      "position": 4,
+      "occurrence_id": "beatport:chart:4242:4",
+      "track": {
+        "entity_id": "beatport:track:101",
+        "beatport_id": 101,
+        "canonical_url": "https://www.beatport.com/track/paper-sun/101",
+        "title": "Paper Sun",
+        "slug": "paper-sun",
+        "mix_name": "Original Mix",
+        "duration": {"display":"6:04","milliseconds":364000},
+        "isrc": "ZZAAA2600001",
+        "bpm": 128,
+        "key": {"id":1,"name":"A Minor","camelot_letter":"A","camelot_number":8},
+        "dates": {"published":"2026-07-01","released":"2026-07-08"},
+        "availability": {"enabled":false},
+        "commerce": {"currency":"EUR","status":"published"},
+        "preview": {},
+        "raw_public_facts": {"id":101,"enabled":false,"source":"invented-fixture"}
+      }
+    }
+  ]
+}

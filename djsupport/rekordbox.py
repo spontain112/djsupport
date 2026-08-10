@@ -18,6 +18,9 @@ class Track:
     duration: int = 0  # seconds, from TotalTime attribute
     location: str = ""  # private Rekordbox audio reference; never report this value
     version: str = ""  # retained Rekordbox Mix/version metadata when available
+    occurrence_id: str = ""  # stable source occurrence identity when supplied
+    source_position: int = 0  # one-based position in the selected source
+    source_facts: dict = field(default_factory=dict)  # normalized public facts
 
     @property
     def display(self) -> str:

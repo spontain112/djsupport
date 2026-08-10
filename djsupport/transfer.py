@@ -59,8 +59,8 @@ from djsupport.spotify import (
 )
 
 
-PUBLICATION_MANIFEST_VERSION = 6
-TRANSFER_STATE_VERSION = 5
+PUBLICATION_MANIFEST_VERSION = 7
+TRANSFER_STATE_VERSION = 6
 EXPENSIVE_BATCH_LOOKUP_THRESHOLD = 100
 SPOTIFY_TRACK_URI = re.compile(r"^spotify:track:([A-Za-z0-9]{22})$")
 SPOTIFY_TRACK_URL = re.compile(
@@ -757,6 +757,7 @@ class PublicationItem:
     source_title: str
     occurrence_id: str = ""
     source_index: int = 0
+    source_position: int = 0
     source_release: str = ""
     source_label: str = ""
     source_version: str = ""
@@ -776,6 +777,7 @@ class PublicationItem:
     availability_checked_at: str | None = None
     availability_source: str | None = None
     qualification_outcome: str | None = None
+    source_facts: dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "score_reasons", tuple(self.score_reasons))
@@ -936,7 +938,7 @@ class FilePublicationStorage:
                 "Publication state is malformed; restore it before use"
             ) from exc
         if not isinstance(data, dict) or data.get("version") not in (
-            1, 2, 3, 4, 5, PUBLICATION_MANIFEST_VERSION,
+            1, 2, 3, 4, 5, 6, PUBLICATION_MANIFEST_VERSION,
         ):
             raise ValueError(
                 "Publication state schema is unsupported; upgrade djsupport "
@@ -1204,7 +1206,7 @@ class FileTransferStorage:
                 "Transfer state is malformed; repair or restore it before use"
             ) from exc
         if not isinstance(data, dict) or data.get("version") not in (
-            1, 2, 3, 4, TRANSFER_STATE_VERSION,
+            1, 2, 3, 4, 5, TRANSFER_STATE_VERSION,
         ):
             raise ValueError(
                 "Transfer state schema is unsupported; upgrade djsupport "
@@ -1420,6 +1422,40 @@ class BeatportChartSource:
             tracks=tracks,
             chart_title=chart_name,
             curator=curator if curator != "Unknown" else None,
+        )
+
+
+class BeatportExportSource:
+    """Local-file adapter for one occurrence-safe Beatport CLI V2 export."""
+
+    source_label = "Beatport"
+    default_mode = TransferMode.SNAPSHOT
+
+    def __init__(self, path: str | Path) -> None:
+        self._path = Path(path)
+        try:
+            digest = hashlib.sha256(self._path.read_bytes()).hexdigest()
+        except OSError as exc:
+            from djsupport.beatport_export import BeatportExportError
+
+            raise BeatportExportError("Could not read the selected Beatport export") from exc
+        self._digest = digest
+        self.selection_reference = f"beatport-export-v2:{digest}"
+
+    def consume(self, reference: str) -> SourceSelection:
+        from djsupport.beatport_export import read_beatport_export
+
+        if reference != self.selection_reference:
+            raise SourceNotFound("Beatport export selection does not match")
+        parsed = read_beatport_export(
+            self._path, expected_sha256=self._digest,
+        )
+        return SourceSelection(
+            name=parsed.name,
+            reference=parsed.reference,
+            tracks=parsed.tracks,
+            chart_title=(parsed.name if parsed.source_kind == "chart" else None),
+            curator=parsed.curator,
         )
 
 
@@ -2245,6 +2281,9 @@ class Transfer:
             "date_added": track.date_added,
             "duration": track.duration,
             "version": track.version,
+            "occurrence_id": track.occurrence_id,
+            "source_position": track.source_position,
+            "source_facts": track.source_facts,
         }
         if include_location:
             stored["location"] = track.location
@@ -5440,6 +5479,7 @@ class Transfer:
                             source_title=track.name,
                             occurrence_id=occurrence_id,
                             source_index=index,
+                            source_position=track.source_position or index + 1,
                             source_release=track.album,
                             source_label=track.label,
                             source_version=track.version,
@@ -5456,6 +5496,7 @@ class Transfer:
                             source_duration=track.duration,
                             authoritative=True,
                             local_evidence_id=local_evidence_id,
+                            source_facts=self._review_source_facts(track),
                             **self._availability_facts(
                                 result, source="spotify_track_lookup",
                             ),
@@ -5495,11 +5536,13 @@ class Transfer:
                             source_title=track.name,
                             occurrence_id=occurrence_id,
                             source_index=index,
+                            source_position=track.source_position or index + 1,
                             source_release=track.album,
                             source_label=track.label,
                             source_version=track.version,
                             source_duration=track.duration,
                             local_evidence_id=local_evidence_id,
+                            source_facts=self._review_source_facts(track),
                         ))
                     candidates = tuple(
                         AlternativeCandidate(
@@ -5544,6 +5587,7 @@ class Transfer:
                             source_title=track.name,
                             occurrence_id=occurrence_id,
                             source_index=index,
+                            source_position=track.source_position or index + 1,
                             source_release=track.album,
                             source_label=track.label,
                             source_version=track.version,
@@ -5560,6 +5604,7 @@ class Transfer:
                             source_duration=track.duration,
                             authoritative=bool(result.get("authoritative")),
                             local_evidence_id=local_evidence_id,
+                            source_facts=self._review_source_facts(track),
                             **self._availability_facts(
                                 result, source="spotify_or_retained_result",
                             ),
@@ -6039,6 +6084,8 @@ class Transfer:
             ReviewTrack(
                 source_track_id=item.source_track_id,
                 source_name=item.source_name,
+                occurrence_id=item.occurrence_id,
+                source_position=item.source_position,
                 source_artist=item.source_artist,
                 source_title=item.source_title,
                 source_release=item.source_release,
@@ -6056,14 +6103,25 @@ class Transfer:
                 authority_status=(
                     "approved" if item.authoritative else "proposal"
                 ),
+                source_facts=dict(item.source_facts),
             )
             for item in items
         ]
 
     @staticmethod
     def _occurrence_id(transfer_id: str, index: int, track: Track) -> str:
+        if track.occurrence_id:
+            return track.occurrence_id
         material = f"{transfer_id}\0{index}\0{track.track_id}"
         return hashlib.sha256(material.encode()).hexdigest()
+
+    @staticmethod
+    def _review_source_facts(track: Track) -> dict:
+        """Return public typed facts while excluding retained raw records."""
+        return {
+            key: value for key, value in track.source_facts.items()
+            if key != "raw_public_facts"
+        }
 
     @staticmethod
     def _is_new_reviewable_occurrence(

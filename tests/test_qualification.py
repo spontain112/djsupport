@@ -27,6 +27,7 @@ from djsupport.transfer import (
     QualificationDecision,
     QualificationRequest,
     QualificationStatus,
+    PUBLICATION_MANIFEST_VERSION,
     SourceSelection,
     SourceNotFound,
     SpotifyMutationResult,
@@ -37,6 +38,7 @@ from djsupport.transfer import (
     SpotifyPlaylistChanged,
     SpotifyPlaylistReviewRequired,
     Transfer,
+    TRANSFER_STATE_VERSION,
     TransferAuthorization,
     TransferMode,
 )
@@ -1333,8 +1335,10 @@ def test_schema_three_transfer_and_schema_five_manifest_apply_additively(
     )
 
     assert outcome.status == QualificationStatus.APPLIED
-    assert json.loads(transfer_path.read_text())["version"] == 5
-    assert json.loads(publication_path.read_text())["version"] == 6
+    assert json.loads(transfer_path.read_text())["version"] == TRANSFER_STATE_VERSION
+    assert json.loads(publication_path.read_text())[
+        "version"
+    ] == PUBLICATION_MANIFEST_VERSION
 
 
 def test_discard_blocks_approval_until_explicit_fresh_draft_is_applied(

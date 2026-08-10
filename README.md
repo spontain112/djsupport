@@ -237,6 +237,22 @@ djsupport beatport <chart-url> --dry-run
 djsupport beatport <chart-url>
 ```
 
+If the standalone Beatport CLI already produced an occurrence-safe V2 file,
+select that file explicitly instead of fetching the page again:
+
+```bash
+beatport-pp-cli extract <beatport-url> --schema v2 --output beatport-export.json --json
+djsupport beatport --export-file beatport-export.json --dry-run
+djsupport beatport --export-file beatport-export.json
+```
+
+The file is validated before Spotify access. Its public source URL, ordered
+occurrences, repeated Beatport IDs, mixes, durations, ISRC, musical facts,
+release/label facts, dates, and tri-state availability are retained through the
+Transfer. The selected local path and raw producer records do not appear in
+reports, Provisional Playlist descriptions, or publication manifests. ISRC is
+evidence only; it does not create a match or Approval.
+
 Preview and publish a label Snapshot by URL or name:
 
 ```bash

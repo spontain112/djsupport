@@ -33,8 +33,8 @@ versioned application-data schemas.
 | --- | --- | --- | --- | --- |
 | Configuration | `config.json` | `1` | [`ConfigManager`](../djsupport/config.py) | Selected Rekordbox XML path and update time; private reference, not source-read authority |
 | Matching knowledge | `matching-knowledge.json` | `3` | [`MatchCache`](../djsupport/cache.py) through `MatchingKnowledge` | Proposals, failures, Approved/Rejected Matches, Corrections, conflicts, private fingerprint observations and account-scoped associations |
-| Publication state | `publication-manifests.json` | `6` | [`FilePublicationStorage`](../djsupport/transfer.py) | Publication manifests, Approval outcomes, and Mirror relationships |
-| Transfer state | `publication-manifests.transfers.json` | `5` | [`FileTransferStorage`](../djsupport/transfer.py) | Transfers, Batches, checkpoints, Qualification Drafts, and retained aggregate Approval outcomes |
+| Publication state | `publication-manifests.json` | `7` | [`FilePublicationStorage`](../djsupport/transfer.py) | Publication manifests, Approval outcomes, Mirror relationships, and typed public Beatport review facts |
+| Transfer state | `publication-manifests.transfers.json` | `6` | [`FileTransferStorage`](../djsupport/transfer.py) | Transfers, Batches, checkpoints, Qualification Drafts, retained aggregate Approval outcomes, and occurrence-safe source facts |
 | Backup manifest | `backup-manifest.json` | `1` | [`LocalDataBackup`](../djsupport/backup.py) | Archive member names, hashes, and schema versions; never credentials |
 
 The current values come from `CONFIG_VERSION`, `CACHE_VERSION`,
@@ -79,8 +79,8 @@ schema versions:
 | `config.json` | `1` |
 | `matching-knowledge.json` | `1`, `2`, `3` |
 | `transfers.json` | `1`, `2`, `3`, `4`, `5` |
-| `publication-manifests.transfers.json` | `1`, `2`, `3`, `4`, `5` |
-| `publication-manifests.json` | `1`, `2`, `3`, `4`, `5`, `6` |
+| `publication-manifests.transfers.json` | `1`, `2`, `3`, `4`, `5`, `6` |
+| `publication-manifests.json` | `1`, `2`, `3`, `4`, `5`, `6`, `7` |
 | `playlist-state.json` | `1`, `2` |
 | `legacy-migration.json` | `1` |
 | `foundation-migration.json` | `1` |

@@ -27,6 +27,8 @@ class MatchedTrack:
 class ReviewTrack:
     source_track_id: str
     source_name: str
+    occurrence_id: str = ""
+    source_position: int = 0
     source_artist: str = ""
     source_title: str = ""
     source_release: str = ""
@@ -42,6 +44,7 @@ class ReviewTrack:
     match_type: str = "unmatched"
     score_reasons: tuple[str, ...] = ()
     authority_status: str = "proposal"
+    source_facts: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
