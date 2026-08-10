@@ -165,9 +165,6 @@ def test_invalid_exports_fail_closed_without_disclosing_the_selected_path(
             start_ms=-1
         ),
         lambda value: value["occurrences"][0].update(position=True),
-        lambda value: value["occurrences"][0]["track"]["preview"].update(
-            url="/private/local-preview.mp3"
-        ),
         lambda value: value.update(extracted_at="2026-08-10"),
     ],
 )
@@ -184,6 +181,7 @@ def test_every_normative_schema_failure_is_rejected(tmp_path, mutate):
 @pytest.mark.parametrize(
     "preview_url",
     [
+        "/private/local-preview.mp3",
         "file:///Users/private/local-preview.mp3",
         "http://localhost/private-preview.mp3",
         "http://127.0.0.1/private-preview.mp3",
@@ -196,8 +194,9 @@ def test_schema_valid_non_public_preview_urls_are_rejected(tmp_path, preview_url
     export_path = tmp_path / "public-facts-only.json"
     export_path.write_text(json.dumps(document))
 
-    with pytest.raises(BeatportExportError, match="public web references"):
+    with pytest.raises(BeatportExportError) as raised:
         BeatportExportSource(export_path)
+    assert preview_url not in str(raised.value)
 
 
 @pytest.mark.parametrize(

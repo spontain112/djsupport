@@ -8,6 +8,7 @@ import json
 import math
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from functools import lru_cache
 from importlib.resources import files
 from pathlib import Path
@@ -50,6 +51,10 @@ TRACK_URL = re.compile(
     r"^https://www\.beatport\.com/track/[^/]+/([1-9][0-9]*)$"
 )
 ENTITY_ID = re.compile(r"^beatport:[a-z_]+:([1-9][0-9]*)$")
+RFC3339_DATE_TIME = re.compile(
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
+    r"(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
+)
 
 
 def _invalid(message: str) -> BeatportExportError:
@@ -132,6 +137,20 @@ def _validate_document(document: object) -> dict:
     if errors:
         raise _invalid("document does not satisfy the normative V2 schema")
     value = document
+    extracted_at = value["extracted_at"]
+    try:
+        parsed_extracted_at = datetime.fromisoformat(
+            extracted_at.replace("Z", "+00:00")
+        )
+    except ValueError as exc:
+        raise _invalid(
+            "document does not satisfy the normative V2 schema"
+        ) from exc
+    if (
+        RFC3339_DATE_TIME.fullmatch(extracted_at) is None
+        or parsed_extracted_at.tzinfo is None
+    ):
+        raise _invalid("document does not satisfy the normative V2 schema")
     source = value["source"]
     kind = source["kind"]
     source_id = source["beatport_id"]
