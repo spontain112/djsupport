@@ -1,0 +1,1016 @@
+<!doctype html>
+<!-- classification: public -->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DJ Support — ISRC feasibility logic prototype</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f7f7f4;
+      --paper: #ffffff;
+      --ink: #17241d;
+      --muted: #637068;
+      --line: #dce5df;
+      --emerald: #0d5e38;
+      --emerald-bright: #1a7a50;
+      --emerald-soft: #e6f4ed;
+      --amber: #9a5b00;
+      --amber-soft: #fff2d8;
+      --red: #a43f3f;
+      --red-soft: #fbe9e7;
+      --shadow: 0 14px 34px rgba(28, 52, 39, 0.08);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      line-height: 1.55;
+    }
+
+    button { font: inherit; }
+
+    .page {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 52px 0 96px;
+    }
+
+    .eyebrow,
+    .section-label,
+    .metric-label,
+    .status-label {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-size: 0.76rem;
+      font-weight: 700;
+      color: var(--emerald);
+    }
+
+    .hero {
+      border-left: 7px solid var(--emerald-bright);
+      padding: 4px 0 6px 28px;
+      margin-bottom: 34px;
+    }
+
+    h1 {
+      font-size: clamp(2.2rem, 6vw, 4.9rem);
+      line-height: 0.98;
+      letter-spacing: -0.055em;
+      margin: 12px 0 20px;
+      max-width: 900px;
+    }
+
+    h2, h3 { line-height: 1.18; letter-spacing: -0.025em; }
+    h2 { font-size: clamp(1.45rem, 3vw, 2.05rem); margin: 0; }
+    h3 { font-size: 1.02rem; margin: 0 0 8px; }
+
+    .hero p {
+      max-width: 850px;
+      color: var(--muted);
+      font-size: 1.08rem;
+      margin: 0;
+    }
+
+    .notice {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 12px;
+      align-items: start;
+      margin-top: 24px;
+      padding: 15px 17px;
+      border: 1px solid #c9ded1;
+      background: var(--emerald-soft);
+      border-radius: 10px;
+      max-width: 900px;
+      font-size: 0.92rem;
+    }
+
+    .notice strong { color: var(--emerald); }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      margin-top: 6px;
+      border-radius: 50%;
+      background: var(--emerald-bright);
+    }
+
+    .section { margin-top: 42px; }
+    .section-head { margin-bottom: 16px; }
+    .section-head p { margin: 7px 0 0; color: var(--muted); }
+
+    .state-shell {
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .state-banner {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px 24px;
+      justify-content: space-between;
+      align-items: center;
+      padding: 18px 22px;
+      background: var(--emerald-soft);
+      border-bottom: 1px solid #c9ded1;
+    }
+
+    .status-line { display: flex; align-items: center; gap: 10px; }
+    .status-value { font-weight: 750; }
+    .last-change { color: var(--muted); font-size: 0.9rem; }
+
+    .state-grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      border-bottom: 1px solid var(--line);
+    }
+
+    .metric {
+      min-height: 112px;
+      padding: 18px 20px;
+      border-right: 1px solid var(--line);
+    }
+
+    .metric:last-child { border-right: 0; }
+    .metric-value { display: block; margin-top: 5px; font-size: 2rem; font-weight: 800; letter-spacing: -0.04em; }
+    .metric-note { color: var(--muted); font-size: 0.78rem; }
+
+    .state-details {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 0;
+    }
+
+    .state-group {
+      padding: 22px;
+      border-right: 1px solid var(--line);
+    }
+
+    .state-group:nth-child(2n) { border-right: 0; }
+    .state-group:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+
+    .counter-list { margin: 13px 0 0; padding: 0; list-style: none; }
+    .counter-list li {
+      display: flex;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 6px 0;
+      border-bottom: 1px dashed #e5ebe7;
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+    .counter-list li:last-child { border-bottom: 0; }
+    .counter-list output { color: var(--ink); font-weight: 750; }
+
+    .privacy-band {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      padding: 18px 22px 22px;
+      background: #fbfcfb;
+      border-top: 1px solid var(--line);
+    }
+
+    .privacy-item {
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+    .privacy-item strong { display: block; color: var(--emerald); font-size: 1rem; }
+
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .action {
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: var(--paper);
+      color: var(--ink);
+      min-height: 84px;
+      padding: 14px;
+      text-align: left;
+      cursor: pointer;
+    }
+    .action:hover, .action:focus-visible { border-color: var(--emerald-bright); outline: none; box-shadow: 0 0 0 3px rgba(26, 122, 80, 0.12); }
+    .action strong { display: block; margin-bottom: 3px; }
+    .action span { color: var(--muted); font-size: 0.78rem; }
+    .action.primary { color: #fff; background: var(--emerald); border-color: var(--emerald); }
+    .action.primary span { color: #dceee4; }
+    .action.warn { border-color: #e7c98f; background: #fffaf0; }
+
+    .tabs {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+      margin-bottom: 14px;
+    }
+
+    .tab {
+      white-space: nowrap;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: transparent;
+      padding: 9px 14px;
+      color: var(--muted);
+      cursor: pointer;
+    }
+
+    .tab[aria-selected="true"] { background: var(--emerald); color: #fff; border-color: var(--emerald); }
+
+    .walkthrough {
+      padding: 24px;
+      background: var(--paper);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      box-shadow: var(--shadow);
+    }
+
+    .walkthrough-copy { max-width: 760px; color: var(--muted); margin: 8px 0 20px; }
+    .steps { display: grid; gap: 10px; }
+    .step {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 14px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+    }
+    .step-number {
+      display: grid;
+      place-items: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: var(--emerald-soft);
+      color: var(--emerald);
+      font-weight: 800;
+    }
+    .step p { margin: 2px 0 0; color: var(--muted); font-size: 0.82rem; }
+    .step button {
+      border: 1px solid var(--emerald);
+      border-radius: 7px;
+      background: transparent;
+      color: var(--emerald);
+      padding: 8px 12px;
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .step button:hover, .step button:focus-visible { background: var(--emerald-soft); outline: none; }
+    .step.done { opacity: 0.55; }
+
+    .report {
+      margin-top: 16px;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--emerald-bright);
+      border-radius: 10px;
+      background: var(--paper);
+      white-space: pre-wrap;
+      font: 0.82rem/1.65 "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      color: #33453b;
+      overflow-wrap: anywhere;
+    }
+
+    .boundary-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+    .boundary-card { padding: 18px; border-radius: 10px; border: 1px solid var(--line); background: var(--paper); }
+    .boundary-card.open { border-color: #c9ded1; background: var(--emerald-soft); }
+    .boundary-card.locked { border-color: #e7c98f; background: var(--amber-soft); }
+    .boundary-card p { color: var(--muted); font-size: 0.84rem; margin: 7px 0 0; }
+
+    footer { margin-top: 44px; color: var(--muted); font-size: 0.8rem; }
+
+    @media (max-width: 900px) {
+      .state-grid, .privacy-band { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .state-grid .metric:nth-child(2) { border-right: 0; }
+      .state-grid .metric:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+      .state-details { grid-template-columns: 1fr; }
+      .state-group { border-right: 0; border-bottom: 1px solid var(--line); }
+      .state-group:last-child { border-bottom: 0; }
+      .controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .boundary-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 560px) {
+      .page { width: min(100% - 20px, 1180px); padding-top: 28px; }
+      .hero { padding-left: 18px; }
+      .state-grid, .privacy-band, .controls { grid-template-columns: 1fr; }
+      .metric { border-right: 0; border-bottom: 1px solid var(--line); }
+      .metric:last-child { border-bottom: 0; }
+      .step { grid-template-columns: 30px minmax(0, 1fr); }
+      .step button { grid-column: 2; justify-self: start; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="hero">
+      <div class="eyebrow">Prototype · Issue 42 · Phase A only</div>
+      <h1>Can ISRC evidence save requests without hiding risk?</h1>
+      <p>This throwaway simulator checks whether a redacted measurement can respect source boundaries, reuse trusted knowledge first, classify Spotify outcomes, and count request tradeoffs. It does not read files or call Spotify.</p>
+      <div class="notice">
+        <span class="dot" aria-hidden="true"></span>
+        <div><strong>Everything here is invented.</strong> The model keeps aggregate counters only. Phase B local-file access and Phase C live Spotify measurement remain locked until separately authorized.</div>
+      </div>
+    </header>
+
+    <section class="section" aria-labelledby="state-title">
+      <div class="section-head">
+        <div class="section-label">01 / Current state</div>
+        <h2 id="state-title">What the measurement currently knows</h2>
+        <p>Every action replaces raw observations with counters before rendering.</p>
+      </div>
+      <div class="state-shell">
+        <div class="state-banner">
+          <div class="status-line"><span class="dot" id="status-dot"></span><span class="status-label">Status</span><span class="status-value" id="status-value">Ready</span></div>
+          <div class="last-change" id="last-change">No synthetic cases measured yet.</div>
+        </div>
+        <div class="state-grid">
+          <div class="metric"><span class="metric-label">Measured source records</span><output class="metric-value" id="records-total">0</output><span class="metric-note">Rejected intake is counted separately.</span></div>
+          <div class="metric"><span class="metric-label">Baseline requests</span><output class="metric-value" id="requests-baseline">0</output><span class="metric-note">Current fuzzy searches after reuse.</span></div>
+          <div class="metric"><span class="metric-label">Candidate requests</span><output class="metric-value" id="requests-candidate">0</output><span class="metric-note">ISRC plus required fuzzy fallback.</span></div>
+          <div class="metric"><span class="metric-label">Net request change</span><output class="metric-value" id="requests-net">0</output><span class="metric-note">Candidate minus baseline. Negative is fewer.</span></div>
+        </div>
+        <div class="state-details">
+          <article class="state-group">
+            <h3>Reuse &amp; source coverage</h3>
+            <ul class="counter-list" id="source-counters"></ul>
+          </article>
+          <article class="state-group">
+            <h3>Local boundary coverage</h3>
+            <ul class="counter-list" id="local-counters"></ul>
+          </article>
+          <article class="state-group">
+            <h3>Spotify result classes</h3>
+            <ul class="counter-list" id="spotify-counters"></ul>
+          </article>
+          <article class="state-group">
+            <h3>Correctness &amp; review</h3>
+            <ul class="counter-list" id="outcome-counters"></ul>
+          </article>
+        </div>
+        <div class="privacy-band">
+          <div class="privacy-item"><strong id="privacy-paths">0</strong>raw paths retained</div>
+          <div class="privacy-item"><strong id="privacy-metadata">0</strong>titles / artists retained</div>
+          <div class="privacy-item"><strong id="privacy-isrc">0</strong>ISRC values retained</div>
+          <div class="privacy-item"><strong id="privacy-spotify">0</strong>Spotify IDs retained</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-labelledby="free-title">
+      <div class="section-head">
+        <div class="section-label">02 / Free play</div>
+        <h2 id="free-title">Add one bounded synthetic case</h2>
+        <p>Use these in any order. Each button names the policy effect, not an internal function.</p>
+      </div>
+      <div class="controls" id="free-actions"></div>
+    </section>
+
+    <section class="section" aria-labelledby="guided-title">
+      <div class="section-head">
+        <div class="section-label">03 / Guided scenarios</div>
+        <h2 id="guided-title">Walk the awkward paths deliberately</h2>
+        <p>Opening a scenario resets the state so its request arithmetic remains repeatable.</p>
+      </div>
+      <div class="tabs" role="tablist" aria-label="Guided scenarios" id="scenario-tabs"></div>
+      <div class="walkthrough" id="walkthrough"></div>
+    </section>
+
+    <section class="section" aria-labelledby="report-title">
+      <div class="section-head">
+        <div class="section-label">04 / Redacted output</div>
+        <h2 id="report-title">The only report this model permits</h2>
+        <p>This rendering is aggregate-only by construction and deliberately contains no record-level evidence.</p>
+      </div>
+      <pre class="report" id="redacted-report"></pre>
+    </section>
+
+    <section class="section" aria-labelledby="boundary-title">
+      <div class="section-head">
+        <div class="section-label">05 / Authorization gates</div>
+        <h2 id="boundary-title">What this prototype cannot prove</h2>
+      </div>
+      <div class="boundary-grid">
+        <article class="boundary-card open"><h3>Phase A · Authorized</h3><p>Synthetic contract, URI, tag, outcome, privacy, and request-accounting logic only.</p></article>
+        <article class="boundary-card locked"><h3>Phase B · Locked</h3><p>No selected Rekordbox XML or local audio has been read. Real tag coverage and URI behavior remain unknown.</p></article>
+        <article class="boundary-card locked"><h3>Phase C · Locked</h3><p>No credentials or live Spotify requests have been used. Real correctness and net request savings remain unknown.</p></article>
+      </div>
+    </section>
+
+    <footer>PROTOTYPE — throwaway decision evidence, not production behavior. No persistence, frameworks, server, file access, or network access.</footer>
+  </main>
+
+  <script>
+  const IsrcMeasurement = (() => {
+    const spotifyClasses = [
+      "no_hit",
+      "one_verified_hit",
+      "multiple_equivalent_release_instances",
+      "ambiguous_version",
+      "market_unplayable_or_relinked",
+      "returned_isrc_mismatch"
+    ];
+
+    const emptyCounters = (keys) => Object.fromEntries(keys.map((key) => [key, 0]));
+
+    const createState = () => ({
+      phase: "A — synthetic only",
+      authorization: { phaseA: true, phaseB: false, phaseC: false },
+      status: "ready",
+      stopReason: null,
+      lastChange: "No synthetic cases measured yet.",
+      totals: {
+        sourceRecords: 0,
+        intakeRejected: 0,
+        approvedMatchHits: 0,
+        retainedCacheHits: 0,
+        eligibleAfterReuse: 0,
+        recordsWithLocation: 0,
+        decodableLocalFileUris: 0,
+        existingReadableFiles: 0,
+        supportedFormats: 0,
+        validNormalizedIsrc: 0,
+        noIsrc: 0,
+        invalidIsrc: 0,
+        conflictingIsrc: 0,
+        normalizationVariants: 0,
+        beatportPresent: 0,
+        beatportNull: 0,
+        beatportMissing: 0,
+        beatportMalformed: 0,
+        beatportSchemaMoved: 0,
+        localEmptyHost: 0,
+        localLocalhost: 0,
+        localWindows: 0,
+        localEncodedSpaces: 0,
+        localUnicode: 0,
+        localNonFileScheme: 0,
+        localNonLocalHost: 0,
+        localMissingFile: 0,
+        localUnsupportedFormat: 0,
+        localCorruptOrNoTags: 0,
+        tagMp3AiffTsrc: 0,
+        tagFlacVorbisIsrc: 0,
+        tagMp4FreeformIsrc: 0,
+        tagUnsupported: 0
+      },
+      spotify: emptyCounters(spotifyClasses),
+      requests: {
+        baselineFuzzy: 0,
+        candidateIsrc: 0,
+        candidateFuzzy: 0,
+        fuzzySkipped: 0,
+        requestBudget: 30,
+        budgetStops: 0
+      },
+      outcomes: {
+        baselineCorrect: 0,
+        baselineWrong: 0,
+        baselineReview: 0,
+        candidateCorrect: 0,
+        candidateWrong: 0,
+        candidateReview: 0
+      },
+      privacy: {
+        rawPathsRetained: 0,
+        titlesArtistsRetained: 0,
+        isrcValuesRetained: 0,
+        spotifyIdsRetained: 0,
+        aggregateOnly: true
+      }
+    });
+
+    const normalizeIsrc = (value) => {
+      if (typeof value !== "string" || value.trim() === "") return { kind: "absent" };
+      const compact = value.toUpperCase().replace(/[\s-]/g, "");
+      if (!/^[A-Z]{2}[A-Z0-9]{3}\d{7}$/.test(compact)) return { kind: "invalid" };
+      return { kind: "valid", value: compact, changed: compact !== value };
+    };
+
+    const deriveIsrc = (values) => {
+      const normalized = values.map(normalizeIsrc);
+      const valid = [...new Set(normalized.filter((item) => item.kind === "valid").map((item) => item.value))];
+      if (valid.length > 1) return { kind: "conflicting", normalizationVariants: normalized.filter((item) => item.changed).length };
+      if (normalized.some((item) => item.kind === "invalid")) return { kind: "invalid", normalizationVariants: normalized.filter((item) => item.changed).length };
+      if (valid.length === 1) return { kind: "valid", value: valid[0], normalizationVariants: normalized.filter((item) => item.changed).length };
+      return { kind: "absent", normalizationVariants: 0 };
+    };
+
+    const safeSpotifyResult = (result) => {
+      if (!result) return false;
+      const classCanBeSafe = result.classification === "one_verified_hit" || result.classification === "multiple_equivalent_release_instances";
+      return classCanBeSafe && result.returnedIsrcVerified === true && result.titleArtistSafe === true && result.versionSafe === true && result.durationSafe === true && result.marketSafe === true;
+    };
+
+    const addOutcome = (outcomes, prefix, outcome) => {
+      const suffix = outcome === "correct" ? "Correct" : outcome === "wrong" ? "Wrong" : "Review";
+      outcomes[`${prefix}${suffix}`] += 1;
+    };
+
+    const inspectLocalBoundary = (record, totals) => {
+      totals.recordsWithLocation += record.local.hasLocation ? 1 : 0;
+      if (!record.local.hasLocation) return { accepted: true, values: [] };
+      if (!record.local.uriAccepted) {
+        if (record.local.unsafeReason === "non_file") totals.localNonFileScheme += 1;
+        if (record.local.unsafeReason === "non_local") totals.localNonLocalHost += 1;
+        return { accepted: true, values: [] };
+      }
+      totals.decodableLocalFileUris += 1;
+      if (record.local.host === "empty") totals.localEmptyHost += 1;
+      if (record.local.host === "localhost") totals.localLocalhost += 1;
+      if (record.local.platform === "windows") totals.localWindows += 1;
+      if (record.local.encodedSpaces) totals.localEncodedSpaces += 1;
+      if (record.local.unicode) totals.localUnicode += 1;
+      if (!record.local.existsReadable) {
+        totals.localMissingFile += 1;
+        return { accepted: true, values: [] };
+      }
+      totals.existingReadableFiles += 1;
+      if (!record.local.supportedFormat) {
+        totals.localUnsupportedFormat += 1;
+        return { accepted: true, values: [] };
+      }
+      totals.supportedFormats += 1;
+      if (record.local.tagState === "corrupt" || record.local.tagState === "none") {
+        totals.localCorruptOrNoTags += 1;
+        return { accepted: true, values: [] };
+      }
+      if (record.local.tagFormat === "mp3_aiff_tsrc") totals.tagMp3AiffTsrc += 1;
+      if (record.local.tagFormat === "flac_vorbis_isrc") totals.tagFlacVorbisIsrc += 1;
+      if (record.local.tagFormat === "mp4_freeform_isrc") totals.tagMp4FreeformIsrc += 1;
+      if (record.local.tagFormat === "unsupported") totals.tagUnsupported += 1;
+      return { accepted: true, values: record.local.tagValues || [] };
+    };
+
+    const inspectSource = (record, totals) => {
+      if (record.source === "beatport") {
+        totals[`beatport${record.beatportCase[0].toUpperCase()}${record.beatportCase.slice(1)}`] += 1;
+        if (!record.contractAccepted) {
+          totals.intakeRejected += 1;
+          return { accepted: false, values: [] };
+        }
+        return { accepted: true, values: record.isrcValues || [] };
+      }
+      return inspectLocalBoundary(record, totals);
+    };
+
+    const measureBatch = (previous, records, label) => {
+      const state = structuredClone(previous);
+      state.status = "measured";
+      state.stopReason = null;
+      state.lastChange = label;
+      const isrcGroups = new Map();
+      const eligible = [];
+
+      for (const record of records) {
+        state.totals.sourceRecords += 1;
+        const source = inspectSource(record, state.totals);
+        if (!source.accepted) continue;
+        if (record.bypass === "approved") {
+          state.totals.approvedMatchHits += 1;
+          continue;
+        }
+        if (record.bypass === "cache") {
+          state.totals.retainedCacheHits += 1;
+          continue;
+        }
+
+        state.totals.eligibleAfterReuse += 1;
+        state.requests.baselineFuzzy += 1;
+        addOutcome(state.outcomes, "baseline", record.fuzzyOutcome || "review");
+
+        const isrc = deriveIsrc(source.values);
+        state.totals.normalizationVariants += isrc.normalizationVariants;
+        if (isrc.kind === "valid") state.totals.validNormalizedIsrc += 1;
+        if (isrc.kind === "absent") state.totals.noIsrc += 1;
+        if (isrc.kind === "invalid") state.totals.invalidIsrc += 1;
+        if (isrc.kind === "conflicting") state.totals.conflictingIsrc += 1;
+        eligible.push({ record, isrc });
+        if (isrc.kind === "valid" && !isrcGroups.has(isrc.value)) isrcGroups.set(isrc.value, record.spotify);
+      }
+
+      const available = state.requests.requestBudget - state.requests.candidateIsrc - state.requests.candidateFuzzy;
+      const groupResults = new Map();
+      let remaining = available;
+      let budgetReached = false;
+      for (const [value, result] of isrcGroups.entries()) {
+        if (remaining < 1) {
+          state.status = "stopped";
+          state.stopReason = "The synthetic request budget was reached before another distinct ISRC lookup.";
+          state.requests.budgetStops += 1;
+          budgetReached = true;
+          break;
+        }
+        state.requests.candidateIsrc += 1;
+        remaining -= 1;
+        state.spotify[result.classification] += 1;
+        groupResults.set(value, { result, safe: safeSpotifyResult(result) });
+      }
+
+      for (const item of eligible) {
+        const group = item.isrc.kind === "valid" ? groupResults.get(item.isrc.value) : null;
+        if (budgetReached && item.isrc.kind === "valid" && !group) break;
+        if (group?.safe) {
+          state.requests.fuzzySkipped += 1;
+          addOutcome(state.outcomes, "candidate", "correct");
+          continue;
+        }
+        if (remaining < 1) {
+          state.status = "stopped";
+          state.stopReason ||= "The synthetic request budget was reached before required fuzzy fallback.";
+          state.requests.budgetStops += 1;
+          break;
+        }
+        state.requests.candidateFuzzy += 1;
+        remaining -= 1;
+        addOutcome(state.outcomes, "candidate", item.record.fuzzyOutcome || "review");
+      }
+
+      return state;
+    };
+
+    const blockUnauthorized = (previous, phase) => {
+      const state = structuredClone(previous);
+      state.status = "stopped";
+      state.stopReason = `${phase} has not been explicitly authorized. No gated boundary was crossed.`;
+      state.lastChange = `${phase} attempt blocked before access.`;
+      return state;
+    };
+
+    const reduce = (state, action) => {
+      if (action.type === "RESET") return createState();
+      if (action.type === "MEASURE") return measureBatch(state, action.records, action.label);
+      if (action.type === "BLOCK_PHASE") return blockUnauthorized(state, action.phase);
+      return state;
+    };
+
+    const report = (state) => {
+      const candidate = state.requests.candidateIsrc + state.requests.candidateFuzzy;
+      const baselineDecisions = state.outcomes.baselineCorrect + state.outcomes.baselineWrong + state.outcomes.baselineReview;
+      const candidateDecisions = state.outcomes.candidateCorrect + state.outcomes.candidateWrong + state.outcomes.candidateReview;
+      const percent = (value, total) => total ? `${((value / total) * 100).toFixed(1)}%` : "n/a";
+      return [
+        "ISRC FEASIBILITY — SYNTHETIC AGGREGATE",
+        "Authorized/run: Phase A only; Phase B and C not authorized or run",
+        `Bounds: ${state.totals.sourceRecords} invented records; request budget ${state.requests.requestBudget}`,
+        `Exclusions: ${state.totals.intakeRejected} contract-rejected; ${state.totals.approvedMatchHits} Approved Match; ${state.totals.retainedCacheHits} retained cache`,
+        `Coverage: valid ${state.totals.validNormalizedIsrc}; absent ${state.totals.noIsrc}; invalid ${state.totals.invalidIsrc}; conflicting ${state.totals.conflictingIsrc}`,
+        `Beatport V2: present ${state.totals.beatportPresent}; null-rejected ${state.totals.beatportNull}; missing ${state.totals.beatportMissing}; malformed ${state.totals.beatportMalformed}; schema-moved-rejected ${state.totals.beatportSchemaMoved}`,
+        `Local URI/file: locations ${state.totals.recordsWithLocation}; decodable ${state.totals.decodableLocalFileUris}; readable ${state.totals.existingReadableFiles}; supported ${state.totals.supportedFormats}; non-file ${state.totals.localNonFileScheme}; non-local ${state.totals.localNonLocalHost}; missing ${state.totals.localMissingFile}; unsupported ${state.totals.localUnsupportedFormat}; corrupt/no-tags ${state.totals.localCorruptOrNoTags}`,
+        `Local tag shapes: MP3/AIFF TSRC ${state.totals.tagMp3AiffTsrc}; FLAC/Vorbis ISRC ${state.totals.tagFlacVorbisIsrc}; MP4 freeform ${state.totals.tagMp4FreeformIsrc}; unsupported ${state.totals.tagUnsupported}`,
+        `Requests: baseline fuzzy ${state.requests.baselineFuzzy}; candidate ISRC ${state.requests.candidateIsrc}; candidate fuzzy ${state.requests.candidateFuzzy}; net ${candidate - state.requests.baselineFuzzy >= 0 ? "+" : ""}${candidate - state.requests.baselineFuzzy}`,
+        `Fuzzy requests skipped after safe ISRC result: ${state.requests.fuzzySkipped}`,
+        `Baseline: correct ${state.outcomes.baselineCorrect}; wrong ${state.outcomes.baselineWrong}; review ${state.outcomes.baselineReview} (${percent(state.outcomes.baselineReview, baselineDecisions)})`,
+        `Candidate: correct ${state.outcomes.candidateCorrect}; wrong ${state.outcomes.candidateWrong}; review ${state.outcomes.candidateReview} (${percent(state.outcomes.candidateReview, candidateDecisions)})`,
+        `Spotify classes: ${spotifyClasses.map((key) => `${key}=${state.spotify[key]}`).join("; ")}`,
+        `Stop: ${state.stopReason || "none"}`,
+        "Privacy: raw paths=0; titles/artists=0; raw tags/ISRCs=0; Spotify identifiers=0",
+        "Interpretation: synthetic arithmetic only — not evidence of real coverage, correctness, or savings."
+      ].join("\n");
+    };
+
+    return { createState, reduce, report, normalizeIsrc, deriveIsrc, safeSpotifyResult };
+  })();
+  </script>
+
+  <script>
+  const verified = (classification = "one_verified_hit") => ({
+    classification,
+    returnedIsrcVerified: true,
+    titleArtistSafe: true,
+    versionSafe: true,
+    durationSafe: true,
+    marketSafe: true
+  });
+
+  const unsafe = (classification) => ({
+    classification,
+    returnedIsrcVerified: classification !== "returned_isrc_mismatch",
+    titleArtistSafe: classification !== "no_hit",
+    versionSafe: false,
+    durationSafe: false,
+    marketSafe: classification !== "market_unplayable_or_relinked"
+  });
+
+  const record = (overrides = {}) => ({
+    source: "beatport",
+    beatportCase: "present",
+    contractAccepted: true,
+    isrcValues: ["ZZAAA2600001"],
+    bypass: null,
+    spotify: verified(),
+    fuzzyOutcome: "correct",
+    ...overrides
+  });
+
+  const local = (overrides = {}) => record({
+    source: "local",
+    local: {
+      hasLocation: true,
+      uriAccepted: true,
+      host: "empty",
+      platform: "posix",
+      existsReadable: true,
+      supportedFormat: true,
+      tagState: "readable",
+      tagFormat: "mp3_aiff_tsrc",
+      encodedSpaces: true,
+      unicode: false,
+      unsafeReason: null,
+      tagValues: ["zz-aaa-26-00005"],
+      ...overrides
+    }
+  });
+
+  const CASES = {
+    approved: [record({ bypass: "approved" })],
+    cache: [record({ bypass: "cache" })],
+    safeBeatport: [record()],
+    duplicateIsrc: [
+      record({ isrcValues: ["zz-aaa-26-00004"], fuzzyOutcome: "review", spotify: verified("multiple_equivalent_release_instances") }),
+      record({ isrcValues: ["ZZ AAA 26 00004"], fuzzyOutcome: "review", spotify: verified("multiple_equivalent_release_instances") })
+    ],
+    unsafeSpotify: [record({ spotify: unsafe("ambiguous_version"), fuzzyOutcome: "review" })],
+    missingBeatport: [record({ beatportCase: "missing", isrcValues: [], fuzzyOutcome: "correct" })],
+    invalidBeatport: [record({ beatportCase: "malformed", isrcValues: ["NOT-A-CODE"], fuzzyOutcome: "review" })],
+    rejectedBeatport: [
+      record({ beatportCase: "null", contractAccepted: false, isrcValues: [] }),
+      record({ beatportCase: "schemaMoved", contractAccepted: false, isrcValues: [] })
+    ],
+    conflicting: [record({ isrcValues: ["ZZAAA2600001", "ZZAAA2600002"], fuzzyOutcome: "review" })],
+    localSafe: [
+      local(),
+      local({ host: "localhost", unicode: true, tagFormat: "flac_vorbis_isrc", tagValues: ["ZZAAA2600006"] }),
+      local({ platform: "windows", tagFormat: "mp4_freeform_isrc", tagValues: ["ZZAAA2600007"] })
+    ],
+    localEdges: [
+      local({ uriAccepted: false, unsafeReason: "non_file", tagValues: [] }),
+      local({ uriAccepted: false, unsafeReason: "non_local", tagValues: [] }),
+      local({ existsReadable: false, tagValues: [] }),
+      local({ supportedFormat: false, tagValues: [] }),
+      local({ tagState: "corrupt", tagValues: [] }),
+      local({ tagState: "none", tagValues: [] }),
+      local({ tagFormat: "unsupported", tagValues: [] })
+    ],
+    allSpotify: [
+      record({ isrcValues: ["ZZAAA2600101"], spotify: unsafe("no_hit"), fuzzyOutcome: "review" }),
+      record({ isrcValues: ["ZZAAA2600102"], spotify: verified("one_verified_hit"), fuzzyOutcome: "correct" }),
+      record({ isrcValues: ["ZZAAA2600103"], spotify: verified("multiple_equivalent_release_instances"), fuzzyOutcome: "review" }),
+      record({ isrcValues: ["ZZAAA2600104"], spotify: unsafe("ambiguous_version"), fuzzyOutcome: "review" }),
+      record({ isrcValues: ["ZZAAA2600105"], spotify: unsafe("market_unplayable_or_relinked"), fuzzyOutcome: "review" }),
+      record({ isrcValues: ["ZZAAA2600106"], spotify: unsafe("returned_isrc_mismatch"), fuzzyOutcome: "wrong" })
+    ]
+  };
+
+  const FULL_PHASE_A = [
+    ...CASES.approved,
+    ...CASES.cache,
+    ...CASES.safeBeatport,
+    ...CASES.duplicateIsrc,
+    ...CASES.missingBeatport,
+    ...CASES.invalidBeatport,
+    ...CASES.rejectedBeatport,
+    ...CASES.conflicting,
+    ...CASES.localSafe,
+    ...CASES.localEdges,
+    ...CASES.allSpotify
+  ];
+
+  const ACTIONS = [
+    { key: "full", title: "Run complete Phase A", note: "All required synthetic boundaries and six Spotify classes.", primary: true, reference: true, records: FULL_PHASE_A },
+    { key: "approved", title: "Reuse Approved Match", note: "Stops before ISRC and fuzzy search.", records: CASES.approved },
+    { key: "cache", title: "Reuse retained cache", note: "Stops before ISRC and fuzzy search.", records: CASES.cache },
+    { key: "safe", title: "Verify Beatport ISRC", note: "One safe result skips fuzzy fallback.", records: CASES.safeBeatport },
+    { key: "duplicate", title: "Reuse one ISRC lookup", note: "Two normalized occurrences share one request.", records: CASES.duplicateIsrc },
+    { key: "ambiguous", title: "Find version ambiguity", note: "Unsafe ISRC result requires fallback.", records: CASES.unsafeSpotify },
+    { key: "source", title: "Exercise source boundaries", note: "V2 rejection plus local URI and tag outcomes.", records: [...CASES.rejectedBeatport, ...CASES.localEdges] },
+    { key: "reset", title: "Reset measurement", note: "Return every aggregate to zero.", reset: true }
+  ];
+
+  const SCENARIOS = [
+    {
+      key: "order",
+      title: "Evaluation order",
+      intro: "Watch trusted knowledge bypass both lookup strategies. Then compare one safe ISRC result with an ambiguous result that must fall back.",
+      steps: [
+        ["Reuse an Approved Match", "No request belongs in either strategy total.", CASES.approved],
+        ["Reuse retained cache", "Again, neither strategy receives a claimed saving.", CASES.cache],
+        ["Try a safe ISRC result", "One ISRC request replaces one fuzzy request.", CASES.safeBeatport],
+        ["Try an ambiguous version", "The ISRC request is additive because fuzzy fallback remains required.", CASES.unsafeSpotify]
+      ]
+    },
+    {
+      key: "sources",
+      title: "Source boundaries",
+      intro: "Beatport V2 is the lower-risk path because it supplies typed public evidence. Local tags remain separately gated and simulated here.",
+      steps: [
+        ["Measure V2 present and missing", "Present is normalizable; missing is accepted absence and falls back.", [...CASES.safeBeatport, ...CASES.missingBeatport]],
+        ["Reject null and moved fields", "The normative V2 contract rejects both before matching.", CASES.rejectedBeatport],
+        ["Read supported tag shapes", "Simulates TSRC, Vorbis ISRC, and MP4 freeform without opening files.", CASES.localSafe],
+        ["Stop at unsafe local boundaries", "Non-local schemes, missing files, unsupported formats, and unreadable tags become aggregate outcomes.", CASES.localEdges]
+      ]
+    },
+    {
+      key: "spotify",
+      title: "Spotify safety",
+      intro: "Every attempted synthetic ISRC lookup lands in exactly one class. Only verified, non-ambiguous, playable results skip fuzzy fallback.",
+      steps: [
+        ["Classify all six outcomes", "No first-result shortcut is allowed.", CASES.allSpotify],
+        ["Measure equivalent releases", "Equivalent representations are safe only when every verification flag passes.", CASES.duplicateIsrc]
+      ]
+    },
+    {
+      key: "gates",
+      title: "Authorization & stops",
+      intro: "The model refuses access beyond Phase A and stops when its synthetic request budget is exhausted.",
+      steps: [
+        ["Attempt Phase B", "The local-file boundary stays closed.", null, "Phase B"],
+        ["Attempt Phase C", "The live Spotify boundary stays closed.", null, "Phase C"],
+        ["Reach the request budget", "A bounded run stops instead of silently broadening work.", Array.from({ length: 22 }, (_, index) => record({ isrcValues: [`ZZAAA26${String(index + 300).padStart(5, "0")}`], spotify: unsafe("no_hit"), fuzzyOutcome: "review" }))]
+      ]
+    },
+    {
+      key: "complete",
+      title: "Complete Phase A",
+      intro: "One click covers the full synthetic method and produces the reference aggregate used in the Phase A verdict.",
+      steps: [
+        ["Run the reference sample", "Inspect the request difference, classifications, coverage, privacy counters, and locked gates.", FULL_PHASE_A]
+      ]
+    }
+  ];
+
+  let state = IsrcMeasurement.createState();
+  let activeScenario = SCENARIOS[0];
+  let completedSteps = new Set();
+
+  const sourceLabels = [
+    ["Approved Match hits", "approvedMatchHits"],
+    ["Retained-cache hits", "retainedCacheHits"],
+    ["Eligible after reuse", "eligibleAfterReuse"],
+    ["Contract-rejected", "intakeRejected"],
+    ["Beatport V2 present", "beatportPresent"],
+    ["Beatport V2 null-rejected", "beatportNull"],
+    ["Beatport V2 missing", "beatportMissing"],
+    ["Beatport V2 malformed", "beatportMalformed"],
+    ["Beatport V2 schema-moved", "beatportSchemaMoved"],
+    ["Valid normalized ISRC", "validNormalizedIsrc"],
+    ["No ISRC", "noIsrc"],
+    ["Invalid ISRC", "invalidIsrc"],
+    ["Conflicting ISRC", "conflictingIsrc"]
+  ];
+
+  const localLabels = [
+    ["Records with location", "recordsWithLocation"],
+    ["Decodable local file URI", "decodableLocalFileUris"],
+    ["Empty host", "localEmptyHost"],
+    ["localhost host", "localLocalhost"],
+    ["Windows form", "localWindows"],
+    ["Encoded spaces", "localEncodedSpaces"],
+    ["Unicode", "localUnicode"],
+    ["Non-file scheme", "localNonFileScheme"],
+    ["Non-local host", "localNonLocalHost"],
+    ["Existing / readable", "existingReadableFiles"],
+    ["Missing file", "localMissingFile"],
+    ["Supported format", "supportedFormats"],
+    ["Unsupported format", "localUnsupportedFormat"],
+    ["Corrupt / no tags", "localCorruptOrNoTags"],
+    ["MP3/AIFF TSRC", "tagMp3AiffTsrc"],
+    ["FLAC/Vorbis ISRC", "tagFlacVorbisIsrc"],
+    ["MP4 freeform ISRC", "tagMp4FreeformIsrc"],
+    ["Unsupported tag shape", "tagUnsupported"]
+  ];
+
+  const spotifyLabels = [
+    ["No hit", "no_hit"],
+    ["One verified hit", "one_verified_hit"],
+    ["Equivalent releases", "multiple_equivalent_release_instances"],
+    ["Ambiguous version", "ambiguous_version"],
+    ["Unplayable / relinked", "market_unplayable_or_relinked"],
+    ["Returned-ISRC mismatch", "returned_isrc_mismatch"]
+  ];
+
+  const outcomeLabels = [
+    ["Baseline correct", "baselineCorrect"],
+    ["Baseline wrong", "baselineWrong"],
+    ["Baseline review", "baselineReview"],
+    ["Candidate correct", "candidateCorrect"],
+    ["Candidate wrong", "candidateWrong"],
+    ["Candidate review", "candidateReview"],
+    ["ISRC searches", "candidateIsrc", "requests"],
+    ["Fuzzy fallbacks", "candidateFuzzy", "requests"],
+    ["Fuzzy searches skipped", "fuzzySkipped", "requests"]
+  ];
+
+  const counterHtml = (rows, source) => rows.map(([label, key, alternate]) => `<li><span>${label}</span><output>${alternate ? state[alternate][key] : state[source][key]}</output></li>`).join("");
+
+  const render = () => {
+    const candidate = state.requests.candidateIsrc + state.requests.candidateFuzzy;
+    const net = candidate - state.requests.baselineFuzzy;
+    document.getElementById("status-value").textContent = state.status === "stopped" ? "Stopped safely" : state.status === "measured" ? "Synthetic evidence measured" : "Ready";
+    document.getElementById("status-dot").style.background = state.status === "stopped" ? "var(--amber)" : "var(--emerald-bright)";
+    document.getElementById("last-change").textContent = state.stopReason || state.lastChange;
+    document.getElementById("records-total").textContent = state.totals.sourceRecords;
+    document.getElementById("requests-baseline").textContent = state.requests.baselineFuzzy;
+    document.getElementById("requests-candidate").textContent = candidate;
+    document.getElementById("requests-net").textContent = `${net > 0 ? "+" : ""}${net}`;
+    document.getElementById("requests-net").style.color = net < 0 ? "var(--emerald)" : net > 0 ? "var(--amber)" : "var(--ink)";
+    document.getElementById("source-counters").innerHTML = counterHtml(sourceLabels, "totals");
+    document.getElementById("local-counters").innerHTML = counterHtml(localLabels, "totals");
+    document.getElementById("spotify-counters").innerHTML = counterHtml(spotifyLabels, "spotify");
+    document.getElementById("outcome-counters").innerHTML = counterHtml(outcomeLabels, "outcomes");
+    document.getElementById("privacy-paths").textContent = state.privacy.rawPathsRetained;
+    document.getElementById("privacy-metadata").textContent = state.privacy.titlesArtistsRetained;
+    document.getElementById("privacy-isrc").textContent = state.privacy.isrcValuesRetained;
+    document.getElementById("privacy-spotify").textContent = state.privacy.spotifyIdsRetained;
+    document.getElementById("redacted-report").textContent = IsrcMeasurement.report(state);
+  };
+
+  const dispatch = (action) => {
+    state = IsrcMeasurement.reduce(state, action);
+    render();
+  };
+
+  const measureAction = (records, label) => dispatch({ type: "MEASURE", records, label });
+
+  document.getElementById("free-actions").innerHTML = ACTIONS.map((action) => `
+    <button class="action ${action.primary ? "primary" : ""}" data-free="${action.key}">
+      <strong>${action.title}</strong><span>${action.note}</span>
+    </button>`).join("");
+
+  document.getElementById("free-actions").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-free]");
+    if (!button) return;
+    const action = ACTIONS.find((item) => item.key === button.dataset.free);
+    if (action.reset) dispatch({ type: "RESET" });
+    else if (action.reference) {
+      state = IsrcMeasurement.createState();
+      measureAction(action.records, action.title);
+    } else measureAction(action.records, action.title);
+  });
+
+  const renderTabs = () => {
+    document.getElementById("scenario-tabs").innerHTML = SCENARIOS.map((scenario) => `<button class="tab" role="tab" aria-selected="${scenario.key === activeScenario.key}" data-scenario="${scenario.key}">${scenario.title}</button>`).join("");
+  };
+
+  const renderScenario = () => {
+    document.getElementById("walkthrough").innerHTML = `
+      <h3>${activeScenario.title}</h3>
+      <p class="walkthrough-copy">${activeScenario.intro}</p>
+      <div class="steps">
+        ${activeScenario.steps.map(([title, note], index) => `
+          <div class="step ${completedSteps.has(index) ? "done" : ""}">
+            <span class="step-number">${index + 1}</span>
+            <div><strong>${title}</strong><p>${note}</p></div>
+            <button data-step="${index}">${completedSteps.has(index) ? "Run again" : "Run step"}</button>
+          </div>`).join("")}
+      </div>`;
+  };
+
+  document.getElementById("scenario-tabs").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-scenario]");
+    if (!button) return;
+    activeScenario = SCENARIOS.find((scenario) => scenario.key === button.dataset.scenario);
+    completedSteps = new Set();
+    dispatch({ type: "RESET" });
+    renderTabs();
+    renderScenario();
+  });
+
+  document.getElementById("walkthrough").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-step]");
+    if (!button) return;
+    const index = Number(button.dataset.step);
+    const [title, , records, blockedPhase] = activeScenario.steps[index];
+    if (blockedPhase) dispatch({ type: "BLOCK_PHASE", phase: blockedPhase });
+    else measureAction(records, title);
+    completedSteps.add(index);
+    renderScenario();
+  });
+
+  renderTabs();
+  renderScenario();
+  render();
+  </script>
+</body>
+</html>
