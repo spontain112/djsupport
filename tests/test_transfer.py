@@ -47,6 +47,7 @@ from djsupport.transfer import (
     MirrorRelationship,
     MirrorDisposition,
     SourceNotFound,
+    PUBLICATION_MANIFEST_VERSION,
 )
 
 
@@ -2734,7 +2735,9 @@ class TestTransferPublicationLifecycle:
             approved_at=datetime(2026, 8, 1),
         ))
 
-        assert json.loads(path.read_text())["version"] == 6
+        assert json.loads(path.read_text())[
+            "version"
+        ] == PUBLICATION_MANIFEST_VERSION
         assert len(FilePublicationStorage(path).mirrors_for_account(
             "spotify-user-1"
         )) == 1

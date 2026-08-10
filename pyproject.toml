@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 include = ["djsupport*"]
 
 [tool.setuptools.package-data]
-djsupport = ["static/*.html", "static/*.png"]
+djsupport = ["static/*.html", "static/*.png", "contracts/*.json"]
 
 [project]
 name = "djsupport"
@@ -21,6 +21,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "rapidfuzz>=3.0",
     "requests>=2.28",
+    "jsonschema>=4.23",
 ]
 
 [project.optional-dependencies]

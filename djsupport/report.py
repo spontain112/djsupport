@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from djsupport.source_facts import SourceOccurrence
+
 if TYPE_CHECKING:
     from djsupport.transfer import PublicationManifest
 
@@ -27,6 +29,7 @@ class MatchedTrack:
 class ReviewTrack:
     source_track_id: str
     source_name: str
+    source_occurrence: SourceOccurrence | dict | None = None
     source_artist: str = ""
     source_title: str = ""
     source_release: str = ""
@@ -42,6 +45,35 @@ class ReviewTrack:
     match_type: str = "unmatched"
     score_reasons: tuple[str, ...] = ()
     authority_status: str = "proposal"
+
+    def __post_init__(self) -> None:
+        if isinstance(self.source_occurrence, dict):
+            object.__setattr__(
+                self,
+                "source_occurrence",
+                SourceOccurrence.from_storage(self.source_occurrence),
+            )
+
+    @property
+    def occurrence_id(self) -> str:
+        return (
+            self.source_occurrence.occurrence_id
+            if isinstance(self.source_occurrence, SourceOccurrence) else ""
+        )
+
+    @property
+    def source_position(self) -> int:
+        return (
+            self.source_occurrence.position
+            if isinstance(self.source_occurrence, SourceOccurrence) else 0
+        )
+
+    @property
+    def source_facts(self) -> dict:
+        occurrence = self.source_occurrence
+        if not isinstance(occurrence, SourceOccurrence) or occurrence.facts is None:
+            return {}
+        return occurrence.facts.to_review_facts()
 
 
 @dataclass(frozen=True)

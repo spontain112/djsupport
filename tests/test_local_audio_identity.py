@@ -23,6 +23,7 @@ from djsupport.transfer import (
     Transfer,
     TransferMode,
     TransferRequest,
+    TRANSFER_STATE_VERSION,
 )
 
 
@@ -327,7 +328,7 @@ def test_completed_local_observation_is_not_recalculated_after_spotify_timeout(
 
     assert resumed.total_matched == 1
     assert local_audio.observed == ["rb-original"]
-    assert json.loads(state_path.read_text())["version"] == 5
+    assert json.loads(state_path.read_text())["version"] == TRANSFER_STATE_VERSION
 
 
 def test_explicit_drift_revocation_removes_local_identity_authority(tmp_path):

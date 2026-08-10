@@ -4,6 +4,8 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from djsupport.source_facts import SourceOccurrence
+
 
 @dataclass
 class Track:
@@ -18,6 +20,27 @@ class Track:
     duration: int = 0  # seconds, from TotalTime attribute
     location: str = ""  # private Rekordbox audio reference; never report this value
     version: str = ""  # retained Rekordbox Mix/version metadata when available
+    source_occurrence: SourceOccurrence | dict | None = None
+
+    def __post_init__(self) -> None:
+        if isinstance(self.source_occurrence, dict):
+            self.source_occurrence = SourceOccurrence.from_storage(
+                self.source_occurrence
+            )
+
+    @property
+    def occurrence_id(self) -> str:
+        return (
+            self.source_occurrence.occurrence_id
+            if isinstance(self.source_occurrence, SourceOccurrence) else ""
+        )
+
+    @property
+    def source_position(self) -> int:
+        return (
+            self.source_occurrence.position
+            if isinstance(self.source_occurrence, SourceOccurrence) else 0
+        )
 
     @property
     def display(self) -> str:
