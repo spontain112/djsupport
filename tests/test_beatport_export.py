@@ -479,6 +479,7 @@ def test_exact_producer_golden_is_accepted_without_transformation():
     assert selection.tracks[0].occurrence_id != selection.tracks[3].occurrence_id
     assert selection.tracks[0].source_occurrence.facts.availability.enabled is False
     assert selection.tracks[1].source_occurrence.facts.availability.enabled is None
+    assert selection.tracks[2].source_occurrence.facts.availability.enabled is True
     assert selection.tracks[0].source_occurrence.facts.commerce.price.code == "EUR"
     assert selection.tracks[0].source_occurrence.facts.commerce.price.value == 1.49
 
