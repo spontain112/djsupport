@@ -111,6 +111,29 @@ class TestRuntimeAssembly:
         assert storage.path == paths.transfer_state
         assert assembly.transfer_storage() is storage
 
+    def test_shared_transfer_storage_refreshes_after_an_external_write(
+        self, tmp_path,
+    ):
+        paths = selected_paths(tmp_path)
+        reader = RuntimeAssembly(default_paths=paths)
+        cached = reader.transfer_storage()
+        writer = RuntimeAssembly(
+            spotify_factory=SyntheticSpotify,
+            default_paths=paths,
+        ).assemble(
+            SyntheticSource(),
+            RuntimeSettings(spotify_access=SpotifyAccess.REQUIRED),
+        )
+
+        report = writer.transfer.execute(TransferRequest(
+            source="synthetic-selection",
+        ))
+
+        assert cached.load_transfer(report.transfer_id) is None
+        current = reader.transfer_storage()
+        assert current is cached
+        assert current.load_transfer(report.transfer_id) is not None
+
     def test_capability_graph_never_constructs_spotify_or_reads_a_source(self):
         def forbidden_spotify():
             raise AssertionError("Spotify must stay untouched")

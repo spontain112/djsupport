@@ -212,6 +212,8 @@ class RuntimeAssembly:
         path = paths.transfer_state
         if path not in self._transfer_storages:
             self._transfer_storages[path] = FileTransferStorage(path)
+        else:
+            self._transfer_storages[path].refresh()
         return self._transfer_storages[path]
 
     @staticmethod

@@ -122,34 +122,6 @@ def test_first_transfer_web_route_ignores_caller_asserted_readiness():
     transfer.assert_not_called()
 
 
-def test_default_first_transfer_uses_the_runtime_capability_graph(tmp_path):
-    delegate = RuntimeAssembly(default_paths=RuntimePaths.selected(
-        tmp_path / "matching-knowledge.json",
-        tmp_path / "publication-manifests.json",
-    ))
-    capability_calls = []
-
-    class SyntheticRuntimeAssembly:
-        local_audition = delegate.local_audition
-
-        def capability_transfer(self):
-            capability_calls.append(True)
-            return delegate.capability_transfer()
-
-    web = create_app(
-        runtime_assembly=SyntheticRuntimeAssembly(),
-        first_transfer_readiness=lambda path, authorized: FirstTransferReadiness(
-            False, False, False, False, None,
-        ),
-    )
-
-    response = TestClient(web).post("/rekordbox/first-transfer", json={})
-
-    assert response.status_code == 200
-    assert response.json()["next_action"] == "configure_spotify"
-    assert capability_calls == [True]
-
-
 def test_first_transfer_web_route_forwards_only_explicit_authority():
     transfer = MagicMock()
     transfer.authorization_requirement.side_effect = (
@@ -208,6 +180,164 @@ def _agent_web_transfer(plan, report=None):
     return transfer
 
 
+class _RecordingRuntimeAssembly:
+    def __init__(
+        self,
+        *,
+        transfer=None,
+        capability_delegate=None,
+        local_audition=None,
+    ):
+        self._transfer = transfer
+        self._capability_delegate = capability_delegate
+        self.local_audition = local_audition or (
+            capability_delegate.local_audition
+            if capability_delegate is not None
+            else LocalSourceAudition()
+        )
+        self.assemble_calls = []
+        self.capability_calls = 0
+
+    def assemble(self, source, settings):
+        if self._transfer is None:
+            raise AssertionError("No synthetic Transfer was configured")
+        self.assemble_calls.append((source, settings))
+        return RuntimeGraph(self._transfer, MagicMock())
+
+    def capability_transfer(self):
+        if self._capability_delegate is None:
+            raise AssertionError("No capability delegate was configured")
+        self.capability_calls += 1
+        return self._capability_delegate.capability_transfer()
+
+
+class TestWebRuntimeAssembly:
+    def test_default_first_transfer_uses_the_capability_graph(self, tmp_path):
+        delegate = RuntimeAssembly(default_paths=RuntimePaths.selected(
+            tmp_path / "matching-knowledge.json",
+            tmp_path / "publication-manifests.json",
+        ))
+        assembly = _RecordingRuntimeAssembly(capability_delegate=delegate)
+        web = create_app(
+            runtime_assembly=assembly,
+            first_transfer_readiness=lambda path, authorized: FirstTransferReadiness(
+                False, False, False, False, None,
+            ),
+        )
+
+        response = TestClient(web).post("/rekordbox/first-transfer", json={})
+
+        assert response.status_code == 200
+        assert response.json()["next_action"] == "configure_spotify"
+        assert assembly.capability_calls == 1
+
+    def test_default_rekordbox_plan_crosses_the_assembly_seam(self):
+        plan = BatchPlan((PlaylistPreflight(
+            name="Synthetic Selection",
+            reference="Synthetic/Selection",
+            total_tracks=1,
+            approved_match_hits=0,
+            cache_hits=0,
+            expected_uncached_lookups=1,
+            selection_token="opaque-selection-token",
+        ),), preview=True)
+        assembly = _RecordingRuntimeAssembly(
+            transfer=_agent_web_transfer(plan),
+        )
+        web = create_app(runtime_assembly=assembly)
+
+        response = TestClient(web).post("/rekordbox/batches/plan", json={
+            "xml_path": "/private/does-not-exist.xml",
+            "playlists": ["Synthetic/Selection"],
+            "preview": True,
+            "no_cache": True,
+            "authorize_private_source": True,
+        })
+
+        assert response.status_code == 200
+        assert response.json()["phase"] == "plan"
+        assert response.json()["counts"]["playlists"] == 1
+        source, settings = assembly.assemble_calls[0]
+        assert source.source_label == "Rekordbox"
+        assert settings.spotify_access == SpotifyAccess.DISABLED
+        assert settings.retain_matching_knowledge is False
+        assert settings.retain_publications is False
+        assert "does-not-exist" not in response.text
+
+    def test_default_beatport_start_crosses_the_assembly_seam(self):
+        transfer = MagicMock()
+        assembly = _RecordingRuntimeAssembly(transfer=transfer)
+        manager = MagicMock()
+        manager.get_cached_token.return_value = {"access_token": "synthetic"}
+        manager.is_token_expired.return_value = False
+        web = create_app(
+            runtime_assembly=assembly,
+            auth_manager=lambda: manager,
+            background_runner=lambda target, args: None,
+        )
+
+        response = TestClient(web).post("/sync", json={
+            "url": "https://www.beatport.com/chart/synthetic/123",
+            "dry_run": True,
+            "no_cache": True,
+        })
+
+        assert response.status_code == 200
+        source, settings = assembly.assemble_calls[0]
+        assert source.source_label == "Beatport"
+        assert settings.spotify_access == SpotifyAccess.REQUIRED
+        assert settings.retain_matching_knowledge is False
+        assert settings.retain_publications is False
+        transfer.prepare.assert_called_once()
+
+    def test_capabilities_cross_the_assembly_seam(self, tmp_path):
+        delegate = RuntimeAssembly(default_paths=RuntimePaths.selected(
+            tmp_path / "matching-knowledge.json",
+            tmp_path / "publication-manifests.json",
+        ))
+        assembly = _RecordingRuntimeAssembly(capability_delegate=delegate)
+
+        response = TestClient(create_app(
+            runtime_assembly=assembly,
+        )).get("/capabilities")
+
+        assert response.status_code == 200
+        assert response.json()["phase"] == "capability"
+        assert assembly.capability_calls == 1
+
+    def test_media_uses_the_assembly_owned_audition(self, tmp_path):
+        media = tmp_path / "private-owner-name.mp3"
+        media.write_bytes(b"0123456789")
+        audition = LocalSourceAudition(max_range_bytes=4)
+        opened = audition.open("transfer-1", "item-1", Track(
+            track_id="1", name="Synthetic", artist="Artist", album="", remixer="",
+            label="", genre="", date_added="", location=media.as_uri(),
+        ))
+
+        def forbidden_spotify():
+            raise AssertionError("Spotify must stay untouched")
+
+        assembly = RuntimeAssembly(
+            spotify_factory=forbidden_spotify,
+            default_paths=RuntimePaths.selected(
+                tmp_path / "matching-knowledge.json",
+                tmp_path / "publication-manifests.json",
+            ),
+            local_audition=audition,
+        )
+        client = TestClient(create_app(runtime_assembly=assembly))
+
+        response = client.get(
+            f"/rekordbox/qualification/media/{opened.handle}",
+            headers={"Range": "bytes=2-5"},
+        )
+
+        assert response.status_code == 206
+        assert response.content == b"2345"
+        assert response.headers["cache-control"] == "private, no-store"
+        assert "private-owner-name" not in str(response.headers)
+
+
 def test_rekordbox_web_plan_exposes_explicit_local_audio_opt_in_without_spotify():
     plan = BatchPlan((PlaylistPreflight(
         name="Private Selection",
@@ -247,80 +377,6 @@ def test_rekordbox_web_plan_exposes_explicit_local_audio_opt_in_without_spotify(
     assert factory_calls[0][0].local_audio_identity is True
     assert factory_calls[0][1] is False
     assert "synthetic-library" not in response.text
-
-
-def test_default_rekordbox_web_plan_crosses_the_runtime_assembly_seam():
-    plan = BatchPlan((PlaylistPreflight(
-        name="Synthetic Selection",
-        reference="Synthetic/Selection",
-        total_tracks=1,
-        approved_match_hits=0,
-        cache_hits=0,
-        expected_uncached_lookups=1,
-        selection_token="opaque-selection-token",
-    ),), preview=True)
-    calls = []
-
-    class SyntheticRuntimeAssembly:
-        local_audition = LocalSourceAudition()
-
-        def assemble(self, source, settings):
-            calls.append((source, settings))
-            return RuntimeGraph(_agent_web_transfer(plan), MagicMock())
-
-    web = create_app(runtime_assembly=SyntheticRuntimeAssembly())
-    response = TestClient(web).post("/rekordbox/batches/plan", json={
-        "xml_path": "/private/does-not-exist.xml",
-        "playlists": ["Synthetic/Selection"],
-        "preview": True,
-        "no_cache": True,
-        "authorize_private_source": True,
-    })
-
-    assert response.status_code == 200
-    assert response.json()["phase"] == "plan"
-    assert response.json()["counts"]["playlists"] == 1
-    source, settings = calls[0]
-    assert source.source_label == "Rekordbox"
-    assert settings.spotify_access == SpotifyAccess.DISABLED
-    assert settings.retain_matching_knowledge is False
-    assert settings.retain_publications is False
-    assert "does-not-exist" not in response.text
-
-
-def test_default_beatport_web_start_crosses_the_runtime_assembly_seam():
-    transfer = MagicMock()
-    calls = []
-
-    class SyntheticRuntimeAssembly:
-        local_audition = LocalSourceAudition()
-
-        def assemble(self, source, settings):
-            calls.append((source, settings))
-            return RuntimeGraph(transfer, MagicMock())
-
-    manager = MagicMock()
-    manager.get_cached_token.return_value = {"access_token": "synthetic"}
-    manager.is_token_expired.return_value = False
-    web = create_app(
-        runtime_assembly=SyntheticRuntimeAssembly(),
-        auth_manager=lambda: manager,
-        background_runner=lambda target, args: None,
-    )
-
-    response = TestClient(web).post("/sync", json={
-        "url": "https://www.beatport.com/chart/synthetic/123",
-        "dry_run": True,
-        "no_cache": True,
-    })
-
-    assert response.status_code == 200
-    source, settings = calls[0]
-    assert source.source_label == "Beatport"
-    assert settings.spotify_access == SpotifyAccess.REQUIRED
-    assert settings.retain_matching_knowledge is False
-    assert settings.retain_publications is False
-    transfer.prepare.assert_called_once()
 
 
 def test_rekordbox_web_execute_returns_aggregate_local_audio_outcome():
@@ -477,29 +533,6 @@ def test_capabilities_are_available_without_spotify_or_private_source(monkeypatc
         "requires_local_audio_identity": False,
         "requires_durable_matching_knowledge": False,
     }
-
-
-def test_capabilities_cross_the_runtime_assembly_seam(tmp_path):
-    delegate = RuntimeAssembly(default_paths=RuntimePaths.selected(
-        tmp_path / "matching-knowledge.json",
-        tmp_path / "publication-manifests.json",
-    ))
-    capability_calls = []
-
-    class SyntheticRuntimeAssembly:
-        local_audition = delegate.local_audition
-
-        def capability_transfer(self):
-            capability_calls.append(True)
-            return delegate.capability_transfer()
-
-    response = TestClient(create_app(
-        runtime_assembly=SyntheticRuntimeAssembly(),
-    )).get("/capabilities")
-
-    assert response.status_code == 200
-    assert response.json()["phase"] == "capability"
-    assert capability_calls == [True]
 
 
 def _qualification_view() -> QualificationView:
@@ -788,39 +821,6 @@ def test_local_media_route_supports_bounded_ranges_without_filename(tmp_path):
         )
         assert denied.headers["x-content-type-options"] == "nosniff"
         assert "private-owner-name" not in str(denied.headers)
-
-
-def test_web_streams_from_the_runtime_assembly_owned_audition(tmp_path):
-    media = tmp_path / "private-owner-name.mp3"
-    media.write_bytes(b"0123456789")
-    audition = LocalSourceAudition(max_range_bytes=4)
-    opened = audition.open("transfer-1", "item-1", Track(
-        track_id="1", name="Synthetic", artist="Artist", album="", remixer="",
-        label="", genre="", date_added="", location=media.as_uri(),
-    ))
-
-    def forbidden_spotify():
-        raise AssertionError("Spotify must stay untouched")
-
-    assembly = RuntimeAssembly(
-        spotify_factory=forbidden_spotify,
-        default_paths=RuntimePaths.selected(
-            tmp_path / "matching-knowledge.json",
-            tmp_path / "publication-manifests.json",
-        ),
-        local_audition=audition,
-    )
-    client = TestClient(create_app(runtime_assembly=assembly))
-
-    response = client.get(
-        f"/rekordbox/qualification/media/{opened.handle}",
-        headers={"Range": "bytes=2-5"},
-    )
-
-    assert response.status_code == 206
-    assert response.content == b"2345"
-    assert response.headers["cache-control"] == "private, no-store"
-    assert "private-owner-name" not in str(response.headers)
 
 
 def test_qualification_routes_reject_remote_peer_rebinding_host_and_origin():
