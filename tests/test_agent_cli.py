@@ -175,7 +175,7 @@ def test_capabilities_json_does_not_require_xml_or_spotify(monkeypatch):
 
 def test_sync_json_requires_explicit_private_source_authorization(monkeypatch):
     monkeypatch.setattr(
-        "djsupport.cli.get_client",
+        "djsupport.runtime.get_client",
         lambda: (_ for _ in ()).throw(AssertionError("Spotify must stay untouched")),
     )
 
@@ -201,7 +201,7 @@ def test_authorized_publish_returns_bounded_plan_before_spotify_write_authority(
     monkeypatch, tmp_path,
 ):
     monkeypatch.setattr(
-        "djsupport.cli.get_client",
+        "djsupport.runtime.get_client",
         lambda: (_ for _ in ()).throw(AssertionError("Spotify must stay untouched")),
     )
 
@@ -273,9 +273,9 @@ def test_authorized_sync_json_returns_only_structured_outcome(
             }
 
     spotify = Spotify()
-    monkeypatch.setattr("djsupport.cli.get_client", lambda: object())
+    monkeypatch.setattr("djsupport.runtime.get_client", lambda: object())
     monkeypatch.setattr(
-        "djsupport.transfer.SpotifyMatcher", lambda client: spotify,
+        "djsupport.runtime.SpotifyMatcher", lambda client: spotify,
     )
 
     result = CliRunner().invoke(cli, [
@@ -322,9 +322,9 @@ def test_audition_intent_is_independent_and_compatible_with_no_cache(
                 "score": 95.0, "match_type": "exact",
             }
 
-    monkeypatch.setattr("djsupport.cli.get_client", lambda: object())
+    monkeypatch.setattr("djsupport.runtime.get_client", lambda: object())
     monkeypatch.setattr(
-        "djsupport.transfer.SpotifyMatcher", lambda client: Spotify(),
+        "djsupport.runtime.SpotifyMatcher", lambda client: Spotify(),
     )
 
     result = CliRunner().invoke(cli, [
@@ -390,7 +390,7 @@ def test_authorized_qualification_source_error_stays_structured_and_redacted(
 ):
     private_path = tmp_path / "owner-library-name.xml"
     monkeypatch.setattr(
-        "djsupport.cli.get_client",
+        "djsupport.runtime.get_client",
         lambda: (_ for _ in ()).throw(
             AssertionError("Spotify must stay untouched")
         ),

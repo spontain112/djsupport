@@ -19,16 +19,19 @@ from djsupport.report import (
     save_report,
     save_review_csv,
 )
-from djsupport.spotify import RateLimitError, get_client
-from djsupport.transfer import (
-    AccountPublishingGuards,
-    default_matching_knowledge_path,
-    default_publication_manifest_path,
+from djsupport.runtime import (
+    MatchingKnowledgeUnavailable,
+    RuntimeAssembly,
+    RuntimePaths,
+    RuntimeSettings,
+    SpotifyAccess,
 )
+from djsupport.spotify import RateLimitError
 
 
-DEFAULT_MATCHING_KNOWLEDGE_PATH = str(default_matching_knowledge_path())
-DEFAULT_PUBLICATION_MANIFEST_PATH = str(default_publication_manifest_path())
+DEFAULT_RUNTIME_PATHS = RuntimePaths.defaults()
+DEFAULT_MATCHING_KNOWLEDGE_PATH = str(DEFAULT_RUNTIME_PATHS.matching_knowledge)
+DEFAULT_PUBLICATION_MANIFEST_PATH = str(DEFAULT_RUNTIME_PATHS.publication_state)
 
 
 @click.group()
@@ -42,11 +45,10 @@ def cli():
 def capabilities(as_json: bool) -> None:
     """Inspect optional capabilities without reading a library or Spotify."""
     from djsupport.agent import capability_document
-    from djsupport.local_audio import ChromaprintLocalAudio
-    from djsupport.local_audition import LocalSourceAudition
 
+    transfer = RuntimeAssembly().capability_transfer()
     document = capability_document(
-        ChromaprintLocalAudio().capability(), LocalSourceAudition().capability(),
+        transfer.local_audio_capability(), transfer.local_audition_capability(),
     )
     if as_json:
         click.echo(json.dumps(document, sort_keys=True))
@@ -89,46 +91,28 @@ def _first_transfer_contract(
 ):
     """Build the public contract only as deeply as the current phase needs."""
     from djsupport.agent import AgentTransferContract
-    from djsupport.cache import MatchCache
-    from djsupport.local_audio import ChromaprintLocalAudio
-    from djsupport.transfer import (
-        EphemeralMatchingKnowledge,
-        FilePublicationStorage,
-        FileTransferStorage,
-        MatchCacheKnowledge,
-        RekordboxPlaylistSource,
-        SpotifyMatcher,
-        Transfer,
-    )
+    from djsupport.transfer import RekordboxPlaylistSource
 
-    local_audio = ChromaprintLocalAudio()
+    assembly = RuntimeAssembly()
     if not activate:
-        return AgentTransferContract(Transfer(
-            source=object(),
-            spotify=object(),
-            matching_knowledge=EphemeralMatchingKnowledge(),
-            publishing_guards=AccountPublishingGuards(),
-            local_audio=local_audio,
-        ))
+        return AgentTransferContract(assembly.capability_transfer())
 
     if xml_path is None:
         raise ValueError("Rekordbox XML is unavailable")
-    cache = MatchCache(cache_path)
-    cache.load()
-    publication_path = Path(state_path)
-    return AgentTransferContract(Transfer(
-        source=RekordboxPlaylistSource(
+    graph = assembly.assemble(
+        RekordboxPlaylistSource(
             xml_path, include_locations=bool(local_audio_identity),
         ),
-        spotify=(SpotifyMatcher(get_client()) if spotify_access else object()),
-        matching_knowledge=MatchCacheKnowledge(cache),
-        publishing_guards=AccountPublishingGuards(),
-        publication_storage=FilePublicationStorage(publication_path),
-        transfer_storage=FileTransferStorage(
-            publication_path.with_suffix(".transfers.json")
+        RuntimeSettings(
+            paths=RuntimePaths.selected(cache_path, state_path),
+            spotify_access=(
+                SpotifyAccess.REQUIRED
+                if spotify_access else SpotifyAccess.DISABLED
+            ),
+            local_audio_identity=bool(local_audio_identity),
         ),
-        local_audio=(local_audio if local_audio_identity else None),
-    ))
+    )
+    return AgentTransferContract(graph.transfer)
 
 
 @cli.command("first-transfer")
@@ -533,20 +517,12 @@ def sync(
             "Use explicit --playlist selections or --whole-library, not both."
         )
 
-    from djsupport.cache import MatchCache
     from djsupport.transfer import (
         BatchPlanRequest,
-        EphemeralMatchingKnowledge,
-        FilePublicationStorage,
-        FileTransferStorage,
-        MatchCacheKnowledge,
         RekordboxPlaylistSource,
-        SpotifyMatcher,
         Transfer,
         TransferAuthorization,
     )
-    from djsupport.local_audio import ChromaprintLocalAudio
-    from djsupport.local_audition import LocalSourceAudition
 
     request = BatchPlanRequest(
         playlist_references=playlist,
@@ -603,11 +579,30 @@ def sync(
         ))
         raise click.exceptions.Exit(2) from exc
 
-    cache = None if no_cache else MatchCache(cache_path)
+    execute_authorized = Transfer.authorization_requirement(
+        request, authorization, phase="execute",
+    ) is None
     try:
-        if cache is not None:
-            cache.load()
-    except (OSError, ValueError) as exc:
+        graph = RuntimeAssembly().assemble(
+            RekordboxPlaylistSource(
+                xml_path,
+                include_locations=(
+                    local_audio_identity or local_audio_audition
+                ),
+            ),
+            RuntimeSettings(
+                paths=RuntimePaths.selected(cache_path, state_path),
+                spotify_access=(
+                    SpotifyAccess.REQUIRED
+                    if execute_authorized else SpotifyAccess.DISABLED
+                ),
+                retain_matching_knowledge=not no_cache,
+                retain_publications=not dry_run,
+                local_audio_identity=local_audio_identity,
+                local_audio_audition=local_audio_audition,
+            ),
+        )
+    except MatchingKnowledgeUnavailable as exc:
         if not agent_json:
             raise click.ClickException(str(exc)) from exc
         from djsupport.agent import error_document
@@ -616,32 +611,7 @@ def sync(
             error_document("plan", "matching_knowledge_unavailable"), sort_keys=True,
         ))
         raise click.exceptions.Exit(2) from exc
-    execute_authorized = Transfer.authorization_requirement(
-        request, authorization, phase="execute",
-    ) is None
-    transfer = Transfer(
-        source=RekordboxPlaylistSource(
-            xml_path,
-            include_locations=(local_audio_identity or local_audio_audition),
-        ),
-        spotify=(
-            SpotifyMatcher(get_client())
-            if execute_authorized else object()
-        ),
-        publishing_guards=AccountPublishingGuards(),
-        matching_knowledge=(
-            EphemeralMatchingKnowledge() if cache is None
-            else MatchCacheKnowledge(cache)
-        ),
-        publication_storage=(
-            None if dry_run else FilePublicationStorage(state_path)
-        ),
-        transfer_storage=FileTransferStorage(
-            str(Path(state_path).with_suffix(".transfers.json"))
-        ),
-        local_audio=(ChromaprintLocalAudio() if local_audio_identity else None),
-        local_audition=(LocalSourceAudition() if local_audio_audition else None),
-    )
+    transfer = graph.transfer
     if agent_json:
         from djsupport.agent import AgentTransferContract
 
@@ -764,18 +734,10 @@ def qualification_command(
         authorization_required_document,
         error_document,
     )
-    from djsupport.cache import MatchCache
-    from djsupport.local_audition import LocalSourceAudition
     from djsupport.transfer import (
-        EphemeralMatchingKnowledge,
-        FilePublicationStorage,
-        FileTransferStorage,
-        MatchCacheKnowledge,
         QualificationDecision,
         QualificationRequest,
         RekordboxPlaylistSource,
-        SpotifyMatcher,
-        Transfer,
         TransferAuthorization,
     )
 
@@ -831,9 +793,9 @@ def qualification_command(
         spotify_write=authorize_spotify_write,
     )
     try:
-        transfer_storage = FileTransferStorage(
-            str(Path(state_path).with_suffix(".transfers.json"))
-        )
+        paths = RuntimePaths.selected(cache_path, state_path)
+        assembly = RuntimeAssembly()
+        transfer_storage = assembly.transfer_storage(paths)
         if draft_id is not None:
             stored_draft = transfer_storage.load_qualification(draft_id)
             stored_state = (
@@ -869,25 +831,18 @@ def qualification_command(
             no_cache = not bool(
                 stored_state.request.get("retain_matching_knowledge", True)
             )
-        cache = None if no_cache else MatchCache(cache_path)
-        if cache is not None:
-            cache.load()
-        transfer = Transfer(
-            source=RekordboxPlaylistSource(
+        graph = assembly.assemble(
+            RekordboxPlaylistSource(
                 selected_xml_path, include_locations=local_audio_audition,
             ),
-            spotify=SpotifyMatcher(get_client()),
-            publishing_guards=AccountPublishingGuards(),
-            matching_knowledge=(
-                EphemeralMatchingKnowledge()
-                if cache is None else MatchCacheKnowledge(cache)
-            ),
-            publication_storage=FilePublicationStorage(state_path),
-            transfer_storage=transfer_storage,
-            local_audition=(
-                LocalSourceAudition() if local_audio_audition else None
+            RuntimeSettings(
+                paths=paths,
+                spotify_access=SpotifyAccess.REQUIRED,
+                retain_matching_knowledge=not no_cache,
+                local_audio_audition=local_audio_audition,
             ),
         )
+        transfer = graph.transfer
         contract = AgentTransferContract(transfer)
         if draft_id is None:
             assert transfer_id is not None and playlist is not None
@@ -1009,30 +964,20 @@ def approve(
     playlist_id: str, state_path: str, cache_path: str, review_csv: str | None,
 ) -> None:
     """Approve one Provisional Playlist after reviewing it in Spotify."""
-    from djsupport.cache import MatchCache
     from djsupport.transfer import (
         BeatportChartSource,
-        FilePublicationStorage,
-        FileTransferStorage,
-        MatchCacheKnowledge,
         SpotifyPlaylistChanged,
         SpotifyPlaylistReviewRequired,
-        SpotifyMatcher,
-        Transfer,
     )
 
-    cache = MatchCache(cache_path)
-    cache.load()
-    transfer = Transfer(
-        source=BeatportChartSource(),
-        spotify=SpotifyMatcher(get_client()),
-        publishing_guards=AccountPublishingGuards(),
-        matching_knowledge=MatchCacheKnowledge(cache),
-        publication_storage=FilePublicationStorage(state_path),
-        transfer_storage=FileTransferStorage(
-            str(Path(state_path).with_suffix(".transfers.json"))
+    graph = RuntimeAssembly().assemble(
+        BeatportChartSource(),
+        RuntimeSettings(
+            paths=RuntimePaths.selected(cache_path, state_path),
+            spotify_access=SpotifyAccess.REQUIRED,
         ),
     )
+    transfer = graph.transfer
     try:
         if review_csv is None:
             review = transfer.approve(playlist_id)
@@ -1114,16 +1059,9 @@ def beatport(
     )
     from djsupport.beatport_export import BeatportExportError
 
-    from djsupport.cache import MatchCache
     from djsupport.transfer import (
         BeatportChartSource,
         BeatportExportSource,
-        EphemeralMatchingKnowledge,
-        FilePublicationStorage,
-        FileTransferStorage,
-        MatchCacheKnowledge,
-        SpotifyMatcher,
-        Transfer,
         TransferMode,
         TransferRequest,
     )
@@ -1144,27 +1082,19 @@ def beatport(
         if isinstance(source, BeatportExportSource) else (url or "")
     )
 
-    cache = None if no_cache else MatchCache(cache_path)
-    if cache is not None:
-        cache.load()
     if resume_id and abandon_id:
         raise click.UsageError("Use either --resume or --abandon, not both.")
-    transfer_storage = FileTransferStorage(
-        str(Path(state_path).with_suffix(".transfers.json"))
-    )
-    transfer = Transfer(
-        source=source,
-        spotify=SpotifyMatcher(get_client()),
-        publishing_guards=AccountPublishingGuards(),
-        matching_knowledge=(
-            EphemeralMatchingKnowledge()
-            if cache is None else MatchCacheKnowledge(cache)
+    graph = RuntimeAssembly().assemble(
+        source,
+        RuntimeSettings(
+            paths=RuntimePaths.selected(cache_path, state_path),
+            spotify_access=SpotifyAccess.REQUIRED,
+            retain_matching_knowledge=not no_cache,
+            retain_publications=not dry_run,
         ),
-        publication_storage=(
-            None if dry_run else FilePublicationStorage(state_path)
-        ),
-        transfer_storage=transfer_storage,
     )
+    transfer = graph.transfer
+    transfer_storage = graph.transfer_storage
     if abandon_id:
         transfer.abandon(abandon_id)
         click.echo(f"Transfer {abandon_id} abandoned.")
@@ -1346,40 +1276,27 @@ def label(
         else:
             click.echo(f"{unique_count} tracks (newest first).")
 
-    from djsupport.cache import MatchCache
     from djsupport.transfer import (
         BeatportLabelSource,
-        EphemeralMatchingKnowledge,
-        FilePublicationStorage,
-        FileTransferStorage,
-        MatchCacheKnowledge,
-        SpotifyMatcher,
-        Transfer,
         TransferMode,
         TransferRequest,
     )
 
-    cache = None if no_cache else MatchCache(cache_path)
-    if cache is not None:
-        cache.load()
     if resume_id and abandon_id:
         raise click.UsageError("Use either --resume or --abandon, not both.")
-    transfer_storage = FileTransferStorage(
-        str(Path(state_path).with_suffix(".transfers.json"))
-    )
-    transfer = Transfer(
-        source=BeatportLabelSource(
+    graph = RuntimeAssembly().assemble(
+        BeatportLabelSource(
             fetcher=fetcher, on_deduplicated=on_deduplicated,
         ),
-        spotify=SpotifyMatcher(get_client()),
-        publishing_guards=AccountPublishingGuards(),
-        matching_knowledge=(
-            EphemeralMatchingKnowledge()
-            if cache is None else MatchCacheKnowledge(cache)
+        RuntimeSettings(
+            paths=RuntimePaths.selected(cache_path, state_path),
+            spotify_access=SpotifyAccess.REQUIRED,
+            retain_matching_knowledge=not no_cache,
+            retain_publications=not dry_run,
         ),
-        publication_storage=None if dry_run else FilePublicationStorage(state_path),
-        transfer_storage=transfer_storage,
     )
+    transfer = graph.transfer
+    transfer_storage = graph.transfer_storage
     if abandon_id:
         transfer.abandon(abandon_id)
         click.echo(f"Transfer {abandon_id} abandoned.")

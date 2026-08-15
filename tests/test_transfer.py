@@ -3429,7 +3429,7 @@ class TestSpotifyApprovalAdapter:
 class TestBeatportCliTransfer:
 
     @patch("djsupport.transfer.Transfer.execute")
-    @patch("djsupport.cli.get_client", return_value=MagicMock())
+    @patch("djsupport.runtime.get_client", return_value=MagicMock())
     def test_cli_beatport_dry_run_enters_transfer_interface(
         self, mock_client, execute,
     ):
@@ -3451,7 +3451,7 @@ class TestBeatportCliTransfer:
 
 
     @patch("djsupport.transfer.Transfer.execute")
-    @patch("djsupport.cli.get_client", return_value=MagicMock())
+    @patch("djsupport.runtime.get_client", return_value=MagicMock())
     def test_cli_beatport_publish_enters_transfer_interface(
         self, mock_client, execute, tmp_path,
     ):
@@ -3477,7 +3477,7 @@ class TestBeatportCliTransfer:
         assert request.mode == TransferMode.SNAPSHOT
 
     @patch("djsupport.transfer.Transfer.execute")
-    @patch("djsupport.cli.get_client", return_value=MagicMock())
+    @patch("djsupport.runtime.get_client", return_value=MagicMock())
     def test_cli_beatport_can_explicitly_choose_mirror(
         self, mock_client, execute, tmp_path,
     ):
@@ -3496,7 +3496,7 @@ class TestBeatportCliTransfer:
         assert execute.call_args.args[0].mode == TransferMode.MIRROR
 
     @patch("djsupport.transfer.Transfer.execute")
-    @patch("djsupport.cli.get_client", return_value=MagicMock())
+    @patch("djsupport.runtime.get_client", return_value=MagicMock())
     def test_cli_label_defaults_to_snapshot_through_transfer(
         self, mock_client, execute, tmp_path,
     ):
@@ -3518,7 +3518,7 @@ class TestBeatportCliTransfer:
 
     @patch("djsupport.transfer.FileTransferStorage.load_transfer")
     @patch("djsupport.transfer.Transfer.execute")
-    @patch("djsupport.cli.get_client", return_value=MagicMock())
+    @patch("djsupport.runtime.get_client", return_value=MagicMock())
     def test_cli_can_resume_a_visible_transfer_id(
         self, mock_client, execute, load_transfer, tmp_path,
     ):
@@ -3539,7 +3539,7 @@ class TestBeatportCliTransfer:
         assert execute.call_args.args[0].transfer_id == "resume-me"
 
     @patch("djsupport.transfer.Transfer.abandon")
-    @patch("djsupport.cli.get_client", return_value=MagicMock())
+    @patch("djsupport.runtime.get_client", return_value=MagicMock())
     def test_cli_can_explicitly_abandon_a_transfer(
         self, mock_client, abandon, tmp_path,
     ):
@@ -3553,8 +3553,8 @@ class TestBeatportCliTransfer:
         assert "Transfer stop-me abandoned" in result.output
 
     @patch("djsupport.transfer.Transfer.approve")
-    @patch("djsupport.transfer.FileTransferStorage")
-    @patch("djsupport.cli.get_client", return_value=MagicMock())
+    @patch("djsupport.runtime.FileTransferStorage")
+    @patch("djsupport.runtime.get_client", return_value=MagicMock())
     def test_cli_approves_one_provisional_playlist(
         self, mock_client, transfer_storage, approve, tmp_path,
     ):
@@ -3574,13 +3574,13 @@ class TestBeatportCliTransfer:
         assert result.exit_code == 0, result.output
         approve.assert_called_once_with("snapshot-1")
         transfer_storage.assert_called_once_with(
-            str((tmp_path / "state.json").with_suffix(".transfers.json"))
+            (tmp_path / "state.json").with_suffix(".transfers.json")
         )
         assert "1 approved" in result.output
         assert "2 rejected" in result.output
 
     @patch("djsupport.transfer.Transfer.approve")
-    @patch("djsupport.cli.get_client", return_value=MagicMock())
+    @patch("djsupport.runtime.get_client", return_value=MagicMock())
     def test_cli_applies_an_edited_review_csv(
         self, mock_client, approve, tmp_path,
     ):
@@ -3605,10 +3605,10 @@ class TestBeatportCliTransfer:
 class TestRekordboxCliTransfer:
     @patch("djsupport.transfer.Transfer.execute_batch")
     @patch("djsupport.transfer.Transfer.plan_batch")
-    @patch("djsupport.transfer.FileTransferStorage")
-    @patch("djsupport.transfer.FilePublicationStorage")
-    @patch("djsupport.cache.MatchCache")
-    @patch("djsupport.cli.get_client", return_value=MagicMock())
+    @patch("djsupport.runtime.FileTransferStorage")
+    @patch("djsupport.runtime.FilePublicationStorage")
+    @patch("djsupport.runtime.MatchCache")
+    @patch("djsupport.runtime.get_client", return_value=MagicMock())
     def test_cli_defaults_to_shared_application_data_storage(
         self, mock_client, match_cache, publication_storage, transfer_storage,
         plan_batch, execute_batch,
@@ -3629,19 +3629,19 @@ class TestRekordboxCliTransfer:
         ])
 
         assert result.exit_code == 0, result.output
-        match_cache.assert_called_once_with(DEFAULT_MATCHING_KNOWLEDGE_PATH)
+        match_cache.assert_called_once_with(Path(DEFAULT_MATCHING_KNOWLEDGE_PATH))
         publication_storage.assert_called_once_with(
-            DEFAULT_PUBLICATION_MANIFEST_PATH
+            Path(DEFAULT_PUBLICATION_MANIFEST_PATH)
         )
         transfer_storage.assert_called_once_with(
-            str(Path(DEFAULT_PUBLICATION_MANIFEST_PATH).with_suffix(
+            Path(DEFAULT_PUBLICATION_MANIFEST_PATH).with_suffix(
                 ".transfers.json"
-            ))
+            )
         )
 
     @patch("djsupport.transfer.Transfer.execute_batch")
     @patch("djsupport.transfer.Transfer.plan_batch")
-    @patch("djsupport.cli.get_client", return_value=MagicMock())
+    @patch("djsupport.runtime.get_client", return_value=MagicMock())
     def test_cli_selected_playlist_enters_transfer_batch(
         self, mock_client, plan_batch, execute_batch, tmp_path,
     ):
@@ -3667,7 +3667,7 @@ class TestRekordboxCliTransfer:
 
     @patch("djsupport.transfer.Transfer.execute_batch")
     @patch("djsupport.transfer.Transfer.plan_batch")
-    @patch("djsupport.cli.get_client", return_value=MagicMock())
+    @patch("djsupport.runtime.get_client", return_value=MagicMock())
     def test_cli_preview_is_owned_by_transfer_batch(
         self, mock_client, plan_batch, execute_batch, tmp_path,
     ):
