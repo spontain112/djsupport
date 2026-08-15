@@ -55,30 +55,30 @@ Corrections, or destructive playlist intent.
 Ordinary users should follow the
 [Latest final GitHub Release](https://github.com/spontain112/djsupport/releases/latest).
 The current Latest release is
-[`v0.5.0`](https://github.com/spontain112/djsupport/releases/tag/v0.5.0).
+[`v0.6.0`](https://github.com/spontain112/djsupport/releases/tag/v0.6.0).
 A newer release marked **Pre-release** is not stable.
 
 Install the command-line application from that exact final tag:
 
 ```bash
-python3 -m pip install "djsupport @ https://github.com/spontain112/djsupport/archive/refs/tags/v0.5.0.zip"
+python3 -m pip install "djsupport @ https://github.com/spontain112/djsupport/archive/refs/tags/v0.6.0.zip"
 ```
 
 Include the optional local web application with:
 
 ```bash
-python3 -m pip install "djsupport[web] @ https://github.com/spontain112/djsupport/archive/refs/tags/v0.5.0.zip"
+python3 -m pip install "djsupport[web] @ https://github.com/spontain112/djsupport/archive/refs/tags/v0.6.0.zip"
 ```
 
 ### Preview/testing
 
 Preview builds are opt-in release candidates for testing, not updates to the
 stable channel. Install only an exact candidate tag or artifact from a GitHub
-Release explicitly marked **Pre-release**. For example, after `v0.6.0rc1`
+Release explicitly marked **Pre-release**. For example, after `v0.7.0rc1`
 exists as a pre-release, its exact tag can be installed with:
 
 ```bash
-python3 -m pip install "djsupport @ https://github.com/spontain112/djsupport/archive/refs/tags/v0.6.0rc1.zip"
+python3 -m pip install "djsupport @ https://github.com/spontain112/djsupport/archive/refs/tags/v0.7.0rc1.zip"
 ```
 
 Expect instability. Before testing, back up DJ Support's local application data
