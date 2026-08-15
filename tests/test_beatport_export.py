@@ -250,7 +250,7 @@ def test_invalid_export_is_rejected_before_spotify_access(tmp_path, monkeypatch)
     invalid["track_count"] = 99
     export_path.write_text(json.dumps(invalid))
     monkeypatch.setattr(
-        "djsupport.cli.get_client",
+        "djsupport.runtime.get_client",
         lambda: (_ for _ in ()).throw(AssertionError("Spotify accessed")),
     )
 
@@ -434,8 +434,8 @@ def test_beatport_cli_selects_a_v2_file_without_passing_its_path_to_transfer(
                 source_label="Beatport",
             )
 
-    monkeypatch.setattr("djsupport.transfer.Transfer", CapturingTransfer)
-    monkeypatch.setattr("djsupport.cli.get_client", lambda: object())
+    monkeypatch.setattr("djsupport.runtime.Transfer", CapturingTransfer)
+    monkeypatch.setattr("djsupport.runtime.get_client", lambda: object())
     result = CliRunner().invoke(cli, [
         "beatport", "--export-file", str(export_path), "--dry-run",
     ])

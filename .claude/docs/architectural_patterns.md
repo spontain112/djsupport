@@ -39,20 +39,22 @@ Files:
 
 ## Dependency injection via parameters
 
-External dependencies are passed through the Transfer constructor or function
-parameters—never global singletons.
+External dependencies are passed through Runtime Assembly, the Transfer
+constructor, or function parameters—never global singletons.
 
 - `match_track(sp, track, threshold)` — receives Spotify client as `sp`
 - `match_track_cached(sp, track, cache, ...)` — receives both `sp` and `cache`
-- CLI and web adapters construct `Transfer` with source, Spotify, matching
-  knowledge, publication, and durable-state adapters.
+- `RuntimeAssembly` receives an injectable Spotify-adapter factory and selects
+  paths, matching knowledge, persistence, guards, and local-audio adapters.
+- CLI and Agent Client paths provide source and authorized phase facts to
+  Runtime Assembly; the web adapter retains its direct construction seam.
 
 Files:
 - `matcher.py:154` — `match_track(sp, track, threshold)`
 - `matcher.py:225-228` — `match_track_cached(sp, track, cache, ...)`
 - `spotify.py:106-113` — `create_or_update_playlist(sp, ..., state_manager=None)`
 - `spotify.py:176-183` — `incremental_update_playlist(sp, ..., state_manager=None)`
-- `cli.py:162-178` — wiring in `sync` command
+- `runtime.py` — private production graph assembly for CLI and Agent Clients
 
 ## Error handling
 
