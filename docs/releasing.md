@@ -17,8 +17,10 @@ authorize any tag, GitHub Release, or package publication.
       documentation adds one `.release-notes/*.md` file.
 - [ ] Set `bump` to `patch`, `minor`, or `major`; set `section` to a Keep a
       Changelog heading; describe the consumer-visible effect.
-- [ ] Internal-only changes to tests, release machinery, or this checklist do
-      not require a release record.
+- [ ] Internal-only changes to tests, release machinery, research notes under
+      `docs/research/`, or this checklist do not require a release record. If
+      the same pull request changes distributable behavior or user guidance,
+      that change still requires a release record.
 
 ## 2. Review the automated version PR
 
