@@ -1,38 +1,45 @@
 # Releasing DJ Support
 
 This is the canonical maintainer checklist for moving DJ Support from
-development through a release candidate to a final release. Replace every
-`X.Y.Z` placeholder deliberately and record the exact commit used at each gate.
+development through a release candidate to a final release. Ordinary changes
+record release intent beside the change; automation maintains the
+release-preparation PR. Replace every `X.Y.Z` placeholder deliberately and
+record the exact commit used at each publication gate.
 
 A release-preparation PR, passing CI, a tag, a GitHub Release, and
 package-index publication are separate gated operations. None implies or
 authorizes another. Preparing this checklist or completing issue #107 does not
 authorize any tag, GitHub Release, or package publication.
 
-## 1. Choose the version and exact commit
+## 1. Record distributable changes
 
-- [ ] Choose the intended candidate `X.Y.ZrcN` or final `X.Y.Z` version.
-- [ ] Record the full commit SHA proposed for release; do not release an
-      unrecorded moving branch head.
-- [ ] Confirm the version follows PEP 440 and that its Git tag will be the same
-      version prefixed with `v`.
+- [ ] Every PR that changes `djsupport/`, package metadata, or user-facing
+      documentation adds one `.release-notes/*.md` file.
+- [ ] Set `bump` to `patch`, `minor`, or `major`; set `section` to a Keep a
+      Changelog heading; describe the consumer-visible effect.
+- [ ] Internal-only changes to tests, release machinery, or this checklist do
+      not require a release record.
 
-## 2. Confirm `main` is ready
+## 2. Review the automated version PR
 
-- [ ] Ensure every issue and PR required for the release is merged.
-- [ ] Fetch `main`, confirm the recorded commit is reachable from it, and
-      confirm the checkout has no uncommitted or untracked release content.
-- [ ] Keep unrelated work out of the release scope. Create a stable maintenance
-      branch only when an actual patch release needs one.
+- [ ] After release records reach `main`, confirm the `release/version` PR
+      contains the intended version, consumes the pending records, and moves
+      their summaries into `CHANGELOG.md`.
+- [ ] Confirm the version follows PEP 440. A `.dev0` development version is
+      finalized at its base version; later stable versions follow the highest
+      pending bump.
+- [ ] For a candidate or final promotion, add the exact intended version to the
+      one-use `.release-notes/next-version` override before the version PR is
+      prepared (for example `0.6.0rc1` or `0.6.0`).
+- [ ] Ensure every issue and PR required for the release is merged before
+      merging the version PR.
 
-## 3. Prepare the release through a PR
+## 3. Merge version metadata through the PR
 
-- [ ] Open a dedicated release-preparation PR that changes the version in
-      `pyproject.toml`, the single source of version truth.
-- [ ] Move the relevant `[Unreleased]` changelog entries under the exact
-      candidate or final version and date; do not rewrite earlier releases.
-- [ ] Review and merge that PR normally. Merging it does not authorize tagging
-      or publication.
+- [ ] Require green CI on the version PR, including release-record validation.
+- [ ] Review and merge the PR normally. The PR changes `pyproject.toml`, the
+      single source of version truth, and the changelog together.
+- [ ] Merging the version PR does not authorize tagging or publication.
 
 ## 4. Run the complete release validation
 
@@ -134,9 +141,9 @@ authorize any tag, GitHub Release, or package publication.
       intended final version. Package-index publication, if any, remains a
       separate explicitly authorized operation and requires its own verification.
 
-## 10. Return `main` to development
+## 10. Continue development
 
-- [ ] Immediately open a follow-up PR moving `pyproject.toml` to the next
-      `.dev0` version while keeping new work under `[Unreleased]`.
-- [ ] Confirm stable users still resolve to the final Latest release and that
-      `main` is again clearly identified as development software.
+- [ ] New distributable work starts with new release records under
+      `.release-notes/`; automation opens or updates the next version PR.
+- [ ] Confirm stable users still resolve to the final Latest release. The
+      mutable `main` branch is not itself a publication channel.

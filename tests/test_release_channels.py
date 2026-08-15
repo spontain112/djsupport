@@ -14,19 +14,19 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
 REPOSITORY_ROOT = Path(__file__).parents[1]
 
 
-def test_source_checkout_uses_0_6_development_version():
+def test_source_checkout_uses_a_supported_release_version():
     with (REPOSITORY_ROOT / "pyproject.toml").open("rb") as pyproject_file:
         project = tomllib.load(pyproject_file)["project"]
 
-    assert project["version"] == "0.6.0.dev0"
+    assert re.fullmatch(r"\d+\.\d+\.\d+(?:(?:\.dev|rc)\d+)?", project["version"])
 
 
-def test_documented_latest_stable_release_differs_from_development():
+def test_documented_latest_stable_release_differs_from_source_version():
     readme = (REPOSITORY_ROOT / "README.md").read_text()
     with (REPOSITORY_ROOT / "pyproject.toml").open("rb") as pyproject_file:
-        development_version = tomllib.load(pyproject_file)["project"]["version"]
+        source_version = tomllib.load(pyproject_file)["project"]["version"]
 
-    assert "v0.5.0" in readme and development_version != "0.5.0"
+    assert "v0.5.0" in readme and source_version != "0.5.0"
 
 
 def test_manual_release_checklist_separates_validation_from_publication():
@@ -35,6 +35,8 @@ def test_manual_release_checklist_separates_validation_from_publication():
     required_policy = (
         "exact commit",
         "release-preparation PR",
+        ".release-notes/*.md",
+        "release/version",
         "migration and backup",
         "green CI",
         "annotated `vX.Y.ZrcN` tag",
@@ -47,7 +49,7 @@ def test_manual_release_checklist_separates_validation_from_publication():
             "as Latest"
         ),
         "green CI on the exact final commit",
-        "next `.dev0` version",
+        "version PR does not authorize tagging or publication",
         "separate gated operations",
     )
 
@@ -143,3 +145,14 @@ def test_ci_is_a_least_privilege_offline_release_gate():
             errors.append(f"forbidden workflow capability: {marker}")
 
     assert not errors, "\n".join(errors)
+
+
+def test_version_pr_automation_cannot_publish_a_release():
+    workflow = (REPOSITORY_ROOT / ".github" / "workflows" / "version-pr.yml").read_text()
+    normalized = workflow.casefold()
+
+    assert "scripts/release_records.py prepare" in workflow
+    assert "release/version" in workflow
+    assert "pull-requests: write" in workflow
+    for forbidden in ("git tag", "gh release create", "twine", "pypi", "spotify", "beatport"):
+        assert forbidden not in normalized

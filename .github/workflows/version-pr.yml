@@ -1,0 +1,50 @@
+name: Version pull request
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: version-pull-request
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Prepare version metadata
+        id: prepare
+        run: |
+          version="$(python scripts/release_records.py prepare | tail -n 1)"
+          if [[ "$version" == "No pending release records." ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Update version branch
+        if: steps.prepare.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.prepare.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -C release/version
+          git add pyproject.toml CHANGELOG.md .release-notes
+          git commit -m "chore: version DJ Support $VERSION"
+          git push --force-with-lease origin release/version
+          if gh pr view release/version --json number >/dev/null 2>&1; then
+            gh pr edit release/version --title "chore: version DJ Support $VERSION" --body "Automated version PR from pending release records. Merging updates version metadata and the changelog; it does not authorize a tag, GitHub Release, or package publication."
+          else
+            gh pr create --base main --head release/version --title "chore: version DJ Support $VERSION" --body "Automated version PR from pending release records. Merging updates version metadata and the changelog; it does not authorize a tag, GitHub Release, or package publication."
+          fi
