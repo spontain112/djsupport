@@ -72,3 +72,35 @@ def test_release_candidate_advances_unless_next_version_overrides_it():
     ]
 
     assert release_records._next_version("0.6.0rc1", records) == "0.6.0rc2"
+
+
+def test_next_version_override_is_applied_once(tmp_path, monkeypatch):
+    records_dir = tmp_path / ".release-notes"
+    records_dir.mkdir()
+    record = records_dir / "change.md"
+    record.write_text(
+        "---\nbump: minor\nsection: Added\n---\n\nAdd a public workflow.\n",
+        encoding="utf-8",
+    )
+    next_version = records_dir / "next-version"
+    next_version.write_text("0.6.0\n", encoding="utf-8")
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "djsupport"\nversion = "0.6.0.dev0"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "CHANGELOG.md").write_text(
+        "# Changelog\n\n## [Unreleased]\n\n## [0.5.0] - 2026-08-02\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(release_records, "ROOT", tmp_path)
+    monkeypatch.setattr(release_records, "RECORDS", records_dir)
+    monkeypatch.setattr(release_records, "NEXT_VERSION", next_version)
+
+    version = release_records.prepare("2026-08-15")
+
+    assert version == "0.6.0"
+    changelog = (tmp_path / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "## [0.6.0] - 2026-08-15\n\n### Added" in changelog
+    assert "- Add a public workflow.\n\n## [0.5.0]" in changelog
+    assert not record.exists()
+    assert not next_version.exists()

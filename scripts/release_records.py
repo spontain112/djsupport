@@ -117,7 +117,8 @@ def _add_summary(body: str, section: str, summary: str) -> str:
     heading = f"### {section}"
     addition = f"- {summary}\n"
     if heading not in body:
-        return body.rstrip() + f"\n\n{heading}\n\n{addition}"
+        section_body = f"{heading}\n\n{addition}"
+        return f"{body.rstrip()}\n\n{section_body}" if body.strip() else section_body
     start = body.index(heading) + len(heading)
     next_heading = body.find("\n### ", start)
     insertion = len(body) if next_heading == -1 else next_heading
@@ -148,13 +149,18 @@ def prepare(date: str) -> str | None:
     body = changelog[start:next_release].strip() if next_release != -1 else changelog[start:].strip()
     for record in records:
         body = _add_summary(body, record.section, record.summary)
-    replacement = f"## [Unreleased]\n\n## [{version}] - {date}\n\n{body}\n"
+    replacement = f"## [Unreleased]\n\n## [{version}] - {date}\n\n{body.rstrip()}\n\n"
     end = next_release if next_release != -1 else len(changelog)
 
     pyproject_path.write_text(
         VERSION_PATTERN.sub(f'version = "{version}"', pyproject, count=1), encoding="utf-8"
     )
-    changelog_path.write_text(changelog[: changelog.index(unreleased)] + replacement + changelog[end:], encoding="utf-8")
+    changelog_path.write_text(
+        changelog[: changelog.index(unreleased)]
+        + replacement
+        + changelog[end:].lstrip("\n"),
+        encoding="utf-8",
+    )
     for record in records:
         record.path.unlink()
     if NEXT_VERSION.exists():
