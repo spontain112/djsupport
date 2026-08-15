@@ -65,8 +65,10 @@ def test_ci_is_a_least_privilege_offline_release_gate():
     errors = []
 
     triggers = workflow.get("on", {})
-    if set(triggers) != {"push", "pull_request"}:
-        errors.append("CI must run only for pushes and pull requests")
+    if set(triggers) != {"push", "pull_request", "workflow_dispatch"}:
+        errors.append(
+            "CI must run only for pushes, pull requests, and explicit dispatches"
+        )
     if triggers.get("push", {}).get("branches") != ["main"]:
         errors.append("push CI must be limited to main")
     if workflow.get("permissions") != {"contents": "read"}:
@@ -148,11 +150,21 @@ def test_ci_is_a_least_privilege_offline_release_gate():
 
 
 def test_version_pr_automation_cannot_publish_a_release():
-    workflow = (REPOSITORY_ROOT / ".github" / "workflows" / "version-pr.yml").read_text()
-    normalized = workflow.casefold()
+    version_workflow = (
+        REPOSITORY_ROOT / ".github" / "workflows" / "version-pr.yml"
+    ).read_text()
+    ci_workflow = (
+        REPOSITORY_ROOT / ".github" / "workflows" / "ci.yml"
+    ).read_text()
+    normalized = version_workflow.casefold()
 
-    assert "scripts/release_records.py prepare" in workflow
-    assert "release/version" in workflow
-    assert "pull-requests: write" in workflow
+    assert "scripts/release_records.py prepare" in version_workflow
+    assert "release/version" in version_workflow
+    assert "pull-requests: write" in version_workflow
+    assert "actions: write" in version_workflow
+    assert "gh workflow run ci.yml --ref release/version" in version_workflow
+    assert "workflow_dispatch:" in ci_workflow
+    assert "github.event_name == 'workflow_dispatch'" in ci_workflow
+    assert "RELEASE_RECORD_BASE" in ci_workflow
     for forbidden in ("git tag", "gh release create", "twine", "pypi", "spotify", "beatport"):
         assert forbidden not in normalized

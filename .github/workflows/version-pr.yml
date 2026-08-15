@@ -10,6 +10,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
+  actions: write
   contents: write
   pull-requests: write
 
@@ -48,3 +49,4 @@ jobs:
           else
             gh pr create --base main --head release/version --title "chore: version DJ Support $VERSION" --body "Automated version PR from pending release records. Merging updates version metadata and the changelog; it does not authorize a tag, GitHub Release, or package publication."
           fi
+          gh workflow run ci.yml --ref release/version

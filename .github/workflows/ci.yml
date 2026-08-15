@@ -2,6 +2,7 @@ name: CI
 
 'on':
   pull_request:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -16,7 +17,7 @@ concurrency:
 jobs:
   release-record:
     name: Release record
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -25,7 +26,9 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: Require release record for distributable changes
-        run: python scripts/release_records.py check "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}"
+        env:
+          RELEASE_RECORD_BASE: ${{ github.event.pull_request.base.sha || 'origin/main' }}
+        run: python scripts/release_records.py check "$RELEASE_RECORD_BASE" "${{ github.sha }}"
 
   test:
     name: Python ${{ matrix.python-version }}
