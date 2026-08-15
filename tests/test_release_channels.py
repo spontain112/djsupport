@@ -35,6 +35,8 @@ def test_manual_release_checklist_separates_validation_from_publication():
     required_policy = (
         "exact commit",
         "release-preparation PR",
+        ".release-notes/*.md",
+        "release/version",
         "migration and backup",
         "green CI",
         "annotated `vX.Y.ZrcN` tag",
@@ -47,7 +49,7 @@ def test_manual_release_checklist_separates_validation_from_publication():
             "as Latest"
         ),
         "green CI on the exact final commit",
-        "next `.dev0` version",
+        "version PR does not authorize tagging or publication",
         "separate gated operations",
     )
 
@@ -143,3 +145,14 @@ def test_ci_is_a_least_privilege_offline_release_gate():
             errors.append(f"forbidden workflow capability: {marker}")
 
     assert not errors, "\n".join(errors)
+
+
+def test_version_pr_automation_cannot_publish_a_release():
+    workflow = (REPOSITORY_ROOT / ".github" / "workflows" / "version-pr.yml").read_text()
+    normalized = workflow.casefold()
+
+    assert "scripts/release_records.py prepare" in workflow
+    assert "release/version" in workflow
+    assert "pull-requests: write" in workflow
+    for forbidden in ("git tag", "gh release create", "twine", "pypi", "spotify", "beatport"):
+        assert forbidden not in normalized
