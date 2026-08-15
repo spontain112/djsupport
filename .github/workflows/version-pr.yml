@@ -44,8 +44,9 @@ jobs:
           git add pyproject.toml CHANGELOG.md .release-notes
           git commit -m "chore: version DJ Support $VERSION"
           git push --force-with-lease origin release/version
-          if gh pr view release/version --json number >/dev/null 2>&1; then
-            gh pr edit release/version --title "chore: version DJ Support $VERSION" --body "Automated version PR from pending release records. Merging updates version metadata and the changelog; it does not authorize a tag, GitHub Release, or package publication."
+          open_pr="$(gh pr list --base main --head release/version --state open --json number --jq '.[0].number // empty')"
+          if [[ -n "$open_pr" ]]; then
+            gh pr edit "$open_pr" --title "chore: version DJ Support $VERSION" --body "Automated version PR from pending release records. Merging updates version metadata and the changelog; it does not authorize a tag, GitHub Release, or package publication."
           else
             gh pr create --base main --head release/version --title "chore: version DJ Support $VERSION" --body "Automated version PR from pending release records. Merging updates version metadata and the changelog; it does not authorize a tag, GitHub Release, or package publication."
           fi

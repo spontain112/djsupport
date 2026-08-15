@@ -168,3 +168,16 @@ def test_version_pr_automation_cannot_publish_a_release():
     assert "RELEASE_RECORD_BASE" in ci_workflow
     for forbidden in ("git tag", "gh release create", "twine", "pypi", "spotify", "beatport"):
         assert forbidden not in normalized
+
+
+def test_version_pr_automation_ignores_prior_merged_pull_requests():
+    version_workflow = (
+        REPOSITORY_ROOT / ".github" / "workflows" / "version-pr.yml"
+    ).read_text()
+
+    assert "gh pr list" in version_workflow
+    assert "--base main" in version_workflow
+    assert "--head release/version" in version_workflow
+    assert "--state open" in version_workflow
+    assert 'gh pr edit "$open_pr"' in version_workflow
+    assert "gh pr view release/version" not in version_workflow
