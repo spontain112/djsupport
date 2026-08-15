@@ -46,15 +46,15 @@ constructor, or function parameters—never global singletons.
 - `match_track_cached(sp, track, cache, ...)` — receives both `sp` and `cache`
 - `RuntimeAssembly` receives an injectable Spotify-adapter factory and selects
   paths, matching knowledge, persistence, guards, and local-audio adapters.
-- CLI and Agent Client paths provide source and authorized phase facts to
-  Runtime Assembly; the web adapter retains its direct construction seam.
+- CLI, web, and Agent Client paths provide source and authorized phase facts to
+  Runtime Assembly.
 
 Files:
 - `matcher.py:154` — `match_track(sp, track, threshold)`
 - `matcher.py:225-228` — `match_track_cached(sp, track, cache, ...)`
 - `spotify.py:106-113` — `create_or_update_playlist(sp, ..., state_manager=None)`
 - `spotify.py:176-183` — `incremental_update_playlist(sp, ..., state_manager=None)`
-- `runtime.py` — private production graph assembly for CLI and Agent Clients
+- `runtime.py` — private production graph assembly for all Transfer clients
 
 ## Error handling
 

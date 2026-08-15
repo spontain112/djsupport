@@ -78,7 +78,7 @@ class RuntimePaths:
 class RuntimeSettings:
     """Policy-neutral facts selecting adapters for one active Transfer."""
 
-    paths: RuntimePaths
+    paths: RuntimePaths | None = None
     spotify_access: SpotifyAccess = SpotifyAccess.DISABLED
     retain_matching_knowledge: bool = True
     retain_publications: bool = True
@@ -145,9 +145,18 @@ class RuntimeAssembly:
     def __init__(
         self,
         spotify_factory: Callable[[], SpotifyAdapter] = _production_spotify,
+        default_paths: RuntimePaths | None = None,
+        local_audition: LocalSourceAudition | None = None,
     ) -> None:
         self._spotify_factory = spotify_factory
+        self._default_paths = default_paths or RuntimePaths.defaults()
+        self._local_audition = local_audition or LocalSourceAudition()
         self._transfer_storages: dict[Path, FileTransferStorage] = {}
+
+    @property
+    def local_audition(self) -> LocalSourceAudition:
+        """Return the process-local audition adapter shared by clients."""
+        return self._local_audition
 
     def capability_transfer(self) -> Transfer:
         """Build a graph that inspects local capabilities and nothing private."""
@@ -157,7 +166,7 @@ class RuntimeAssembly:
             matching_knowledge=EphemeralMatchingKnowledge(),
             publishing_guards=AccountPublishingGuards(),
             local_audio=ChromaprintLocalAudio(),
-            local_audition=LocalSourceAudition(),
+            local_audition=self._local_audition,
         )
 
     def assemble(
@@ -166,8 +175,9 @@ class RuntimeAssembly:
         settings: RuntimeSettings,
     ) -> RuntimeGraph:
         """Build one active Transfer from explicit, policy-owned phase facts."""
-        matching_knowledge = self._matching_knowledge(settings)
-        transfer_storage = self.transfer_storage(settings.paths)
+        paths = settings.paths or self._default_paths
+        matching_knowledge = self._matching_knowledge(settings, paths)
+        transfer_storage = self.transfer_storage(paths)
         spotify = (
             self._spotify_factory()
             if settings.spotify_access == SpotifyAccess.REQUIRED
@@ -179,7 +189,7 @@ class RuntimeAssembly:
             matching_knowledge=matching_knowledge,
             publishing_guards=AccountPublishingGuards(),
             publication_storage=(
-                FilePublicationStorage(settings.paths.publication_state)
+                FilePublicationStorage(paths.publication_state)
                 if settings.retain_publications else None
             ),
             transfer_storage=transfer_storage,
@@ -188,24 +198,31 @@ class RuntimeAssembly:
                 if settings.local_audio_identity else None
             ),
             local_audition=(
-                LocalSourceAudition()
+                self._local_audition
                 if settings.local_audio_audition else None
             ),
         )
         return RuntimeGraph(transfer, transfer_storage)
 
-    def transfer_storage(self, paths: RuntimePaths) -> FileTransferStorage:
+    def transfer_storage(
+        self, paths: RuntimePaths | None = None,
+    ) -> FileTransferStorage:
         """Return the shared Transfer-state adapter for one path family."""
+        paths = paths or self._default_paths
         path = paths.transfer_state
         if path not in self._transfer_storages:
             self._transfer_storages[path] = FileTransferStorage(path)
+        else:
+            self._transfer_storages[path].refresh()
         return self._transfer_storages[path]
 
     @staticmethod
-    def _matching_knowledge(settings: RuntimeSettings):
+    def _matching_knowledge(
+        settings: RuntimeSettings, paths: RuntimePaths,
+    ):
         if not settings.retain_matching_knowledge:
             return EphemeralMatchingKnowledge()
-        cache = MatchCache(settings.paths.matching_knowledge)
+        cache = MatchCache(paths.matching_knowledge)
         try:
             cache.load()
         except (OSError, ValueError) as exc:
