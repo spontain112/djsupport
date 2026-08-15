@@ -32,6 +32,7 @@ from djsupport.readiness import (
     FirstTransferReadiness,
     inspect_first_transfer_readiness,
 )
+from djsupport.runtime import RuntimeAssembly, RuntimeSettings, SpotifyAccess
 from djsupport.spotify import SCOPES
 from djsupport.local_audition import (
     AuditionHandleUnavailable,
@@ -39,27 +40,19 @@ from djsupport.local_audition import (
     LocalSourceAudition,
 )
 from djsupport.transfer import (
-    AccountPublishingGuards,
     BatchPlanRequest,
     BeatportChartSource,
     BeatportLabelSource,
-    EphemeralMatchingKnowledge,
-    FilePublicationStorage,
-    FileTransferStorage,
-    MatchCacheKnowledge,
     QualificationDecision,
     QualificationRequest,
     QualificationView,
     RekordboxPlaylistSource,
     SpotifyPlaylistChanged,
     SpotifyPlaylistReviewRequired,
-    SpotifyMatcher,
     Transfer,
     TransferAuthorization,
     TransferMode,
     TransferRequest,
-    default_matching_knowledge_path,
-    default_publication_manifest_path,
 )
 
 logger = logging.getLogger(__name__)
@@ -198,80 +191,13 @@ def _url_error() -> str:
     )
 
 
-def _default_transfer_factory(url_type: str, request: SyncRequest) -> Transfer:
-    from djsupport.cache import MatchCache
-    from djsupport.spotify import get_client
-
-    cache = None if request.no_cache else MatchCache(default_matching_knowledge_path())
-    if cache is not None:
-        cache.load()
-    publication_path = default_publication_manifest_path()
-    return Transfer(
-        source=(BeatportChartSource() if url_type == "chart" else BeatportLabelSource()),
-        spotify=SpotifyMatcher(get_client()),
-        publishing_guards=AccountPublishingGuards(),
-        matching_knowledge=(
-            EphemeralMatchingKnowledge() if cache is None else MatchCacheKnowledge(cache)
-        ),
-        publication_storage=(
-            None if request.dry_run else FilePublicationStorage(publication_path)
-        ),
-        transfer_storage=FileTransferStorage(
-            publication_path.with_suffix(".transfers.json")
-        ),
-    )
-
-
-def _default_rekordbox_transfer_factory(
-    request: RekordboxBatchRequest, execute_authorized: bool,
-    *, local_audition: LocalSourceAudition | None = None,
-) -> Transfer:
-    from djsupport.cache import MatchCache
-    from djsupport.local_audio import ChromaprintLocalAudio
-    from djsupport.spotify import get_client
-
-    cache = None if request.no_cache else MatchCache(
-        default_matching_knowledge_path(),
-    )
-    if cache is not None:
-        cache.load()
-    publication_path = default_publication_manifest_path()
-    return Transfer(
-        source=RekordboxPlaylistSource(
-            request.xml_path,
-            include_locations=(
-                request.local_audio_identity or request.local_audio_audition
-            ),
-        ),
-        spotify=(
-            SpotifyMatcher(get_client()) if execute_authorized else object()
-        ),
-        publishing_guards=AccountPublishingGuards(),
-        matching_knowledge=(
-            EphemeralMatchingKnowledge()
-            if cache is None else MatchCacheKnowledge(cache)
-        ),
-        publication_storage=(
-            None if request.preview else FilePublicationStorage(publication_path)
-        ),
-        transfer_storage=FileTransferStorage(
-            publication_path.with_suffix(".transfers.json")
-        ),
-        local_audio=(
-            ChromaprintLocalAudio() if request.local_audio_identity else None
-        ),
-        local_audition=(
-            local_audition if request.local_audio_audition else None
-        ),
-    )
-
-
 def _thread_runner(target: Callable, args: tuple) -> None:
     threading.Thread(target=target, args=args, daemon=True).start()
 
 
 def create_app(
     *,
+    runtime_assembly: RuntimeAssembly | None = None,
     transfer_factory: Callable[[str, SyncRequest], Transfer] | None = None,
     rekordbox_transfer_factory: Callable[
         [RekordboxBatchRequest, bool], Transfer
@@ -286,14 +212,47 @@ def create_app(
     """Create the web adapter with replaceable external-boundary wiring."""
     web_app = FastAPI(title="djsupport", lifespan=lifespan)
     web_app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-    make_transfer = transfer_factory or _default_transfer_factory
-    audition = local_audition or LocalSourceAudition()
+    assembly = runtime_assembly or RuntimeAssembly(
+        local_audition=local_audition,
+    )
+    if transfer_factory is None:
+        def make_transfer(url_type, request):
+            return assembly.assemble(
+                (
+                    BeatportChartSource()
+                    if url_type == "chart" else BeatportLabelSource()
+                ),
+                RuntimeSettings(
+                    spotify_access=SpotifyAccess.REQUIRED,
+                    retain_matching_knowledge=not request.no_cache,
+                    retain_publications=not request.dry_run,
+                ),
+            ).transfer
+    else:
+        make_transfer = transfer_factory
+    audition = assembly.local_audition
     uses_default_rekordbox_wiring = rekordbox_transfer_factory is None
     if rekordbox_transfer_factory is None:
         def make_rekordbox_transfer(request, execute_authorized):
-            return _default_rekordbox_transfer_factory(
-                request, execute_authorized, local_audition=audition,
-            )
+            return assembly.assemble(
+                RekordboxPlaylistSource(
+                    request.xml_path,
+                    include_locations=(
+                        request.local_audio_identity
+                        or request.local_audio_audition
+                    ),
+                ),
+                RuntimeSettings(
+                    spotify_access=(
+                        SpotifyAccess.REQUIRED
+                        if execute_authorized else SpotifyAccess.DISABLED
+                    ),
+                    retain_matching_knowledge=not request.no_cache,
+                    retain_publications=not request.preview,
+                    local_audio_identity=request.local_audio_identity,
+                    local_audio_audition=request.local_audio_audition,
+                ),
+            ).transfer
     else:
         make_rekordbox_transfer = rekordbox_transfer_factory
     run_background = background_runner or _thread_runner
@@ -408,10 +367,11 @@ def create_app(
     @web_app.get("/capabilities")
     def capabilities():
         from djsupport.agent import capability_document
-        from djsupport.local_audio import ChromaprintLocalAudio
 
+        transfer = assembly.capability_transfer()
         return capability_document(
-            ChromaprintLocalAudio().capability(), audition.capability(),
+            transfer.local_audio_capability(),
+            transfer.local_audition_capability(),
         )
 
     @web_app.get("/auth/status")
@@ -552,7 +512,6 @@ def create_app(
             FirstTransferGuideRequest,
             error_document,
         )
-        from djsupport.local_audio import ChromaprintLocalAudio
 
         readiness = inspect_readiness(
             request.xml_path, request.authorize_private_source,
@@ -585,13 +544,7 @@ def create_app(
         )
         try:
             if uses_default_rekordbox_wiring and not activate:
-                transfer = Transfer(
-                    source=object(),
-                    spotify=object(),
-                    matching_knowledge=EphemeralMatchingKnowledge(),
-                    publishing_guards=AccountPublishingGuards(),
-                    local_audio=ChromaprintLocalAudio(),
-                )
+                transfer = assembly.capability_transfer()
             else:
                 transfer = make_rekordbox_transfer(
                     adapter_request, spotify_access,
@@ -631,10 +584,7 @@ def create_app(
             return None
         from djsupport.config import ConfigManager
 
-        publication_path = default_publication_manifest_path()
-        storage = FileTransferStorage(
-            publication_path.with_suffix(".transfers.json")
-        )
+        storage = assembly.transfer_storage()
         draft = storage.load_qualification(draft_id)
         if draft is None:
             return None
@@ -666,10 +616,7 @@ def create_app(
         """Derive adapter wiring from durable Transfer intent, not web input."""
         if not uses_default_rekordbox_wiring:
             return request
-        publication_path = default_publication_manifest_path()
-        storage = FileTransferStorage(
-            publication_path.with_suffix(".transfers.json")
-        )
+        storage = assembly.transfer_storage()
         batch = storage.load_batch(request.transfer_id)
         transfer_id = request.transfer_id
         if batch is not None:
@@ -705,10 +652,7 @@ def create_app(
             context = qualification_contexts.get(draft_id)
         if context is None:
             if uses_default_rekordbox_wiring:
-                publication_path = default_publication_manifest_path()
-                storage = FileTransferStorage(
-                    publication_path.with_suffix(".transfers.json")
-                )
+                storage = assembly.transfer_storage()
                 if storage.load_qualification(draft_id) is not None:
                     raise HTTPException(
                         status_code=409,

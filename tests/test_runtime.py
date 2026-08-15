@@ -78,6 +78,39 @@ def selected_paths(tmp_path):
 
 
 class TestRuntimeAssembly:
+    def test_clients_can_use_one_assembly_owned_default_path_family(
+        self, tmp_path,
+    ):
+        paths = selected_paths(tmp_path)
+        assembly = RuntimeAssembly(
+            spotify_factory=SyntheticSpotify,
+            default_paths=paths,
+        )
+
+        graph = assembly.assemble(
+            SyntheticSource(),
+            RuntimeSettings(spotify_access=SpotifyAccess.REQUIRED),
+        )
+        report = graph.transfer.execute(TransferRequest(
+            source="synthetic-selection",
+        ))
+
+        assert report.total_matched == 1
+        assert graph.transfer_storage.path == paths.transfer_state
+        assert paths.matching_knowledge.exists()
+        assert paths.publication_state.exists()
+
+    def test_clients_share_the_assembly_owned_default_transfer_storage(
+        self, tmp_path,
+    ):
+        paths = selected_paths(tmp_path)
+        assembly = RuntimeAssembly(default_paths=paths)
+
+        storage = assembly.transfer_storage()
+
+        assert storage.path == paths.transfer_state
+        assert assembly.transfer_storage() is storage
+
     def test_capability_graph_never_constructs_spotify_or_reads_a_source(self):
         def forbidden_spotify():
             raise AssertionError("Spotify must stay untouched")
