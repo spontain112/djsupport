@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import re
 import subprocess
+from pathlib import Path
 
 
 PUBLIC_PATHS = {
@@ -42,12 +43,13 @@ def validate(changed_files: list[str], pr_body: str) -> list[str]:
     ]
 
 
-def changed_files(base: str, head: str) -> list[str]:
+def changed_files(base: str, head: str, cwd: Path | None = None) -> list[str]:
     result = subprocess.run(
-        ["git", "diff", "--diff-filter=AM", "--name-only", base, head],
+        ["git", "diff", "--diff-filter=ACDMRT", "--name-only", base, head],
         check=True,
         capture_output=True,
         text=True,
+        cwd=cwd,
     )
     return result.stdout.splitlines()
 

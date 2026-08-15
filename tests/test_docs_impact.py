@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -62,3 +63,25 @@ def test_empty_no_impact_reason_is_rejected() -> None:
     )
 
     assert errors
+
+
+def test_deleted_public_file_requires_docs_declaration(tmp_path: Path) -> None:
+    subprocess.run(["git", "init"], cwd=tmp_path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test User"], cwd=tmp_path, check=True
+    )
+    public_file = tmp_path / "djsupport" / "public.py"
+    public_file.parent.mkdir()
+    public_file.write_text("PUBLIC = True\n")
+    subprocess.run(["git", "add", str(public_file)], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "add public file"], cwd=tmp_path, check=True)
+    public_file.unlink()
+    subprocess.run(["git", "add", "-u"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-m", "remove public file"], cwd=tmp_path, check=True)
+
+    assert check_docs_impact.changed_files("HEAD~1", "HEAD", cwd=tmp_path) == [
+        "djsupport/public.py"
+    ]
