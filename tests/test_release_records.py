@@ -14,6 +14,26 @@ sys.modules[SPEC.name] = release_records
 SPEC.loader.exec_module(release_records)
 
 
+def test_distributable_paths_exclude_internal_research_only():
+    distributable = (
+        "djsupport/transfer.py",
+        "README.md",
+        "pyproject.toml",
+        "docs/architecture.md",
+        "docs/storage.md",
+        "docs/backup-and-restore.md",
+    )
+    internal = (
+        "docs/releasing.md",
+        "docs/research/operational-store-contract.md",
+        "tests/test_transfer.py",
+        ".github/workflows/ci.yml",
+    )
+
+    assert all(release_records._is_distributable(path) for path in distributable)
+    assert not any(release_records._is_distributable(path) for path in internal)
+
+
 def test_release_record_parser_requires_bump_section_and_summary(tmp_path):
     record = tmp_path / "change.md"
     record.write_text(

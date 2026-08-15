@@ -66,7 +66,9 @@ def load_records() -> list[ReleaseRecord]:
 
 def _is_distributable(path: str) -> bool:
     return path.startswith("djsupport/") or path in {"README.md", "pyproject.toml"} or (
-        path.startswith("docs/") and path != "docs/releasing.md"
+        path.startswith("docs/")
+        and path != "docs/releasing.md"
+        and not path.startswith("docs/research/")
     )
 
 
