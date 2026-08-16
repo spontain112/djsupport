@@ -1349,7 +1349,7 @@ def web(host: str, port: int):
     except ImportError:
         click.echo(
             "Web UI requires extra dependencies. Install with:\n"
-            "  pip install djsupport[web]"
+            "  python3 -m pip install --only-binary=apsw \"djsupport[web]\""
         )
         raise SystemExit(1)
 

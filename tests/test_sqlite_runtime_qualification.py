@@ -44,6 +44,7 @@ def active_upstream_manifest():
         "entries": [
             {
                 "evidence_id": "apsw/3.53.4.0/test-wheel",
+                "artifact_id": "apsw/3.53.4.0/test-wheel",
                 "classification": "qualified_upstream",
                 "status": "active",
                 "selectors": {
@@ -711,7 +712,7 @@ class TestQualificationManifest:
         ):
             SQLiteRuntimeQualification(manifest)
 
-    def test_packaged_policy_qualifies_no_artifact_before_issue_167(self):
+    def test_packaged_policy_rejects_an_unlisted_synthetic_runtime(self):
         qualification = SQLiteRuntimeQualification.packaged()
 
         result = qualification.classify(qualified_runtime_facts())
@@ -775,6 +776,43 @@ class TestApswRuntimeProbe:
         assert facts.python_version == "3.14.7"
         assert facts.python_abi == "cpython-314t-darwin"
         assert facts.python_gil_mode == "free-threaded"
+
+    def test_probe_derives_legacy_windows_abi_when_soabi_is_absent(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        configure_synthetic_probe(
+            monkeypatch,
+            tmp_path,
+            python_version=(3, 10, 11),
+            python_abi=None,
+            windows_product_type=3,
+        )
+        monkeypatch.setattr(
+            "djsupport.operational_store.apsw.platform.system",
+            lambda: "Windows",
+        )
+        monkeypatch.setattr(
+            "djsupport.operational_store.apsw.platform.win32_ver",
+            lambda: ("10", "10.0.26100", "", "Multiprocessor Free"),
+        )
+        monkeypatch.setattr(
+            "djsupport.operational_store.apsw.platform.release",
+            lambda: "10",
+        )
+        monkeypatch.setattr(
+            "djsupport.operational_store.apsw.platform.machine",
+            lambda: "AMD64",
+        )
+        monkeypatch.setattr(
+            "djsupport.operational_store.apsw.sysconfig.get_platform",
+            lambda: "win-amd64",
+        )
+
+        facts = probe_apsw_runtime()
+
+        assert facts.python_abi == "cp310-win_amd64"
 
     def test_probe_separates_product_os_version_from_kernel_release(
         self,
@@ -991,7 +1029,7 @@ class TestRuntimeGate:
 class TestBindingArchitecture:
     def test_operational_store_has_one_direct_sqlite_binding_import(self):
         repository_root = Path(__file__).parents[1]
-        package_root = repository_root / "djsupport" / "operational_store"
+        package_root = repository_root / "djsupport"
         apsw_importers = set()
         sqlite3_importers = set()
 

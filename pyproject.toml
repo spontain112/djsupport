@@ -14,8 +14,9 @@ version = "0.6.0"
 description = "Transfer Rekordbox and Beatport selections to Spotify"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.15"
 dependencies = [
+    "apsw==3.53.4.0",
     "spotipy>=2.23",
     "click>=8.0",
     "python-dotenv>=1.0",

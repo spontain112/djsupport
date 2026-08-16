@@ -14,6 +14,8 @@ the exact version and complete license material in a particular environment.
 
 | Project | How DJ Support uses it | License |
 | --- | --- | --- |
+| [APSW](https://github.com/rogerbinns/apsw) | Sole private Python binding for the qualified local Operational Store; pinned to 3.53.4.0 for the 0.7 release train | [Any OSI-approved license](https://rogerbinns.github.io/apsw/copyright.html) |
+| [SQLite](https://sqlite.org/) | Embedded by the approved APSW binary artifacts as the local transactional database engine; pinned runtime 3.53.4 | [Public domain](https://sqlite.org/copyright.html) |
 | [Spotipy](https://github.com/spotipy-dev/spotipy) | Spotify authentication and Web API access | MIT |
 | [Click](https://github.com/pallets/click) | Command-line interface | BSD-3-Clause |
 | [python-dotenv](https://github.com/theskumar/python-dotenv) | Optional environment-file loading | BSD-3-Clause |
@@ -50,6 +52,8 @@ the exact version and complete license material in a particular environment.
 | [checkout](https://github.com/actions/checkout) | GitHub Actions source checkout | MIT |
 | [setup-python](https://github.com/actions/setup-python) | GitHub Actions Python toolchains | MIT |
 | [CodeQL](https://github.com/github/codeql-action) | Static security analysis for Python and GitHub Actions workflows | MIT |
+| [certifi](https://github.com/certifi/python-certifi) | CA bundle for CI-only PyPI attestation HTTPS verification | MPL-2.0 |
+| [PyPI Attestations](https://github.com/pypi/pypi-attestations) | Pinned CI verifier for APSW wheel Trusted Publisher attestations | Apache-2.0 |
 
 ## Independent external tools
 

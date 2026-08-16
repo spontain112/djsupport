@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spontain112/djsupport/apsw-runtime-artifacts.v1.schema.json",
+  "title": "DJ Support approved APSW binary artifact catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "catalog_id",
+    "selected_binding",
+    "publisher",
+    "artifacts"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "catalog_id": {"const": "djsupport/apsw-runtime-artifacts/1"},
+    "selected_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["distribution", "version"],
+      "properties": {
+        "distribution": {"const": "apsw"},
+        "version": {"const": "3.53.4.0"}
+      }
+    },
+    "publisher": {"$ref": "#/$defs/publisher"},
+    "artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/artifact"}
+    }
+  },
+  "$defs": {
+    "safe_identity": {
+      "type": "string",
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*(/[A-Za-z0-9][A-Za-z0-9._+-]*)*$"
+    },
+    "https_url": {
+      "type": "string",
+      "maxLength": 2048,
+      "pattern": "^https://[^\\s]+$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "utc_timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "publisher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "repository",
+        "workflow",
+        "source_repository_url",
+        "source_commit",
+        "workflow_url"
+      ],
+      "properties": {
+        "kind": {"const": "GitHub"},
+        "repository": {"const": "rogerbinns/apsw"},
+        "workflow": {"const": "build-pypi.yml"},
+        "source_repository_url": {
+          "const": "https://github.com/rogerbinns/apsw"
+        },
+        "source_commit": {
+          "const": "09b6a89e13e1c49f13bfb92fdb8725d1a0f03b5a"
+        },
+        "workflow_url": {
+          "const": "https://github.com/rogerbinns/apsw/actions/workflows/build-pypi.yml"
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "runner_label",
+        "python_version",
+        "architecture",
+        "os",
+        "os_version_family",
+        "product_type",
+        "filename",
+        "platform_tag",
+        "download_url",
+        "size_bytes",
+        "sha256",
+        "provenance_url",
+        "uploaded_at_utc"
+      ],
+      "properties": {
+        "artifact_id": {"$ref": "#/$defs/safe_identity"},
+        "runner_label": {
+          "enum": [
+            "macos-15",
+            "macos-15-intel",
+            "ubuntu-24.04",
+            "ubuntu-24.04-arm",
+            "windows-2025"
+          ]
+        },
+        "python_version": {
+          "type": "string",
+          "pattern": "^3\\.(?:10|11|12|13|14)\\.[0-9]+$"
+        },
+        "architecture": {
+          "enum": ["AMD64", "aarch64", "arm64", "x86_64"]
+        },
+        "os": {"enum": ["Ubuntu", "macOS", "Windows"]},
+        "os_version_family": {
+          "type": "string",
+          "pattern": "^[0-9]+(?:\\.[0-9]+){0,3}$"
+        },
+        "product_type": {"enum": ["not_applicable", "server"]},
+        "filename": {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^apsw-3\\.53\\.4\\.0-cp(?:310|311|312|313|314)-cp(?:310|311|312|313|314)-[A-Za-z0-9_.]+\\.whl$"
+        },
+        "platform_tag": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*$"
+        },
+        "download_url": {"$ref": "#/$defs/https_url"},
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "provenance_url": {"$ref": "#/$defs/https_url"},
+        "uploaded_at_utc": {"$ref": "#/$defs/utc_timestamp"}
+      }
+    }
+  }
+}

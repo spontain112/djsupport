@@ -129,7 +129,7 @@ def test_ci_is_a_least_privilege_offline_release_gate():
         step.get("run", "") for step in test_job.get("steps", [])
     )
     for command in (
-        'python -m pip install ".[dev,web]"',
+        'python -m pip install --only-binary=apsw ".[dev,web]"',
         "python -m pytest",
         "python -m compileall -q djsupport tests",
     ):
@@ -144,6 +144,7 @@ def test_ci_is_a_least_privilege_offline_release_gate():
         "python -m tarfile -l",
         "python -m zipfile -l",
         "python -m venv",
+        "python -m pip install --only-binary=apsw dist/*.whl",
         "import djsupport",
         "djsupport --help",
     ):
