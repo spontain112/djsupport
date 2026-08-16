@@ -123,9 +123,13 @@ def test_first_transfer_rejects_nonlocal_context_before_inspecting_a_path():
             headers={"Origin": "https://attacker.example"},
             json=payload,
         ),
+        local_client.get(
+            "/qualification/synthetic-draft",
+            headers={"Origin": "https://attacker.example"},
+        ),
     )
 
-    assert [response.status_code for response in responses] == [403, 403, 403]
+    assert [response.status_code for response in responses] == [403, 403, 403, 403]
     assert inspected_paths == []
 
 

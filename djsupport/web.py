@@ -159,7 +159,7 @@ class QualificationLinkRequest(BaseModel):
     authorize_private_source: bool = False
 
 
-QUALIFICATION_PRIVACY_HEADERS = {
+PRIVATE_SOURCE_PRIVACY_HEADERS = {
     "Cache-Control": "private, no-store",
     "Content-Security-Policy": (
         "default-src 'self'; script-src 'self' 'unsafe-inline'; "
@@ -323,7 +323,7 @@ def create_app(
                 )
             else:
                 response = await call_next(request)
-            privacy_headers = dict(QUALIFICATION_PRIVACY_HEADERS)
+            privacy_headers = dict(PRIVATE_SOURCE_PRIVACY_HEADERS)
             if request.url.path.startswith(
                 "/rekordbox/qualification/media/"
             ):
@@ -372,18 +372,17 @@ def create_app(
                 status_code=403,
                 detail="Private-source routes require a loopback Host",
             )
-        if request.method not in {"GET", "HEAD", "OPTIONS"}:
-            origin = request.headers.get("origin")
-            if origin:
-                try:
-                    origin_host = urlparse(origin).hostname or ""
-                except ValueError:
-                    origin_host = ""
-                if not is_loopback(origin_host, allow_test=peer_is_test):
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Private-source routes require a loopback Origin",
-                    )
+        origin = request.headers.get("origin")
+        if origin:
+            try:
+                origin_host = urlparse(origin).hostname or ""
+            except ValueError:
+                origin_host = ""
+            if not is_loopback(origin_host, allow_test=peer_is_test):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Private-source routes require a loopback Origin",
+                )
 
     def transfer_for(transfer_id: str, request: SyncRequest | None = None):
         probe_request = request or SyncRequest(
@@ -1043,7 +1042,7 @@ def create_app(
     @web_app.get("/rekordbox/qualification/media/{handle}")
     def qualification_media(handle: str, request: FastAPIRequest):
         require_private_source_loopback(request)
-        privacy_headers = QUALIFICATION_PRIVACY_HEADERS
+        privacy_headers = PRIVATE_SOURCE_PRIVACY_HEADERS
         try:
             stream = audition.stream(handle, request.headers.get("range"))
         except AuditionHandleUnavailable as exc:
