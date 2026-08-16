@@ -2,12 +2,12 @@
 
 ## Development setup
 
-DJ Support is a Python 3.10+ package. The CLI uses Click, the optional local web
-adapter uses FastAPI, and the Spotify boundary uses Spotipy. Install development
-and web dependencies from the repository root:
+DJ Support is a Python 3.10–3.14 package. The CLI uses Click, the optional local
+web adapter uses FastAPI, and the Spotify boundary uses Spotipy. Install
+development and web dependencies from the repository root:
 
 ```bash
-python3 -m pip install -e ".[dev,web]"
+python3 -m pip install --only-binary=apsw -e ".[dev,web]"
 ```
 
 Run the fully offline test suite and compilation checks with:

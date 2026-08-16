@@ -40,9 +40,11 @@ failure, runtime near-miss, revoked entry, or unknown cell fails before any
 Operational Store path or state mutation.
 
 Ordinary Python dependency metadata cannot require pip's binary-only resolver.
-Installers therefore use `--only-binary=apsw`; a source build may install but is
-never admitted by the extension digest and fail-closed runtime manifest. There
-is no standard-library, rollback-journal, JSON-after-cutover, configuration,
+Every repository-owned user, development, CI, and release installation route
+therefore uses `--only-binary=apsw` and fails if its exact reviewed wheel is
+unavailable. An invocation outside those controlled routes is never admitted by
+the extension digest and fail-closed runtime manifest. There is no
+standard-library, rollback-journal, JSON-after-cutover, configuration,
 warning-only, or checkpoint-scheduling fallback.
 
 ## Update and monitoring ownership

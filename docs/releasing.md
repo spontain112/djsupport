@@ -49,7 +49,7 @@ authorize any tag, GitHub Release, or package publication.
       the complete offline suite plus compilation:
 
   ```bash
-  python3 -m pip install ".[dev,web]"
+  python3 -m pip install --only-binary=apsw ".[dev,web]"
   python3 -m pytest
   python3 -m compileall -q djsupport tests
   ```
@@ -87,6 +87,7 @@ authorize any tag, GitHub Release, or package publication.
   install_dir="$(mktemp -d)"
   python3 -m venv "$install_dir/venv"
   "$install_dir/venv/bin/python" -m pip install \
+    --only-binary=apsw \
     "$artifact_dir/djsupport-X.Y.Z-py3-none-any.whl"
   "$install_dir/venv/bin/python" -c \
     'from importlib.metadata import version; assert version("djsupport") == "X.Y.Z"; import djsupport'

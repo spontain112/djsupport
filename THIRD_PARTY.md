@@ -52,6 +52,7 @@ the exact version and complete license material in a particular environment.
 | [checkout](https://github.com/actions/checkout) | GitHub Actions source checkout | MIT |
 | [setup-python](https://github.com/actions/setup-python) | GitHub Actions Python toolchains | MIT |
 | [CodeQL](https://github.com/github/codeql-action) | Static security analysis for Python and GitHub Actions workflows | MIT |
+| [certifi](https://github.com/certifi/python-certifi) | CA bundle for CI-only PyPI attestation HTTPS verification | MPL-2.0 |
 | [PyPI Attestations](https://github.com/pypi/pypi-attestations) | Pinned CI verifier for APSW wheel Trusted Publisher attestations | Apache-2.0 |
 
 ## Independent external tools

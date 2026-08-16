@@ -29,7 +29,6 @@ from djsupport.operational_store.delivery import (
 )
 
 
-APSW_REQUIREMENT = "apsw==3.53.4.0"
 APSW_REPOSITORY = "https://github.com/rogerbinns/apsw"
 NATIVE_SUFFIXES = (".dylib", ".dll", ".pyd", ".so")
 PRIVATE_SUFFIXES = (
@@ -94,8 +93,11 @@ def _outer(mode: str) -> None:
     )
     with tempfile.TemporaryDirectory(prefix="djsupport-runtime-delivery-") as raw:
         workspace = Path(raw)
-        apsw_wheel = _download_binary_wheel(workspace / "apsw")
         catalog = load_artifact_catalog()
+        apsw_wheel = _download_binary_wheel(
+            workspace / "apsw",
+            _selected_binding_requirement(catalog),
+        )
         artifact = artifact_for_cell(
             catalog,
             runner_label=runner_label,
@@ -170,7 +172,7 @@ def _inner(args: argparse.Namespace) -> None:
     print(f"{marker}={json.dumps(payload, sort_keys=True, separators=(',', ':'))}")
 
 
-def _download_binary_wheel(destination: Path) -> Path:
+def _download_binary_wheel(destination: Path, requirement: str) -> Path:
     destination.mkdir()
     subprocess.run(
         [
@@ -183,7 +185,7 @@ def _download_binary_wheel(destination: Path) -> Path:
             "--no-deps",
             "--dest",
             str(destination),
-            APSW_REQUIREMENT,
+            requirement,
         ],
         check=True,
     )
@@ -191,6 +193,21 @@ def _download_binary_wheel(destination: Path) -> Path:
     if len(wheels) != 1:
         raise SystemExit("sqlite_runtime_delivery_failed:wheel_resolution")
     return wheels[0]
+
+
+def _selected_binding_requirement(catalog: dict[str, object]) -> str:
+    selected = catalog.get("selected_binding")
+    if not isinstance(selected, dict):
+        raise SystemExit(
+            "sqlite_runtime_delivery_failed:selected_binding_unavailable"
+        )
+    distribution = selected.get("distribution")
+    version = selected.get("version")
+    if not isinstance(distribution, str) or not isinstance(version, str):
+        raise SystemExit(
+            "sqlite_runtime_delivery_failed:selected_binding_unavailable"
+        )
+    return f"{distribution}=={version}"
 
 
 def _verify_provenance(download_url: str) -> None:
