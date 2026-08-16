@@ -246,6 +246,11 @@ djsupport beatport --export-file beatport-export.json --dry-run
 djsupport beatport --export-file beatport-export.json
 ```
 
+DJ Support consumes only the exported file and does not distribute
+`beatport-pp-cli`. Its canonical upstream, license, and supported installation
+route remain unverified in [issue #133](https://github.com/spontain112/djsupport/issues/133);
+do not infer a distribution from this interoperability example.
+
 The file is validated before Spotify access. Its public source URL, ordered
 occurrences, repeated Beatport IDs, mixes, durations, ISRC, musical facts,
 release/label facts, dates, and tri-state availability are retained through the
@@ -417,8 +422,12 @@ is `$XDG_DATA_HOME/djsupport` or `~/.local/share/djsupport`.
 - [Release notes](docs/release-notes-0.5.0.md)
 - [Maintainer release checklist](docs/releasing.md)
 - [Changelog](CHANGELOG.md)
+- [Security policy](SECURITY.md)
+- [Open-source acknowledgements](THIRD_PARTY.md)
 - [Contributing](CONTRIBUTING.md)
 
-## License
+## License and acknowledgements
 
-MIT
+DJ Support is available under the [MIT License](LICENSE). It is built with
+open-source projects maintained by people and communities we gratefully credit
+in [Open-source acknowledgements](THIRD_PARTY.md).

@@ -207,6 +207,34 @@ High-level tests and callers cross these interfaces rather than reaching into
 the implementation. See [`CONTRIBUTING.md`](../CONTRIBUTING.md) for the file map
 and engineering conventions.
 
+## Accepted production hardening direction
+
+[ADR-0005](adr/0005-use-one-local-transactional-operational-store.md) accepts
+one local transactional Operational Store for the 0.7 development line. It
+will replace the three current production persistence adapters with one deep
+internal interface implemented by SQLite in production and an in-memory
+adapter in behavior tests. Transfer remains the sole public policy authority;
+the Operational Store concentrates transactions, integrity, recovery, and
+derived diagnostics without creating a second policy interface.
+
+[Runtime Assembly](../djsupport/runtime.py) already concentrates production
+adapter selection for CLI, web, and Agent Clients. Delivery follows the
+[#138–#147 dependency map](research/2026-08-16-operational-store-issue-frontier.md#dependency-order-and-parallel-safe-lanes):
+JSON remains the sole production authority before the verified activation
+point, and every client resolves the selected SQLite generation afterward.
+There is no runtime dual-write, partial-client cutover, or silent JSON
+fallback. Retained JSON is inert input to explicit migration or rollback only.
+
+SQLite transactions do not include Spotify. Transfer retains explicit effect
+ordering and Spotify Account publishing guards, while the Effect Journal makes
+incomplete external work durable and reconcilable. The implementation details
+for connection behavior, runtime qualification, migration, backup, restore,
+and atomic activation live in the linked
+[concurrency](research/2026-08-16-sqlite-concurrency-durability-contract.md)
+and
+[cutover](research/2026-08-16-sqlite-migration-backup-cutover-contract.md)
+contracts rather than in this stable architecture overview.
+
 ## Audio capabilities are separate
 
 **Local Audio Identity** calculates an opt-in Chromaprint observation for audio

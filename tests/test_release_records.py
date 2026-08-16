@@ -14,6 +14,58 @@ sys.modules[SPEC.name] = release_records
 SPEC.loader.exec_module(release_records)
 
 
+def test_public_root_artifacts_are_distributable():
+    public_root_artifacts = (
+        ".env.example",
+        "CHANGELOG.md",
+        "CONTEXT.md",
+        "CONTRIBUTING.md",
+        "LICENSE",
+        "MANIFEST.in",
+        "README.md",
+        "SECURITY.md",
+        "THIRD_PARTY.md",
+        "pyproject.toml",
+    )
+
+    assert all(
+        release_records._is_distributable(path)
+        for path in public_root_artifacts
+    )
+
+
+def test_distributable_paths_exclude_internal_research_only():
+    distributable = (
+        "djsupport/transfer.py",
+        "README.md",
+        "pyproject.toml",
+        "docs/architecture.md",
+        "docs/storage.md",
+        "docs/backup-and-restore.md",
+    )
+    internal = (
+        "docs/releasing.md",
+        "docs/research/operational-store-contract.md",
+        "tests/test_transfer.py",
+        ".github/workflows/ci.yml",
+    )
+
+    assert all(release_records._is_distributable(path) for path in distributable)
+    assert not any(release_records._is_distributable(path) for path in internal)
+
+
+def test_agent_only_repository_instructions_are_not_distributable():
+    agent_only = (
+        "AGENTS.md",
+        "CLAUDE.md",
+        ".claude/settings.local.json",
+    )
+
+    assert not any(
+        release_records._is_distributable(path) for path in agent_only
+    )
+
+
 def test_release_record_parser_requires_bump_section_and_summary(tmp_path):
     record = tmp_path / "change.md"
     record.write_text(

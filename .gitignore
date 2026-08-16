@@ -27,6 +27,30 @@ build/
 !tests/fixtures/*.xml
 *playlist-state*.json
 
+# Planned Operational Store, retained legacy authorities, and private derivatives
+operational-store.sqlite3
+operational-store.sqlite3-*
+operational-store.authority.json
+operational-stores/
+djsupport-snapshot-*.sqlite3
+djsupport-snapshot-*.sqlite3-*
+djsupport-backup-*.zip
+backup-manifest.json
+djsupport-migration-*
+djsupport-restore-*
+djsupport-rollback-*
+djsupport-operational-events*
+djsupport-analytics*
+djsupport-diagnostics*
+djsupport-query-export*
+matching-knowledge.json
+publication-manifests.json
+publication-manifests.transfers.json
+transfers.json
+legacy-migration.json
+foundation-migration.json
+config.json
+
 # Local matching evidence and exports (force-add only after explicit consent
 # and privacy review for contribution)
 matching-regression*.json
