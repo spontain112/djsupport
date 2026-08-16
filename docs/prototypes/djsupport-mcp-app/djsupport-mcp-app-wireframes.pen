@@ -1,0 +1,1158 @@
+{
+  "version": "2.14",
+  "children": [
+    {
+      "type": "frame",
+      "id": "f93yr",
+      "x": 0,
+      "y": 0,
+      "name": "00 · DJ Support MCP App — Component Library",
+      "metadata": {
+        "type": "component-library-reference",
+        "source": "validated-export"
+      },
+      "clip": true,
+      "width": 3600,
+      "height": 1420,
+      "fill": {
+        "type": "image",
+        "enabled": true,
+        "url": "./exports/00-component-library.png",
+        "mode": "stretch"
+      }
+    },
+    {
+      "type": "frame",
+      "id": "FMWEZ",
+      "x": 0,
+      "y": 1620,
+      "name": "01 · Compact — Choose Rekordbox File",
+      "metadata": {
+        "type": "prototype-screen",
+        "source": "validated-export"
+      },
+      "clip": true,
+      "width": 720,
+      "height": 440,
+      "fill": {
+        "type": "image",
+        "enabled": true,
+        "url": "./exports/01-choose-rekordbox-file.png",
+        "mode": "stretch"
+      }
+    },
+    {
+      "type": "frame",
+      "id": "NnIyw",
+      "x": 800,
+      "y": 1620,
+      "name": "02 · Compact — Prepare Playlists",
+      "metadata": {
+        "type": "prototype-screen",
+        "source": "validated-export"
+      },
+      "clip": true,
+      "width": 720,
+      "height": 440,
+      "fill": {
+        "type": "image",
+        "enabled": true,
+        "url": "./exports/02-prepare-playlists.png",
+        "mode": "stretch"
+      }
+    },
+    {
+      "type": "frame",
+      "id": "W5ad6",
+      "x": 1600,
+      "y": 1620,
+      "name": "03 · Medium — Choose Playlist",
+      "metadata": {
+        "type": "prototype-screen",
+        "source": "validated-export"
+      },
+      "clip": true,
+      "width": 920,
+      "height": 620,
+      "fill": {
+        "type": "image",
+        "enabled": true,
+        "url": "./exports/03-choose-playlist.png",
+        "mode": "stretch"
+      }
+    },
+    {
+      "type": "frame",
+      "id": "lHpgG",
+      "x": 0,
+      "y": 2440,
+      "name": "04 · Compact — Confirm Spotify Check",
+      "metadata": {
+        "type": "prototype-screen",
+        "source": "validated-export"
+      },
+      "clip": true,
+      "width": 720,
+      "height": 360,
+      "fill": {
+        "type": "image",
+        "enabled": true,
+        "url": "./exports/04-confirm-spotify-check.png",
+        "mode": "stretch"
+      }
+    },
+    {
+      "type": "frame",
+      "id": "ei7gM",
+      "x": 800,
+      "y": 2440,
+      "name": "05 · Compact — Match Results",
+      "metadata": {
+        "type": "prototype-screen",
+        "source": "validated-export"
+      },
+      "clip": true,
+      "width": 720,
+      "height": 330,
+      "fill": {
+        "type": "image",
+        "enabled": true,
+        "url": "./exports/05-match-results.png",
+        "mode": "stretch"
+      }
+    },
+    {
+      "type": "frame",
+      "id": "QJqOm",
+      "x": 1600,
+      "y": 2440,
+      "name": "06 · Large — Review Uncertain Songs",
+      "metadata": {
+        "type": "prototype-screen",
+        "source": "validated-export"
+      },
+      "clip": true,
+      "width": 1040,
+      "height": 580,
+      "fill": {
+        "type": "image",
+        "enabled": true,
+        "url": "./exports/06-review-uncertain-songs.png",
+        "mode": "stretch"
+      }
+    },
+    {
+      "type": "frame",
+      "id": "teMdV",
+      "x": 0,
+      "y": 3220,
+      "name": "07 · Wide — Compare Spotify Versions",
+      "metadata": {
+        "type": "prototype-screen",
+        "source": "validated-export"
+      },
+      "clip": true,
+      "width": 920,
+      "height": 480,
+      "fill": {
+        "type": "image",
+        "enabled": true,
+        "url": "./exports/07-compare-spotify-versions.png",
+        "mode": "stretch"
+      }
+    },
+    {
+      "type": "frame",
+      "id": "cYDL5",
+      "x": 1000,
+      "y": 3220,
+      "name": "08 · Compact — Confirm Spotify Playlist",
+      "metadata": {
+        "type": "prototype-screen",
+        "source": "validated-export"
+      },
+      "clip": true,
+      "width": 720,
+      "height": 480,
+      "fill": {
+        "type": "image",
+        "enabled": true,
+        "url": "./exports/08-confirm-spotify-playlist.png",
+        "mode": "stretch"
+      }
+    },
+    {
+      "type": "frame",
+      "id": "jwaRW",
+      "x": 1800,
+      "y": 3220,
+      "name": "09 · Compact — Remember Matches",
+      "metadata": {
+        "type": "prototype-screen",
+        "source": "validated-export"
+      },
+      "clip": true,
+      "width": 720,
+      "height": 470,
+      "fill": {
+        "type": "image",
+        "enabled": true,
+        "url": "./exports/09-remember-matches.png",
+        "mode": "stretch"
+      }
+    },
+    {
+      "type": "frame",
+      "id": "ptlBr",
+      "x": 2600,
+      "y": 3220,
+      "name": "10 · Compact — Playlist Ready",
+      "metadata": {
+        "type": "prototype-screen",
+        "source": "validated-export"
+      },
+      "clip": true,
+      "width": 720,
+      "height": 380,
+      "fill": {
+        "type": "image",
+        "enabled": true,
+        "url": "./exports/10-playlist-ready.png",
+        "mode": "stretch"
+      }
+    },
+    {
+      "type": "frame",
+      "id": "RtzDW",
+      "x": 0,
+      "y": 3900,
+      "name": "99 · Archived Alternative — Fullscreen Onboarding",
+      "opacity": 0.65,
+      "metadata": {
+        "type": "archived-prototype",
+        "source": "superseded-export"
+      },
+      "clip": true,
+      "width": 1180,
+      "height": 760,
+      "fill": {
+        "type": "image",
+        "enabled": true,
+        "url": "./archive/hV5p1.png",
+        "mode": "stretch"
+      }
+    },
+    {
+      "type": "frame",
+      "id": "zmhix",
+      "x": 3800,
+      "y": 0,
+      "name": "00A · Editable Component Sources",
+      "clip": true,
+      "width": 1800,
+      "height": 1420,
+      "fill": "#F3F3F1",
+      "layout": "vertical",
+      "gap": 24,
+      "padding": 36,
+      "children": [
+        {
+          "type": "text",
+          "id": "Ng2Y6",
+          "name": "Editable Components Title",
+          "fill": "#1A1A1A",
+          "content": "Editable component sources",
+          "fontFamily": "Inter",
+          "fontSize": 30,
+          "fontWeight": "700"
+        },
+        {
+          "type": "text",
+          "id": "e2O13",
+          "name": "Editable Components Description",
+          "fill": "#666666",
+          "content": "Native reusable primitives. The presentation board to the left shows the intended composition and hierarchy.",
+          "fontFamily": "Inter",
+          "fontSize": 13,
+          "fontWeight": "normal"
+        },
+        {
+          "type": "frame",
+          "id": "j9nwb8",
+          "name": "Editable Foundations",
+          "width": "fill_container",
+          "height": 220,
+          "fill": "#FFFFFF",
+          "cornerRadius": 12,
+          "layout": "vertical",
+          "gap": 16,
+          "padding": 22,
+          "children": [
+            {
+              "type": "text",
+              "id": "Z9xEhC",
+              "name": "Editable Foundations Title",
+              "fill": "#1A1A1A",
+              "content": "Context, actions & status",
+              "fontFamily": "Inter",
+              "fontSize": 17,
+              "fontWeight": "650"
+            },
+            {
+              "type": "frame",
+              "id": "SM2i1",
+              "name": "Editable Foundations Row",
+              "width": "fill_container",
+              "gap": 14,
+              "alignItems": "center",
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "skIhe",
+                  "name": "Context / Tool Label",
+                  "reusable": true,
+                  "width": 320,
+                  "height": 44,
+                  "fill": "#F7F7F5",
+                  "cornerRadius": 7,
+                  "gap": 8,
+                  "padding": [
+                    12,
+                    14
+                  ],
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "QRzHW",
+                      "name": "Context Tool Mark",
+                      "width": 20,
+                      "height": 20,
+                      "fill": "#252525",
+                      "cornerRadius": 5,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "f88XmQ",
+                          "name": "Context Tool Mark Label",
+                          "fill": "#FFFFFF",
+                          "content": "D",
+                          "fontFamily": "Inter",
+                          "fontSize": 10,
+                          "fontWeight": "700"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "NEEkZ",
+                      "name": "Context Tool Name",
+                      "fill": "#1A1A1A",
+                      "content": "DJ Support",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "650"
+                    },
+                    {
+                      "type": "text",
+                      "id": "PeJaI",
+                      "name": "Context Tool State",
+                      "fill": "#999999",
+                      "content": "checked Spotify",
+                      "fontFamily": "Inter",
+                      "fontSize": 10,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "IyzOI",
+                  "name": "Action / Primary",
+                  "reusable": true,
+                  "fill": "#252525",
+                  "cornerRadius": 7,
+                  "padding": [
+                    10,
+                    16
+                  ],
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "GzMTP",
+                      "name": "Primary Action Label",
+                      "fill": "#FFFFFF",
+                      "content": "Continue",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "650"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "lrPGv",
+                  "name": "Action / Secondary",
+                  "reusable": true,
+                  "fill": "#FFFFFF",
+                  "cornerRadius": 7,
+                  "stroke": "#E5E5E5",
+                  "strokeWidth": 1,
+                  "padding": [
+                    10,
+                    16
+                  ],
+                  "justifyContent": "center",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "VTch6",
+                      "name": "Secondary Action Label",
+                      "fill": "#666666",
+                      "content": "Go back",
+                      "fontFamily": "Inter",
+                      "fontSize": 12,
+                      "fontWeight": "650"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "Lp1Sg",
+                  "name": "Status / Success",
+                  "reusable": true,
+                  "fill": "#EAF4ED",
+                  "cornerRadius": 999,
+                  "padding": [
+                    6,
+                    10
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "qVqgy",
+                      "name": "Status / Success Label",
+                      "fill": "#327A56",
+                      "content": "Ready",
+                      "fontFamily": "Inter",
+                      "fontSize": 10,
+                      "fontWeight": "700"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "VctD2",
+                  "name": "Status / Attention",
+                  "reusable": true,
+                  "fill": "#FFF4DE",
+                  "cornerRadius": 999,
+                  "padding": [
+                    6,
+                    10
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "M4QKM",
+                      "name": "Status / Attention Label",
+                      "fill": "#8A5A13",
+                      "content": "Needs a choice",
+                      "fontFamily": "Inter",
+                      "fontSize": 10,
+                      "fontWeight": "700"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "RsiOE",
+                  "name": "Status / Neutral",
+                  "reusable": true,
+                  "fill": "#F7F7F5",
+                  "cornerRadius": 999,
+                  "padding": [
+                    6,
+                    10
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "B50viG",
+                      "name": "Status / Neutral Label",
+                      "fill": "#666666",
+                      "content": "Private",
+                      "fontFamily": "Inter",
+                      "fontSize": 10,
+                      "fontWeight": "700"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Wn7zl",
+          "name": "Editable Feedback and Data",
+          "width": "fill_container",
+          "height": 250,
+          "fill": "#FFFFFF",
+          "cornerRadius": 12,
+          "layout": "vertical",
+          "gap": 16,
+          "padding": 22,
+          "children": [
+            {
+              "type": "text",
+              "id": "dXqbM",
+              "name": "Editable Feedback Title",
+              "fill": "#1A1A1A",
+              "content": "Feedback & data",
+              "fontFamily": "Inter",
+              "fontSize": 17,
+              "fontWeight": "650"
+            },
+            {
+              "type": "frame",
+              "id": "jE4OE",
+              "name": "Editable Feedback Row",
+              "width": "fill_container",
+              "gap": 14,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "wN1F8",
+                  "name": "Notice / Success",
+                  "reusable": true,
+                  "width": 400,
+                  "height": 92,
+                  "fill": "#EAF4ED",
+                  "cornerRadius": 7,
+                  "stroke": "#BFD8C8",
+                  "strokeWidth": 1,
+                  "layout": "vertical",
+                  "gap": 5,
+                  "padding": 16,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "b6mRIv",
+                      "name": "Success Notice Title",
+                      "fill": "#1A1A1A",
+                      "content": "Your playlist is ready",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "650"
+                    },
+                    {
+                      "type": "text",
+                      "id": "Txkn3",
+                      "name": "Success Notice Body",
+                      "fill": "#666666",
+                      "content": "24 songs were added to a private Spotify playlist.",
+                      "fontFamily": "Inter",
+                      "fontSize": 10,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "LOPTp",
+                  "name": "Notice / Information",
+                  "reusable": true,
+                  "width": 400,
+                  "height": 92,
+                  "fill": "#F7F7F5",
+                  "cornerRadius": 7,
+                  "stroke": "#E5E5E5",
+                  "strokeWidth": 1,
+                  "layout": "vertical",
+                  "gap": 5,
+                  "padding": 16,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "GILZB",
+                      "name": "Information Notice Title",
+                      "fill": "#1A1A1A",
+                      "content": "Spotify will only be checked",
+                      "fontFamily": "Inter",
+                      "fontSize": 13,
+                      "fontWeight": "650"
+                    },
+                    {
+                      "type": "text",
+                      "id": "z8GQLA",
+                      "name": "Information Notice Body",
+                      "fill": "#666666",
+                      "content": "Nothing will be added until you confirm.",
+                      "fontFamily": "Inter",
+                      "fontSize": 10,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "mVcGC",
+                  "name": "Metric / Success",
+                  "reusable": true,
+                  "width": 180,
+                  "height": 92,
+                  "fill": "#EAF4ED",
+                  "cornerRadius": 7,
+                  "layout": "vertical",
+                  "gap": 4,
+                  "padding": 14,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "zigtW",
+                      "name": "Metric / Success Value",
+                      "fill": "#327A56",
+                      "content": "24",
+                      "fontFamily": "Inter",
+                      "fontSize": 26,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "BeeaF",
+                      "name": "Metric / Success Label",
+                      "fill": "#666666",
+                      "content": "matched exactly",
+                      "fontFamily": "Inter",
+                      "fontSize": 10,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "F3fwV",
+                  "name": "Metric / Attention",
+                  "reusable": true,
+                  "width": 180,
+                  "height": 92,
+                  "fill": "#FFF4DE",
+                  "cornerRadius": 7,
+                  "layout": "vertical",
+                  "gap": 4,
+                  "padding": 14,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "FM6Us",
+                      "name": "Metric / Attention Value",
+                      "fill": "#8A5A13",
+                      "content": "3",
+                      "fontFamily": "Inter",
+                      "fontSize": 26,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "XFU3j",
+                      "name": "Metric / Attention Label",
+                      "fill": "#666666",
+                      "content": "need your choice",
+                      "fontFamily": "Inter",
+                      "fontSize": 10,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "vlAYv",
+                  "name": "Metric / Neutral",
+                  "reusable": true,
+                  "width": 180,
+                  "height": 92,
+                  "fill": "#F7F7F5",
+                  "cornerRadius": 7,
+                  "layout": "vertical",
+                  "gap": 4,
+                  "padding": 14,
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "HkqDt",
+                      "name": "Metric / Neutral Value",
+                      "fill": "#1A1A1A",
+                      "content": "27",
+                      "fontFamily": "Inter",
+                      "fontSize": 26,
+                      "fontWeight": "700"
+                    },
+                    {
+                      "type": "text",
+                      "id": "BWEvQ",
+                      "name": "Metric / Neutral Label",
+                      "fill": "#666666",
+                      "content": "songs in playlist",
+                      "fontFamily": "Inter",
+                      "fontSize": 10,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "frame",
+          "id": "Ldwtk",
+          "name": "Editable Content Patterns",
+          "width": "fill_container",
+          "height": "fill_container",
+          "fill": "#FFFFFF",
+          "cornerRadius": 12,
+          "layout": "vertical",
+          "gap": 16,
+          "padding": 22,
+          "children": [
+            {
+              "type": "text",
+              "id": "ORsbZ",
+              "name": "Editable Content Patterns Title",
+              "fill": "#1A1A1A",
+              "content": "Content patterns",
+              "fontFamily": "Inter",
+              "fontSize": 17,
+              "fontWeight": "650"
+            },
+            {
+              "type": "frame",
+              "id": "FHLJA",
+              "name": "Editable Content Pattern Row",
+              "width": "fill_container",
+              "height": "fill_container",
+              "gap": 14,
+              "children": [
+                {
+                  "type": "frame",
+                  "id": "uXWmX",
+                  "name": "Editable Playlist Rows",
+                  "width": 380,
+                  "layout": "vertical",
+                  "gap": 10,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "LGfUq",
+                      "name": "List / Playlist Row — Default",
+                      "reusable": true,
+                      "width": 380,
+                      "height": 68,
+                      "fill": "#F7F7F5",
+                      "cornerRadius": 7,
+                      "stroke": "#E5E5E5",
+                      "strokeWidth": 1,
+                      "gap": 12,
+                      "padding": 13,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "buAjr",
+                          "name": "Default Playlist Cover",
+                          "width": 40,
+                          "height": 40,
+                          "fill": "#E4E4E0",
+                          "cornerRadius": 5
+                        },
+                        {
+                          "type": "frame",
+                          "id": "D8gI5",
+                          "name": "Default Playlist Copy",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "UfrdA",
+                              "name": "Default Playlist Title",
+                              "fill": "#1A1A1A",
+                              "content": "Saturday warm-up",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "650"
+                            },
+                            {
+                              "type": "text",
+                              "id": "t7L8Ru",
+                              "name": "Default Playlist Count",
+                              "fill": "#666666",
+                              "content": "12 songs",
+                              "fontFamily": "Inter",
+                              "fontSize": 10,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "LRxq3",
+                      "name": "List / Playlist Row — Selected",
+                      "reusable": true,
+                      "width": 380,
+                      "height": 68,
+                      "fill": "#EAF4ED",
+                      "cornerRadius": 7,
+                      "stroke": "#BFD8C8",
+                      "strokeWidth": 1,
+                      "gap": 12,
+                      "padding": 13,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "Hofdt",
+                          "name": "Selected Playlist Mark",
+                          "width": 40,
+                          "height": 40,
+                          "fill": "#327A56",
+                          "cornerRadius": 5
+                        },
+                        {
+                          "type": "frame",
+                          "id": "sZfO1",
+                          "name": "Selected Playlist Copy",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "RaY4z",
+                              "name": "Selected Playlist Title",
+                              "fill": "#1A1A1A",
+                              "content": "Warehouse set",
+                              "fontFamily": "Inter",
+                              "fontSize": 12,
+                              "fontWeight": "650"
+                            },
+                            {
+                              "type": "text",
+                              "id": "soxBE",
+                              "name": "Selected Playlist Count",
+                              "fill": "#327A56",
+                              "content": "27 songs selected",
+                              "fontFamily": "Inter",
+                              "fontSize": 10,
+                              "fontWeight": "600"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "eHd0s",
+                  "name": "Track / Spotify Version Candidate",
+                  "reusable": true,
+                  "width": 400,
+                  "height": 170,
+                  "fill": "#F7F7F5",
+                  "cornerRadius": 7,
+                  "stroke": "#E5E5E5",
+                  "strokeWidth": 1,
+                  "layout": "vertical",
+                  "gap": 12,
+                  "padding": 16,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "Z9qnI",
+                      "name": "Candidate Header",
+                      "width": "fill_container",
+                      "gap": 10,
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "Z1kNRT",
+                          "name": "Candidate Play",
+                          "width": 40,
+                          "height": 40,
+                          "fill": "#252525",
+                          "cornerRadius": 999,
+                          "justifyContent": "center",
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "k89ImR",
+                              "name": "Candidate Play Glyph",
+                              "fill": "#FFFFFF",
+                              "content": "▶",
+                              "fontFamily": "Inter",
+                              "fontSize": 10,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "s2aQO",
+                          "name": "Candidate Text",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 3,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "m3s9Od",
+                              "name": "Candidate Title",
+                              "fill": "#1A1A1A",
+                              "content": "Midnight Circuit",
+                              "fontFamily": "Inter",
+                              "fontSize": 13,
+                              "fontWeight": "650"
+                            },
+                            {
+                              "type": "text",
+                              "id": "nK8HE",
+                              "name": "Candidate Version",
+                              "fill": "#666666",
+                              "content": "Original Mix · Aster Vale · 6:42",
+                              "fontFamily": "Inter",
+                              "fontSize": 10,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "CX5rt",
+                      "name": "Candidate Timeline",
+                      "width": "fill_container",
+                      "height": 6,
+                      "fill": "#DDDDDA",
+                      "cornerRadius": 999
+                    },
+                    {
+                      "type": "text",
+                      "id": "b9OsA7",
+                      "name": "Candidate Hint",
+                      "fill": "#666666",
+                      "content": "Listen, then choose this version.",
+                      "fontFamily": "Inter",
+                      "fontSize": 10,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "JL1gt",
+                  "name": "Review / Choice",
+                  "reusable": true,
+                  "width": 320,
+                  "height": 110,
+                  "fill": "#FFFFFF",
+                  "cornerRadius": 7,
+                  "stroke": "#E5E5E5",
+                  "strokeWidth": 1,
+                  "gap": 12,
+                  "padding": 16,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "ellipse",
+                      "id": "BCu7T",
+                      "name": "Choice Radio",
+                      "fill": "#FFFFFF",
+                      "width": 22,
+                      "height": 22,
+                      "stroke": "#666666",
+                      "strokeWidth": 2
+                    },
+                    {
+                      "type": "frame",
+                      "id": "uxWK6",
+                      "name": "Choice Text",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 5,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "zzXip",
+                          "name": "Choice Title",
+                          "fill": "#1A1A1A",
+                          "content": "Use this Spotify version",
+                          "fontFamily": "Inter",
+                          "fontSize": 12,
+                          "fontWeight": "650"
+                        },
+                        {
+                          "type": "text",
+                          "id": "ztIy0",
+                          "name": "Choice Detail",
+                          "fill": "#666666",
+                          "content": "Original Mix · 6:42 · 2024",
+                          "fontFamily": "Inter",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "IZoed",
+                  "name": "Card / Inline Shell",
+                  "reusable": true,
+                  "width": 520,
+                  "height": 360,
+                  "fill": "#FFFFFF",
+                  "cornerRadius": 12,
+                  "stroke": "#E5E5E5",
+                  "strokeWidth": 1,
+                  "layout": "vertical",
+                  "gap": 14,
+                  "padding": 20,
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "yKGuE",
+                      "name": "Shell Context",
+                      "width": "fill_container",
+                      "height": 38,
+                      "fill": "#F7F7F5",
+                      "cornerRadius": 7,
+                      "padding": [
+                        10,
+                        12
+                      ],
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "llIXk",
+                          "name": "Shell Context Label",
+                          "fill": "#666666",
+                          "content": "DJ Support · ready for your next step",
+                          "fontFamily": "Inter",
+                          "fontSize": 11,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "pwsqw",
+                      "name": "Header Slot",
+                      "width": "fill_container",
+                      "layout": "vertical",
+                      "gap": 5,
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "gXgFD",
+                          "name": "Header Slot Title",
+                          "fill": "#1A1A1A",
+                          "content": "Clear outcome-focused heading",
+                          "fontFamily": "Inter",
+                          "fontSize": 19,
+                          "fontWeight": "650"
+                        },
+                        {
+                          "type": "text",
+                          "id": "rFRKS",
+                          "name": "Header Slot Body",
+                          "fill": "#666666",
+                          "content": "One short sentence explains the current decision.",
+                          "fontFamily": "Inter",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "YLtza",
+                      "name": "Content Slot",
+                      "width": "fill_container",
+                      "height": "fill_container",
+                      "fill": "#F7F7F5",
+                      "cornerRadius": 7,
+                      "stroke": "#E5E5E5",
+                      "strokeWidth": 1,
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "text",
+                          "id": "FSU1h",
+                          "name": "Content Slot Label",
+                          "fill": "#999999",
+                          "content": "Screen-specific content",
+                          "fontFamily": "Inter",
+                          "fontSize": 10,
+                          "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "oRiws",
+                      "name": "Actions Slot",
+                      "width": "fill_container",
+                      "justifyContent": "end",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "rzT8d",
+                          "name": "Shell Primary Action",
+                          "fill": "#252525",
+                          "cornerRadius": 7,
+                          "padding": [
+                            9,
+                            14
+                          ],
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "yz2vZ",
+                              "name": "Shell Primary Action Label",
+                              "fill": "#FFFFFF",
+                              "content": "Continue",
+                              "fontFamily": "Inter",
+                              "fontSize": 11,
+                              "fontWeight": "650"
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "fileToken": "447c34ef-f57b-447a-bb8a-3d8062c574a6"
+}

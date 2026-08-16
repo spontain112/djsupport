@@ -1,0 +1,145 @@
+<!doctype html>
+<!--
+classification: concept
+PROTOTYPE — throwaway, local-only, synthetic data.
+Question: Three structural variants of the complete DJ Support MCP App flow,
+switchable via ?variant=A|B|C, on one standalone prototype surface.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DJ Support — MCP App prototype</title>
+  <style>
+    :root{--bg:#f7f7f6;--surface:#fff;--surface-2:#f1f1ef;--text:#181817;--muted:#6b6b67;--line:#deded9;--strong:#252523;--positive:#327a56;--warning:#966a25;--danger:#a34848;--focus:#486b9b;--r:10px;--s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px}
+    *{box-sizing:border-box} body{margin:0;background:#e9e9e6;color:var(--text);font:14px/1.45 Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif} button,input{font:inherit} button{cursor:pointer}
+    .page{min-height:100vh;padding:32px}.context{max-width:1040px;margin:0 auto 14px;color:var(--muted);font-size:12px;display:flex;justify-content:space-between}.context strong{color:var(--text)}
+    .host{max-width:1040px;height:760px;margin:auto;background:var(--surface);border:1px solid #cfcfca;border-radius:18px;box-shadow:0 10px 30px #00000012;overflow:hidden;display:flex;flex-direction:column}
+    .hostbar{height:44px;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 16px;gap:10px;color:var(--muted);font-size:12px}.appmark{width:20px;height:20px;background:var(--strong);border-radius:5px;color:white;display:grid;place-items:center;font-weight:700}.hostbar b{color:var(--text)}.mode{margin-left:auto;padding:3px 8px;background:var(--surface-2);border-radius:999px}
+    .app{flex:1;min-height:0;display:grid}.variant-a .app{grid-template-columns:210px 1fr}.variant-b .app{grid-template-rows:58px 1fr}.variant-c .app{grid-template-columns:72px 1fr}
+    .side{border-right:1px solid var(--line);padding:20px 14px;background:#fbfbfa;display:flex;flex-direction:column}.variant-b .side{border:0;border-bottom:1px solid var(--line);padding:10px 18px;flex-direction:row;align-items:center;gap:8px}.variant-c .side{padding:14px 10px;align-items:center}
+    .brand{font-weight:700;font-size:15px;margin:0 8px 20px}.variant-b .brand{margin:0 16px 0 0}.variant-c .brand{font-size:0;margin:0 0 18px}.variant-c .brand:after{content:'DJ';font-size:12px;background:var(--strong);color:#fff;width:36px;height:36px;border-radius:8px;display:grid;place-items:center}
+    .nav{display:flex;flex-direction:column;gap:4px}.variant-b .nav{flex-direction:row}.nav button{border:0;background:transparent;color:var(--muted);padding:9px 10px;border-radius:7px;text-align:left}.nav button:hover,.nav button.active{background:var(--surface-2);color:var(--text)}.variant-c .nav button{font-size:0;width:42px;height:42px;text-align:center;padding:0}.variant-c .nav button:before{content:attr(data-short);font-size:11px;font-weight:700}.side-note{margin-top:auto;padding:12px;color:var(--muted);font-size:11px;border-top:1px solid var(--line)}.variant-b .side-note{margin:0 0 0 auto;border:0;padding:0}.variant-c .side-note{display:none}
+    .main{min-width:0;min-height:0;overflow:auto;padding:28px 34px 96px;position:relative}.variant-c .main{padding-left:42px}.screen{display:none;max-width:760px;margin:0 auto}.screen.active{display:block}.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:700}.title-row{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}.title-row h1{font-size:25px;line-height:1.2;margin:6px 0 8px}.lead{color:var(--muted);max-width:590px;margin:0 0 24px}.status{display:inline-flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;white-space:nowrap}.dot{width:7px;height:7px;border-radius:50%;background:var(--positive)}
+    .panel{border:1px solid var(--line);border-radius:var(--r);padding:18px;background:var(--surface);margin:12px 0}.panel.soft{background:var(--surface-2);border-color:transparent}.panel h2{font-size:15px;margin:0 0 5px}.panel p{margin:0;color:var(--muted)}
+    .choice-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.choice{border:1px solid var(--line);border-radius:var(--r);background:var(--surface);padding:18px;text-align:left;min-height:142px}.choice:hover,.choice.selected{border-color:var(--strong);box-shadow:inset 0 0 0 1px var(--strong)}.choice b{display:block;margin:12px 0 5px}.choice span{font-size:12px;color:var(--muted)}.choice .glyph{font-size:20px}
+    .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:22px}.btn{border:1px solid var(--line);border-radius:8px;background:var(--surface);padding:9px 14px;color:var(--text)}.btn.primary{background:var(--strong);border-color:var(--strong);color:#fff}.btn.danger{color:var(--danger)}.btn:disabled{opacity:.4;cursor:default}
+    .steps{display:flex;align-items:center;margin:22px 0 26px}.step{display:flex;align-items:center;color:var(--muted);font-size:11px;flex:1}.step:after{content:'';height:1px;background:var(--line);flex:1;margin:0 8px}.step:last-child{flex:0}.step:last-child:after{display:none}.step.current,.step.done{color:var(--text);font-weight:700}.step.done:before{content:'✓';margin-right:5px;color:var(--positive)}
+    .summary{display:grid;grid-template-columns:1.1fr .9fr;gap:20px}.fact-list{margin:0}.fact{display:flex;justify-content:space-between;gap:20px;padding:11px 0;border-bottom:1px solid var(--line)}.fact:last-child{border:0}.fact dt{color:var(--muted)}.fact dd{margin:0;font-weight:600;text-align:right}.permission{border-left:3px solid var(--warning);padding:12px 14px;background:#faf7f0;color:#554930;font-size:12px}
+    .metric-row{display:flex;gap:26px;margin:18px 0}.metric strong{display:block;font-size:25px}.metric span{color:var(--muted);font-size:11px}.bar{height:7px;background:var(--surface-2);border-radius:999px;overflow:hidden}.bar i{display:block;height:100%;background:var(--strong);width:82%}
+    .review{display:grid;grid-template-columns:190px 1fr;gap:18px;min-height:390px}.queue{border-right:1px solid var(--line);padding-right:14px}.queue button{display:block;width:100%;border:0;background:transparent;text-align:left;padding:10px;border-radius:7px;margin-bottom:4px}.queue button.active{background:var(--surface-2)}.queue b,.queue span{display:block}.queue span{font-size:11px;color:var(--muted)}.compare h2{font-size:22px;margin:3px 0}.compare>.artist{color:var(--muted);margin-bottom:18px}.columns{display:grid;grid-template-columns:1fr 1fr;gap:12px}.source{padding:15px 0;border-top:2px solid var(--line)}.source label{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--muted)}.source b{display:block;margin:8px 0}.source p{font-size:12px;color:var(--muted)}.outcomes{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:18px}.outcomes button{text-align:left;border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:11px}.outcomes button:hover{border-color:var(--strong)}
+    .authority{border:1px solid var(--line);border-radius:var(--r);overflow:hidden}.authority-row{display:grid;grid-template-columns:32px 1fr auto;gap:12px;align-items:center;padding:15px 16px;border-bottom:1px solid var(--line)}.authority-row:last-child{border:0}.authority-row .num{width:26px;height:26px;border-radius:50%;background:var(--surface-2);display:grid;place-items:center;font-size:11px;font-weight:700}.authority-row b,.authority-row span{display:block}.authority-row span{font-size:11px;color:var(--muted)}.tag{font-size:10px!important;text-transform:uppercase;letter-spacing:.06em;padding:4px 7px;border-radius:999px;background:var(--surface-2);color:var(--muted)!important}.tag.write{background:#faf1e2;color:#77571f!important}.tag.authority{background:#edf5f0;color:#2d684a!important}
+    .success{padding:42px 0;text-align:center}.check{width:52px;height:52px;border-radius:50%;background:#eaf3ed;color:var(--positive);display:grid;place-items:center;font-size:24px;margin:0 auto 16px}.success h1{margin:0 0 8px}.success p{color:var(--muted);max-width:480px;margin:0 auto 24px}
+    .table{width:100%;border-collapse:collapse}.table th,.table td{text-align:left;padding:11px 8px;border-bottom:1px solid var(--line);font-size:12px}.table th{color:var(--muted);font-weight:500}.table td:first-child{font-weight:600}.right{text-align:right!important}
+    .settings{display:grid;grid-template-columns:180px 1fr;gap:20px}.setting-nav button{display:block;border:0;background:transparent;padding:9px;width:100%;text-align:left;border-radius:7px}.setting-nav button:first-child{background:var(--surface-2);font-weight:600}.connection{display:flex;align-items:center;gap:12px;padding:15px 0;border-bottom:1px solid var(--line)}.connection:last-child{border:0}.connection .icon{width:34px;height:34px;border-radius:8px;background:var(--surface-2);display:grid;place-items:center}.connection .copy{flex:1}.connection b,.connection span{display:block}.connection span{font-size:11px;color:var(--muted)}
+    .inline-card{max-width:600px;margin:18px auto;border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:0 2px 10px #0000000b}.inline-card .actions{margin-top:16px}.inline-card h2{font-size:16px;margin:0}.inline-card p{color:var(--muted);margin:5px 0 14px}.inline-list{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}.inline-list div{padding:10px;background:var(--surface-2);border-radius:7px}.inline-list b,.inline-list span{display:block}.inline-list span{font-size:10px;color:var(--muted)}
+    .switcher{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:20;display:flex;align-items:center;background:#181817;color:#fff;border-radius:999px;box-shadow:0 8px 24px #0004;padding:5px}.switcher button{width:34px;height:34px;border:0;background:transparent;color:#fff;border-radius:50%}.switcher button:hover{background:#ffffff1c}.switcher span{min-width:220px;text-align:center;font-size:12px}.toast{position:absolute;right:22px;bottom:22px;background:var(--strong);color:#fff;border-radius:8px;padding:10px 14px;font-size:12px;opacity:0;transform:translateY(8px);transition:.2s;pointer-events:none}.toast.show{opacity:1;transform:none}
+    .variant-b .screen{max-width:860px}.variant-b .review{grid-template-columns:1fr}.variant-b .queue{display:flex;gap:6px;border:0;border-bottom:1px solid var(--line);padding:0 0 12px;overflow:hidden}.variant-b .queue button{width:180px;flex:none}.variant-c .screen{max-width:820px}.variant-c .summary{grid-template-columns:1fr}.variant-c .choice-grid{grid-template-columns:1fr}.variant-c .choice{min-height:0;display:grid;grid-template-columns:32px 130px 1fr;align-items:center;gap:12px}.variant-c .choice b{margin:0}.variant-c .review{grid-template-columns:1fr}.variant-c .queue{display:none}
+    @media(max-width:760px){.page{padding:0}.context{display:none}.host{height:100vh;border:0;border-radius:0}.app,.variant-a .app,.variant-c .app{grid-template-columns:1fr}.side{display:none}.main{padding:22px 18px 90px}.choice-grid,.summary,.columns,.settings{grid-template-columns:1fr}.review{grid-template-columns:1fr}.queue{display:flex;overflow:auto;border:0;border-bottom:1px solid var(--line);padding:0 0 10px}.queue button{min-width:160px}.inline-list{grid-template-columns:1fr}.switcher span{min-width:180px}}
+  </style>
+</head>
+<body class="variant-a">
+  <div class="page">
+    <div class="context"><span><strong>Prototype:</strong> DJ Support as an MCP App</span><span>Neutral wireframe · synthetic data · local only</span></div>
+    <div class="host">
+      <div class="hostbar"><span class="appmark">D</span><b>DJ Support</b><span>used a tool</span><span class="mode" id="modeLabel">Fullscreen workflow</span></div>
+      <div class="app">
+        <aside class="side">
+          <div class="brand">DJ Support</div>
+          <nav class="nav" aria-label="Prototype screens">
+            <button data-screen="start" data-short="01" class="active">Start a Transfer</button>
+            <button data-screen="plan" data-short="02">Review plan</button>
+            <button data-screen="preview" data-short="03">Preview result</button>
+            <button data-screen="qualify" data-short="04">Qualification</button>
+            <button data-screen="apply" data-short="05">Apply draft</button>
+            <button data-screen="approve" data-short="06">Approval</button>
+            <button data-screen="history" data-short="07">Transfers</button>
+            <button data-screen="settings" data-short="08">Connections</button>
+            <button data-screen="inline" data-short="09">Inline card</button>
+          </nav>
+          <div class="side-note">Conversation can open the exact screen needed. Navigation here exists only to inspect the prototype.</div>
+        </aside>
+        <main class="main">
+          <section class="screen active" id="start">
+            <div class="eyebrow">New bounded Transfer</div><div class="title-row"><div><h1>What do you want to transfer?</h1><p class="lead">Choose one source type. DJ Support will ask for one explicit selection before it reads private source data or plans Spotify changes.</p></div><span class="status"><i class="dot"></i>Spotify connected</span></div>
+            <div class="choice-grid">
+              <button class="choice selected"><span class="glyph">▤</span><b>Rekordbox playlist</b><span>Create or update a Mirror. Starts with a read-only Preview and supports local Qualification.</span></button>
+              <button class="choice"><span class="glyph">▥</span><b>Beatport chart</b><span>Create a one-time Snapshot. Review proposed matches in Spotify before Approval.</span></button>
+              <button class="choice"><span class="glyph">◎</span><b>Beatport label</b><span>Create a Snapshot from an explicitly named label selection.</span></button>
+            </div>
+            <div class="panel soft"><h2>Current Rekordbox source</h2><p>A library reference is saved privately on this device. Its path will not be shown to the model.</p></div>
+            <div class="actions"><button class="btn">Change source</button><button class="btn primary" data-next="plan">Choose a playlist</button></div>
+          </section>
+
+          <section class="screen" id="plan">
+            <div class="eyebrow">Confirm bounded work</div><h1>Review the Transfer plan</h1><p class="lead">This plan names exactly what DJ Support may read and what it may do. Preview cannot modify Spotify.</p>
+            <div class="steps"><span class="step current">Plan</span><span class="step">Preview</span><span class="step">Qualify</span><span class="step">Apply</span><span class="step">Approve</span></div>
+            <div class="summary"><dl class="fact-list"><div class="fact"><dt>Source Selection</dt><dd>Playlist 07</dd></div><div class="fact"><dt>Result</dt><dd>Mirror</dd></div><div class="fact"><dt>Occurrences</dt><dd>34 ordered tracks</dd></div><div class="fact"><dt>Mode</dt><dd>Preview only</dd></div></dl><div><div class="panel"><h2>Optional local capabilities</h2><p>Audition exact selected source occurrences during Qualification. No directory scan and no path disclosure.</p><label><input type="checkbox" checked> Allow local audition for this selection</label></div></div></div>
+            <div class="permission"><b>Private-source boundary:</b> continuing authorizes reading only this selected playlist for Preview. It does not authorize a Spotify write.</div>
+            <div class="actions"><button class="btn" data-next="start">Back</button><button class="btn primary" data-action="run" data-next="preview">Run Preview</button></div>
+          </section>
+
+          <section class="screen" id="preview">
+            <div class="eyebrow">Preview complete</div><div class="title-row"><div><h1>34 occurrences evaluated</h1><p class="lead">No Spotify playlist was created or changed. Review where attention is needed before choosing whether to publish a Provisional Mirror.</p></div><span class="status"><i class="dot"></i>Read-only</span></div>
+            <div class="metric-row"><div class="metric"><strong>28</strong><span>strong proposals</span></div><div class="metric"><strong>4</strong><span>need attention</span></div><div class="metric"><strong>2</strong><span>unresolved</span></div></div><div class="bar"><i></i></div>
+            <div class="panel"><h2>What happens next</h2><p>Qualification records a revisable draft. It does not approve matches. Publishing a Provisional Mirror and applying the draft require a separate Spotify-write authorization.</p></div>
+            <table class="table"><thead><tr><th>Attention reason</th><th>Occurrences</th><th class="right">Next action</th></tr></thead><tbody><tr><td>Release or duration differs</td><td>3</td><td class="right">Compare</td></tr><tr><td>Distinct sources share one Spotify result</td><td>1 collision</td><td class="right">Resolve</td></tr><tr><td>No acceptable proposal</td><td>2</td><td class="right">Correct or defer</td></tr></tbody></table>
+            <div class="actions"><button class="btn">Keep Preview only</button><button class="btn primary" data-next="qualify">Open Qualification</button></div>
+          </section>
+
+          <section class="screen" id="qualify">
+            <div class="title-row"><div><div class="eyebrow">Qualification Draft · 2 of 6 decided</div><h1>Compare what you selected</h1></div><span class="status">Draft · no authority</span></div>
+            <div class="review"><nav class="queue"><button class="active"><b>Artist Delta</b><span>Track Seven · duration differs</span></button><button><b>Artist Echo</b><span>Track Eleven · collision</span></button><button><b>Artist Foxtrot</b><span>Track Nineteen · unresolved</span></button></nav><div class="compare"><h2>Track Seven</h2><div class="artist">Artist Delta</div><div class="columns"><div class="source"><label>Selected source</label><b>Extended Version</b><p>Independent Release · 07:42<br>Local audition available</p><button class="btn">▶ Audition source</button></div><div class="source"><label>Spotify proposal</label><b>Original Mix</b><p>Catalog Release · 06:58<br>Metadata score 84%</p><button class="btn">▶ Open in Spotify</button></div></div><div class="outcomes"><button data-action="decision"><b>Correct</b><br><small>This proposal represents my source</small></button><button data-action="decision"><b>Wrong — find another</b><br><small>Start a bounded Correction Search</small></button><button data-action="decision"><b>Cannot verify</b><br><small>Leave unresolved for now</small></button><button data-action="decision"><b>Not my source</b><br><small>Exclude this occurrence</small></button></div></div></div>
+            <div class="actions"><button class="btn">Save and close</button><button class="btn primary" data-next="apply">Review draft application</button></div>
+          </section>
+
+          <section class="screen" id="apply">
+            <div class="eyebrow">Write authorization required</div><h1>Apply this Qualification Draft?</h1><p class="lead">This changes only the linked Provisional Mirror. It does not create Approved Matches or authorize later Mirror updates.</p>
+            <div class="authority"><div class="authority-row"><span class="num">1</span><div><b>Publish or link Provisional Mirror</b><span>Creates the review playlist for this bounded Transfer.</span></div><span class="tag write">Spotify write</span></div><div class="authority-row"><span class="num">2</span><div><b>Apply 6 draft outcomes</b><span>Updates the Provisional Mirror to reflect corrections and exclusions.</span></div><span class="tag write">Spotify write</span></div><div class="authority-row"><span class="num">3</span><div><b>Review the resulting playlist</b><span>Approval remains a later, separate act.</span></div><span class="tag">No action yet</span></div></div>
+            <div class="panel soft"><h2>Resulting playlist</h2><p>32 represented occurrences · 2 unresolved · order retained · private playlist</p></div>
+            <div class="actions"><button class="btn" data-next="qualify">Back to draft</button><button class="btn primary" data-action="authorize" data-next="approve">Authorize and apply</button></div>
+          </section>
+
+          <section class="screen" id="approve">
+            <div class="eyebrow">Separate authority</div><h1>Approve the reviewed playlist?</h1><p class="lead">DJ Support will compare the current Spotify playlist head with its Publication Manifest. Only surviving and corrected mappings become reusable Approved Matches.</p>
+            <div class="authority"><div class="authority-row"><span class="num">✓</span><div><b>Qualification Draft applied</b><span>Playlist contains 32 represented occurrences.</span></div><span class="tag">Complete</span></div><div class="authority-row"><span class="num">!</span><div><b>Confirm your Spotify review</b><span>Removed proposals become Rejected Matches. No playlist mutation occurs during Approval.</span></div><span class="tag authority">Creates authority</span></div></div>
+            <div class="permission"><b>Approval is durable:</b> accepted mappings may be reused in later Transfers across supported source types.</div>
+            <div class="actions"><button class="btn">Not yet</button><button class="btn primary" data-action="approve">Approve playlist</button></div>
+          </section>
+
+          <section class="screen" id="history">
+            <div class="eyebrow">Durable work</div><div class="title-row"><div><h1>Transfers</h1><p class="lead">Resume attention where it is needed. Status reflects the Transfer lifecycle, not background activity.</p></div><button class="btn primary" data-next="start">New Transfer</button></div>
+            <table class="table"><thead><tr><th>Source Selection</th><th>Result</th><th>Status</th><th>Last change</th></tr></thead><tbody><tr><td>Playlist 07</td><td>Mirror</td><td>Ready for Approval</td><td>Today</td></tr><tr><td>Chart 12</td><td>Snapshot</td><td>Approved</td><td>Yesterday</td></tr><tr><td>Playlist 03</td><td>Mirror</td><td>Drift needs a decision</td><td>4 days ago</td></tr><tr><td>Label Selection 04</td><td>Snapshot</td><td>Preview only</td><td>1 week ago</td></tr></tbody></table>
+            <div class="panel soft"><h2>One Transfer, one next action</h2><p>The conversation can open a specific retained Transfer directly. The UI should never make a user reconstruct state from chat history.</p></div>
+          </section>
+
+          <section class="screen" id="settings">
+            <div class="eyebrow">Local readiness</div><h1>Connections and capabilities</h1><p class="lead">Show presence and scope without returning secrets, private paths, playlist IDs, or local evidence to the model.</p>
+            <div class="settings"><nav class="setting-nav"><button>Connections</button><button>Rekordbox source</button><button>Local audio</button><button>Data and backup</button></nav><div><div class="connection"><span class="icon">S</span><div class="copy"><b>Spotify Account</b><span>Connected · account-scoped publication state</span></div><button class="btn">Reconnect</button></div><div class="connection"><span class="icon">R</span><div class="copy"><b>Rekordbox library</b><span>Saved privately on this device · path redacted</span></div><button class="btn">Change</button></div><div class="connection"><span class="icon">A</span><div class="copy"><b>Local audition</b><span>Available · enabled only for explicitly selected Batches</span></div><button class="btn">Details</button></div><div class="connection"><span class="icon">B</span><div class="copy"><b>Private application data</b><span>Backup recommended before upgrades</span></div><button class="btn">Create backup</button></div></div></div>
+          </section>
+
+          <section class="screen" id="inline">
+            <div class="eyebrow">Inline mode examples</div><h1>Conversation-sized handoffs</h1><p class="lead">Inline cards remain single-purpose, use at most two actions, and expand to fullscreen for the multi-step Qualification workflow.</p>
+            <article class="inline-card"><div class="title-row"><div><h2>Preview complete</h2><p>Playlist 07 · Mirror · no Spotify changes</p></div><span class="tag">Read-only</span></div><div class="inline-list"><div><b>28</b><span>strong proposals</span></div><div><b>4</b><span>need attention</span></div><div><b>2</b><span>unresolved</span></div></div><div class="actions"><button class="btn">Keep Preview</button><button class="btn primary" data-next="qualify">Open Qualification</button></div></article>
+            <article class="inline-card"><div class="title-row"><div><h2>Approval complete</h2><p>32 accepted mappings are now reusable matching knowledge.</p></div><span class="tag authority">Approved</span></div><div class="actions"><button class="btn">View Transfer</button></div></article>
+          </section>
+          <div class="toast" role="status">State updated in this prototype</div>
+        </main>
+      </div>
+    </div>
+  </div>
+  <div class="switcher"><button id="prev" aria-label="Previous variant">←</button><span id="variantLabel">A — Guided workspace</span><button id="next" aria-label="Next variant">→</button></div>
+  <script>
+    const variants=[['A','Guided workspace'],['B','Horizontal stages'],['C','Compact tool rail']];
+    const params=new URLSearchParams(location.search); let variant=(params.get('variant')||'A').toUpperCase(); if(!variants.some(v=>v[0]===variant))variant='A';
+    function setVariant(key){variant=key;document.body.className='variant-'+key.toLowerCase();document.getElementById('variantLabel').textContent=key+' — '+variants.find(v=>v[0]===key)[1];params.set('variant',key);history.replaceState(null,'','?'+params.toString()+location.hash)}
+    function cycle(delta){const i=variants.findIndex(v=>v[0]===variant);setVariant(variants[(i+delta+variants.length)%variants.length][0])}
+    function showScreen(id){document.querySelectorAll('.screen').forEach(s=>s.classList.toggle('active',s.id===id));document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('active',b.dataset.screen===id));location.hash=id;document.querySelector('.main').scrollTop=0}
+    document.querySelectorAll('[data-screen]').forEach(b=>b.onclick=()=>showScreen(b.dataset.screen));document.querySelectorAll('[data-next]').forEach(b=>b.onclick=()=>showScreen(b.dataset.next));
+    document.querySelectorAll('[data-action]').forEach(b=>b.addEventListener('click',()=>{const t=document.querySelector('.toast');t.textContent=b.dataset.action==='approve'?'Approval recorded — no playlist mutation':'Prototype state updated';t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1400)}));
+    document.querySelectorAll('.choice').forEach(b=>b.onclick=()=>{document.querySelectorAll('.choice').forEach(x=>x.classList.remove('selected'));b.classList.add('selected')});
+    document.getElementById('prev').onclick=()=>cycle(-1);document.getElementById('next').onclick=()=>cycle(1);document.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA'].includes(document.activeElement.tagName)||document.activeElement.isContentEditable)return;if(e.key==='ArrowLeft')cycle(-1);if(e.key==='ArrowRight')cycle(1)});
+    setVariant(variant);showScreen(location.hash.slice(1)||'start');
+  </script>
+</body>
+</html>
