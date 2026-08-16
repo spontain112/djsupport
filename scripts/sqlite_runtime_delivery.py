@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import argparse
 from functools import lru_cache
+import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
+import re
 import subprocess
 import sys
 import tarfile
@@ -107,11 +109,24 @@ def _outer(mode: str) -> None:
         verify_downloaded_wheel(apsw_wheel, artifact)
         _verify_provenance(str(artifact["download_url"]))
         djsupport_wheel = _build_and_inspect(workspace / "dist")
+        expected_djsupport_wheel = os.environ.get(
+            "DJ_SUPPORT_EXPECTED_WHEEL_SHA256"
+        )
+        if expected_djsupport_wheel is not None:
+            _verify_expected_djsupport_wheel(
+                djsupport_wheel,
+                expected_djsupport_wheel,
+            )
         clean_python = _create_clean_install(
             workspace / "clean",
             apsw_wheel,
             djsupport_wheel,
         )
+        if expected_djsupport_wheel is not None:
+            _verify_installed_candidate_smoke(
+                clean_python,
+                _candidate_version_from_wheel(djsupport_wheel),
+            )
         subprocess.run(
             [
                 str(clean_python),
@@ -231,17 +246,25 @@ def _verify_provenance(download_url: str) -> None:
     )
 
 
-def _build_and_inspect(destination: Path) -> Path:
+def _build_and_inspect(destination: Path, *, quiet: bool = False) -> Path:
+    environment = dict(os.environ)
+    environment["SOURCE_DATE_EPOCH"] = _source_date_epoch()
+    environment["PYTHONHASHSEED"] = "0"
+    environment["TZ"] = "UTC"
     subprocess.run(
         [
             sys.executable,
             "-m",
             "build",
+            "--no-isolation",
             "--outdir",
             str(destination),
             str(REPOSITORY_ROOT),
         ],
+        env=environment,
         check=True,
+        capture_output=quiet,
+        text=quiet,
     )
     wheels = list(destination.glob("djsupport-*.whl"))
     sources = list(destination.glob("djsupport-*.tar.gz"))
@@ -269,6 +292,88 @@ def _inspect_wheel(path: Path) -> None:
                 )
             with archive.open(member) as source:
                 _reject_build_root(source.read())
+
+
+def _verify_expected_djsupport_wheel(path: Path, expected_sha256: str) -> None:
+    if not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
+        raise SystemExit(
+            "sqlite_runtime_delivery_failed:djsupport_wheel_digest"
+        )
+    try:
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        raise SystemExit(
+            "sqlite_runtime_delivery_failed:djsupport_wheel_digest"
+        ) from None
+    if digest != expected_sha256:
+        raise SystemExit(
+            "sqlite_runtime_delivery_failed:djsupport_wheel_digest"
+        )
+
+
+def _candidate_version_from_wheel(path: Path) -> str:
+    prefix = "djsupport-"
+    suffix = "-py3-none-any.whl"
+    if not path.name.startswith(prefix) or not path.name.endswith(suffix):
+        raise SystemExit(
+            "sqlite_runtime_delivery_failed:djsupport_wheel_identity"
+        )
+    version = path.name[len(prefix) : -len(suffix)]
+    if (
+        re.fullmatch(
+            r"[0-9]+\.[0-9]+\.[0-9]+(?:(?:\.dev|rc)[0-9]+)?",
+            version,
+        )
+        is None
+    ):
+        raise SystemExit(
+            "sqlite_runtime_delivery_failed:djsupport_wheel_identity"
+        )
+    return version
+
+
+def _verify_installed_candidate_smoke(python: Path, expected_version: str) -> None:
+    environment = dict(os.environ)
+    for name in (
+        "SPOTIPY_CLIENT_ID",
+        "SPOTIPY_CLIENT_SECRET",
+        "SPOTIPY_REDIRECT_URI",
+        "BEATPORT_ACCESS_TOKEN",
+    ):
+        environment.pop(name, None)
+    environment["PYTHONNOUSERSITE"] = "1"
+    code = (
+        "from importlib.metadata import version; "
+        "import djsupport; "
+        "raise SystemExit(0 if version('djsupport') == __import__('sys').argv[1] "
+        "else 1)"
+    )
+    cli = (
+        python.parent / "djsupport.exe"
+        if os.name == "nt"
+        else python.parent / "djsupport"
+    )
+    try:
+        subprocess.run(
+            [str(python), "-I", "-c", code, expected_version],
+            cwd=python.parent,
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            [str(cli), "--help"],
+            cwd=python.parent,
+            env=environment,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        raise SystemExit(
+            "sqlite_runtime_delivery_failed:installed_candidate_smoke"
+        ) from None
 
 
 def _inspect_source(path: Path) -> None:
@@ -425,6 +530,27 @@ def _architecture() -> str:
     import platform
 
     return platform.machine()
+
+
+def _source_date_epoch() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "show", "-s", "--format=%ct", "HEAD"],
+            cwd=REPOSITORY_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        raise SystemExit(
+            "sqlite_runtime_delivery_failed:source_epoch_unavailable"
+        ) from None
+    value = result.stdout.strip()
+    if not value.isdigit() or int(value) < 1:
+        raise SystemExit(
+            "sqlite_runtime_delivery_failed:source_epoch_unavailable"
+        )
+    return value
 
 
 if __name__ == "__main__":

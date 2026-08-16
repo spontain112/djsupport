@@ -158,6 +158,8 @@ jobs:
           "certifi==2026.7.22"
           "jsonschema==4.26.0"
           "pypi-attestations==0.0.30"
+          "setuptools==80.9.0"
+          "wheel==0.45.1"
       - name: Verify binary provenance and loaded-runtime admission
         env:
           DJ_SUPPORT_RUNNER_LABEL: ${{ matrix.runner }}

@@ -1,8 +1,8 @@
-# Open-source acknowledgements
+# Third-party acknowledgements
 
 DJ Support is possible because people maintain and share excellent open-source
-software. Thank you to every author, maintainer, reviewer, documentarian, and
-contributor behind the projects below.
+and source-available software. Thank you to every author, maintainer, reviewer,
+documentarian, and contributor behind the projects below.
 
 This is an acknowledgement and navigation index, not a replacement for the
 projects' license texts. DJ Support does not vendor these projects. Python
@@ -35,6 +35,8 @@ the exact version and complete license material in a particular environment.
 | Project | How DJ Support uses it | License |
 | --- | --- | --- |
 | [Python](https://github.com/python/cpython) | Language and standard library | PSF-2.0 |
+| [Node.js](https://github.com/nodejs/node) | Exact JavaScript runtime for documentation-site checks in candidate qualification | MIT |
+| [npm CLI](https://github.com/npm/cli) | Installs the exact Mint CLI used for documentation-site checks | Artistic-2.0 |
 | [Git](https://github.com/git/git) | Source history and contribution workflow | GPL-2.0-only |
 | [setuptools](https://github.com/pypa/setuptools) | Package build backend | MIT |
 | [wheel](https://github.com/pypa/wheel) | Wheel build format tooling | MIT |
@@ -51,9 +53,11 @@ the exact version and complete license material in a particular environment.
 | --- | --- | --- |
 | [checkout](https://github.com/actions/checkout) | GitHub Actions source checkout | MIT |
 | [setup-python](https://github.com/actions/setup-python) | GitHub Actions Python toolchains | MIT |
+| [setup-node](https://github.com/actions/setup-node) | GitHub Actions Node.js toolchain for exact documentation-site checks | MIT |
 | [CodeQL](https://github.com/github/codeql-action) | Static security analysis for Python and GitHub Actions workflows | MIT |
 | [certifi](https://github.com/certifi/python-certifi) | CA bundle for CI-only PyPI attestation HTTPS verification | MPL-2.0 |
 | [PyPI Attestations](https://github.com/pypi/pypi-attestations) | Pinned CI verifier for APSW wheel Trusted Publisher attestations | Apache-2.0 |
+| [Mint CLI](https://github.com/mintlify/mint) | Exact documentation validation, link, redirect, and accessibility checks for candidate qualification | Elastic-2.0 |
 
 ## Independent external tools
 

@@ -49,7 +49,9 @@ djsupport/
   local_audio.py Optional local-only Chromaprint boundary
   local_audition.py Process-local, path-redacted selected-media boundary
 tests/           Offline behavior, adapter, migration, privacy, and package tests
+scripts/candidate_qualification.py Publication-free candidate evidence gate
 scripts/sqlite_runtime_delivery.py Binary-only clean-install/provenance gate
+scripts/contracts/ Versioned release-tooling input and evidence contracts
 docs/adr/        Architecture decisions
 docs/plans/      Product roadmap and retained implementation history
 docs/research/   Durable research findings
