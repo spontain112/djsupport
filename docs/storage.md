@@ -152,6 +152,82 @@ or Transfer document. It does not make separate files one transaction. Transfer
 therefore orders Spotify effects, manifests, matching knowledge, and checkpoints
 explicitly and represents incomplete ordering as recoverable durable state.
 
+## Accepted 0.7 storage direction
+
+[ADR-0005](adr/0005-use-one-local-transactional-operational-store.md) accepts a
+single local SQLite Operational Store as the next production write model. The
+current files and schema table above remain the sole production authority until
+the verified activation in #146. After activation, every production client uses
+the SQLite generation selected by the authority pointer; there is no runtime
+dual-write, partial-client cutover, or silent JSON fallback. Retained JSON stays
+byte-identical and inert for the documented rollback window and is read only by
+explicit migration or rollback tooling.
+
+The Operational Store contains Matching Knowledge, Publication Manifests,
+Approval, Mirrors, Transfers, Batches, Qualification Drafts, checkpoints, the
+Effect Journal, and compact Operational Events. `config.json`, Spotify
+environment values, and Spotipy token storage remain outside the database.
+
+The migration contract is backup → Preview → import → exact verification →
+atomic authority switch. Verification compares canonical typed facts, not only
+counts: identities, relationships, explicit nulls, Source Occurrence order and
+duplicates, authority state, revisions, evidence, and incomplete effects. One
+small same-filesystem pointer selects a complete generation by stable identity.
+An inactive candidate is closed, validated, and inert; once selected, that
+generation remains the mutable sole authority. Runtime Assembly drains and
+reopens CLI, web, and Agent Client graphs around activation so an old generation
+cannot remain open.
+
+An active SQLite store is backed up through the selected binding's SQLite Online
+Backup API (`Connection.backup()` for the standard-library implementation) into
+a fresh private destination. The destination is normalized to a closed,
+self-contained rollback-journal image and passes identity, schema, integrity,
+foreign-key, and hash checks before publication. Production never copies or
+archives a live main/WAL/SHM file family. JSON-era byte backups and post-cutover
+SQLite logical snapshots are separate operations.
+
+SQLite uses WAL, short transactions, bounded lock waits, optimistic revisions,
+and fail-closed integrity behavior. Concurrent WAL authority is available only
+when the exact Python binding artifact and SQLite runtime are admitted by the
+maintained
+[runtime qualification contract](research/2026-08-16-sqlite-runtime-qualification-and-delivery.md);
+affected, withdrawn, revoked, and unknown builds fail before store mutation.
+No database transaction remains open across a Spotify request. Transfer first
+retains bounded effect intent, then performs the effect, then retains the
+observed result; resume reconciles incomplete Effect Journal entries and never
+infers Approval or repeats an uncertain authority write.
+
+Operational Events are append-only during ordinary recording and are never
+consumed as authority-bearing input. SQL views and diagnostics are rebuildable
+read-only projections. An explicit analytics-history deletion may remove events
+and projections without changing Transfers, Approval, Matching Knowledge,
+publication state, Effect Journal recovery facts, or any other authority-bearing
+row. Even privacy-redacted diagnostics remain private local user data.
+
+## Repository exclusion contract
+
+All Operational Store artifacts are private user data even when copied outside
+the application-data directory. `.gitignore` and repository privacy tests cover
+the authority pointer, active/staged/retained generation directory, database and
+WAL/SHM/rollback-journal family, logical snapshots, backup ZIPs, migration and
+restore staging/extraction, rollback copies, analytics, diagnostics, query
+exports, all supported legacy JSON authorities, configuration, and reports.
+
+Rules use DJ Support-specific filename patterns instead of blanket `*.db` or
+`*.sqlite*` exclusions. Tests create synthetic databases only in temporary
+storage; generated SQLite fixture images are never committed. Invented textual
+source fixtures remain reviewable when their format permits them. A generated
+export is not safe for Git merely because it is aggregate, JSON, CSV, or
+privacy-redacted. Package-manifest and built-archive rejection remain explicit
+delivery gates in #138, #145, and #147; ignore rules alone do not prove package
+privacy.
+
+Detailed connection, migration, backup, restore, crash, and platform contracts
+live in the
+[concurrency research](research/2026-08-16-sqlite-concurrency-durability-contract.md)
+and
+[migration/cutover research](research/2026-08-16-sqlite-migration-backup-cutover-contract.md).
+
 ## Migration ownership
 
 - Schema readers accept only documented older versions and fail closed when
