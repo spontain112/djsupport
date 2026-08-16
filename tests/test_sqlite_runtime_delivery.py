@@ -268,6 +268,7 @@ class TestRuntimeDeliveryContract:
         single_line_routes = (
             REPOSITORY_ROOT / "README.md",
             REPOSITORY_ROOT / "CONTRIBUTING.md",
+            REPOSITORY_ROOT / "djsupport" / "cli.py",
             REPOSITORY_ROOT / ".github" / "workflows" / "ci.yml",
         )
         for path in single_line_routes:
