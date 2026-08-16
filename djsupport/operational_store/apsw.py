@@ -54,7 +54,7 @@ def probe_apsw_runtime() -> RuntimeFacts:
                 f"{sys.version_info.minor}."
                 f"{sys.version_info.micro}"
             ),
-            python_abi=str(sysconfig.get_config_var("SOABI") or "unknown"),
+            python_abi=_python_abi(),
             python_gil_mode=_python_gil_mode(),
             os_name=os_name,
             os_version=os_version,
@@ -95,6 +95,24 @@ def _python_implementation() -> str:
     if sys.implementation.name == "cpython":
         return "CPython"
     return sys.implementation.name
+
+
+def _python_abi() -> str:
+    """Return a stable ABI identity without accepting an unknown value."""
+    soabi = sysconfig.get_config_var("SOABI")
+    if isinstance(soabi, str) and soabi:
+        return soabi
+    if (
+        sys.implementation.name == "cpython"
+        and platform.system() == "Windows"
+    ):
+        platform_tag = sysconfig.get_platform().replace("-", "_")
+        if platform_tag:
+            return (
+                f"cp{sys.version_info.major}{sys.version_info.minor}-"
+                f"{platform_tag}"
+            )
+    raise RuntimeProbeError("python_abi_unavailable")
 
 
 def _python_gil_mode() -> str:
