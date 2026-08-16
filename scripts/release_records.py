@@ -17,6 +17,20 @@ NEXT_VERSION = RECORDS / "next-version"
 ALLOWED_BUMPS = {"patch": 0, "minor": 1, "major": 2}
 ALLOWED_SECTIONS = ("Added", "Changed", "Deprecated", "Removed", "Fixed", "Security")
 VERSION_PATTERN = re.compile(r'(?m)^version = "([^"]+)"$')
+PUBLIC_ROOT_ARTIFACTS = frozenset(
+    {
+        ".env.example",
+        "CHANGELOG.md",
+        "CONTEXT.md",
+        "CONTRIBUTING.md",
+        "LICENSE",
+        "MANIFEST.in",
+        "README.md",
+        "SECURITY.md",
+        "THIRD_PARTY.md",
+        "pyproject.toml",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -65,10 +79,14 @@ def load_records() -> list[ReleaseRecord]:
 
 
 def _is_distributable(path: str) -> bool:
-    return path.startswith("djsupport/") or path in {"README.md", "pyproject.toml"} or (
-        path.startswith("docs/")
-        and path != "docs/releasing.md"
-        and not path.startswith("docs/research/")
+    return (
+        path.startswith("djsupport/")
+        or path in PUBLIC_ROOT_ARTIFACTS
+        or (
+            path.startswith("docs/")
+            and path != "docs/releasing.md"
+            and not path.startswith("docs/research/")
+        )
     )
 
 
