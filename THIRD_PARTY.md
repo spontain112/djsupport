@@ -49,6 +49,7 @@ the exact version and complete license material in a particular environment.
 | --- | --- | --- |
 | [checkout](https://github.com/actions/checkout) | GitHub Actions source checkout | MIT |
 | [setup-python](https://github.com/actions/setup-python) | GitHub Actions Python toolchains | MIT |
+| [CodeQL](https://github.com/github/codeql-action) | Static security analysis for Python and GitHub Actions workflows | MIT |
 
 ## Independent external tools
 

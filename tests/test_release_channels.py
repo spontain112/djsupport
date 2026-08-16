@@ -33,6 +33,7 @@ def test_direct_tools_are_credited_and_source_archive_includes_acknowledgements(
 
     assert not [name for name in package_names if name not in credits.lower()]
     assert "Chromaprint" in credits and "beatport-pp-cli" in credits
+    assert "[CodeQL](https://github.com/github/codeql-action)" in credits
     assert "issue #133" in credits and "Unverified" in credits
     assert "include THIRD_PARTY.md" in (REPOSITORY_ROOT / "MANIFEST.in").read_text()
     assert (REPOSITORY_ROOT / "THIRD_PARTY.md").is_file()
@@ -181,6 +182,121 @@ def test_ci_is_a_least_privilege_offline_release_gate():
     for marker in forbidden:
         if marker in lowered_workflow:
             errors.append(f"forbidden workflow capability: {marker}")
+
+    assert not errors, "\n".join(errors)
+
+
+def test_codeql_scans_python_and_workflows_with_least_privilege():
+    workflow_path = REPOSITORY_ROOT / ".github" / "workflows" / "codeql.yml"
+    workflow_text = workflow_path.read_text()
+    workflow = yaml.safe_load(workflow_text)
+    errors = []
+
+    triggers = workflow.get("on", {})
+    if set(triggers) != {"push", "pull_request", "schedule"}:
+        errors.append("CodeQL must run only for main changes and its schedule")
+    if triggers.get("push", {}).get("branches") != ["main"]:
+        errors.append("CodeQL push scans must be limited to main")
+    if triggers.get("pull_request", {}).get("branches") != ["main"]:
+        errors.append("CodeQL pull-request scans must target main")
+    if triggers.get("schedule") != [{"cron": "17 3 * * 1"}]:
+        errors.append("CodeQL must define the reviewed weekly UTC schedule")
+
+    if workflow.get("permissions") != {"contents": "read"}:
+        errors.append("CodeQL workflow permissions must default to contents: read")
+    concurrency = workflow.get("concurrency", {})
+    if concurrency.get("cancel-in-progress") is not True:
+        errors.append("superseded CodeQL runs must be cancelled")
+    if "github.ref" not in concurrency.get("group", ""):
+        errors.append("CodeQL concurrency must be scoped to the ref")
+
+    jobs = workflow.get("jobs", {})
+    if set(jobs) != {"analyze"}:
+        errors.append("CodeQL must expose one analysis job")
+    analyze = jobs.get("analyze", {})
+    if analyze.get("permissions") != {
+        "actions": "read",
+        "contents": "read",
+        "packages": "read",
+        "security-events": "write",
+    }:
+        errors.append("CodeQL analysis permissions must be the reviewed minimum")
+    if analyze.get("timeout-minutes") != 30:
+        errors.append("CodeQL analysis must have a bounded timeout")
+
+    expected_matrix = [
+        {"language": "python", "build-mode": "none"},
+        {"language": "actions", "build-mode": "none"},
+    ]
+    strategy = analyze.get("strategy", {})
+    if strategy.get("fail-fast") is not False:
+        errors.append("one failed language must not hide the other analysis")
+    if strategy.get("matrix", {}).get("include") != expected_matrix:
+        errors.append("CodeQL must explicitly analyze Python and Actions")
+
+    steps = analyze.get("steps", [])
+    uses = [step.get("uses", "") for step in steps]
+    action_roles = [action.rsplit("@", maxsplit=1)[0] for action in uses]
+    expected_action_roles = [
+        "actions/checkout",
+        "github/codeql-action/init",
+        "github/codeql-action/analyze",
+    ]
+    action_pin = re.compile(
+        r"^(?:actions/checkout|github/codeql-action/(?:init|analyze))@[0-9a-f]{40}$"
+    )
+    if action_roles != expected_action_roles:
+        errors.append("CodeQL must check out, initialize, and analyze in that order")
+    if any(action_pin.fullmatch(action) is None for action in uses):
+        errors.append("CodeQL actions must be canonical and pinned to full SHAs")
+    codeql_pins = {
+        action.rsplit("@", maxsplit=1)[1]
+        for action in uses
+        if action.startswith("github/codeql-action/")
+    }
+    if len(codeql_pins) != 1:
+        errors.append("CodeQL initialization and analysis must use one reviewed pin")
+    checkout = next(
+        (step for step in steps if step.get("uses", "").startswith("actions/checkout@")),
+        {},
+    )
+    if checkout.get("with", {}).get("persist-credentials") is not False:
+        errors.append("CodeQL checkout credentials must not persist")
+    initialize = next(
+        (
+            step
+            for step in steps
+            if step.get("uses", "").startswith("github/codeql-action/init@")
+        ),
+        {},
+    )
+    if initialize.get("with") != {
+        "languages": "${{ matrix.language }}",
+        "build-mode": "${{ matrix.build-mode }}",
+    }:
+        errors.append("CodeQL must initialize only the explicit matrix language")
+
+    forbidden = (
+        "pull_request_target",
+        "workflow_dispatch",
+        "continue-on-error",
+        "permissions: write",
+        "spotify",
+        "beatport",
+        "git tag",
+        "gh release",
+        "twine",
+        "pypi",
+        "upload-sarif",
+    )
+    normalized = workflow_text.casefold()
+    for marker in forbidden:
+        if marker in normalized:
+            errors.append(f"forbidden CodeQL capability: {marker}")
+    if re.search(r"\bsecrets\s*(?:\.|\[)", normalized):
+        errors.append("forbidden CodeQL capability: repository secrets")
+    if any("run" in step for step in steps):
+        errors.append("CodeQL setup must not execute arbitrary repository commands")
 
     assert not errors, "\n".join(errors)
 
