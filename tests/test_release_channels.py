@@ -199,9 +199,8 @@ def test_codeql_scans_python_and_workflows_with_least_privilege():
         errors.append("CodeQL push scans must be limited to main")
     if triggers.get("pull_request", {}).get("branches") != ["main"]:
         errors.append("CodeQL pull-request scans must target main")
-    schedules = triggers.get("schedule", [])
-    if len(schedules) != 1 or set(schedules[0]) != {"cron"}:
-        errors.append("CodeQL must define exactly one weekly schedule")
+    if triggers.get("schedule") != [{"cron": "17 3 * * 1"}]:
+        errors.append("CodeQL must define the reviewed weekly UTC schedule")
 
     if workflow.get("permissions") != {"contents": "read"}:
         errors.append("CodeQL workflow permissions must default to contents: read")
@@ -237,10 +236,18 @@ def test_codeql_scans_python_and_workflows_with_least_privilege():
 
     steps = analyze.get("steps", [])
     uses = [step.get("uses", "") for step in steps]
+    action_roles = [action.rsplit("@", maxsplit=1)[0] for action in uses]
+    expected_action_roles = [
+        "actions/checkout",
+        "github/codeql-action/init",
+        "github/codeql-action/analyze",
+    ]
     action_pin = re.compile(
         r"^(?:actions/checkout|github/codeql-action/(?:init|analyze))@[0-9a-f]{40}$"
     )
-    if len(uses) != 3 or any(action_pin.fullmatch(action) is None for action in uses):
+    if action_roles != expected_action_roles:
+        errors.append("CodeQL must check out, initialize, and analyze in that order")
+    if any(action_pin.fullmatch(action) is None for action in uses):
         errors.append("CodeQL actions must be canonical and pinned to full SHAs")
     codeql_pins = {
         action.rsplit("@", maxsplit=1)[1]
@@ -272,7 +279,6 @@ def test_codeql_scans_python_and_workflows_with_least_privilege():
     forbidden = (
         "pull_request_target",
         "workflow_dispatch",
-        "secrets.",
         "continue-on-error",
         "permissions: write",
         "spotify",
@@ -287,6 +293,8 @@ def test_codeql_scans_python_and_workflows_with_least_privilege():
     for marker in forbidden:
         if marker in normalized:
             errors.append(f"forbidden CodeQL capability: {marker}")
+    if re.search(r"\bsecrets\s*(?:\.|\[)", normalized):
+        errors.append("forbidden CodeQL capability: repository secrets")
     if any("run" in step for step in steps):
         errors.append("CodeQL setup must not execute arbitrary repository commands")
 
