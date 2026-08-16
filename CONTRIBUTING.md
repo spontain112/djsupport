@@ -92,6 +92,10 @@ use the repository's [issue workflow](docs/agents/issue-tracker.md) and
 
 ## Protect local DJ data
 
+Report suspected vulnerabilities according to [`SECURITY.md`](SECURITY.md).
+Never put vulnerability details or sensitive evidence in a public issue or
+pull request.
+
 Keep user data out of Git. This includes credentials and tokens, source-library
 files and paths, playlist state and identifiers, Transfer reports and review
 CSVs, Approved Matches, Corrections, matching-knowledge files, and local
@@ -136,6 +140,14 @@ offline release gate.
 
 Follow the canonical [maintainer release checklist](docs/releasing.md) for the
 separate validation, candidate, final-release, and return-to-development gates.
+
+When adding, removing, or changing a direct runtime, optional, development, or
+build dependency—or a documented external tool—update
+[`THIRD_PARTY.md`](THIRD_PARTY.md) in the same pull request. Link the canonical
+upstream project, state how DJ Support uses it, and verify the SPDX license from
+upstream metadata. Do not copy a third-party license into DJ Support unless its
+distribution terms require that exact notice; package artifacts must retain all
+notices required for content they actually bundle.
 
 When a persistent schema changes, keep its reader compatible with documented
 older versions or provide an explicit migration. Add a synthetic backup/restore

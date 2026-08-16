@@ -14,6 +14,42 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on Python 3.10
 REPOSITORY_ROOT = Path(__file__).parents[1]
 
 
+def test_direct_tools_are_credited_and_source_archive_includes_acknowledgements():
+    with (REPOSITORY_ROOT / "pyproject.toml").open("rb") as pyproject_file:
+        metadata = tomllib.load(pyproject_file)
+    project = metadata["project"]
+
+    credits = (REPOSITORY_ROOT / "THIRD_PARTY.md").read_text()
+    declared = [
+        *project["dependencies"],
+        *project["optional-dependencies"]["web"],
+        *project["optional-dependencies"]["dev"],
+        *metadata["build-system"]["requires"],
+    ]
+    package_names = {
+        re.split(r"[<>=!~;\[]", requirement, maxsplit=1)[0].strip().lower()
+        for requirement in declared
+    }
+
+    assert not [name for name in package_names if name not in credits.lower()]
+    assert "Chromaprint" in credits and "beatport-pp-cli" in credits
+    assert "issue #133" in credits and "Unverified" in credits
+    assert "include THIRD_PARTY.md" in (REPOSITORY_ROOT / "MANIFEST.in").read_text()
+    assert (REPOSITORY_ROOT / "THIRD_PARTY.md").is_file()
+
+
+def test_security_policy_uses_private_reporting_and_is_in_source_archive():
+    policy = (REPOSITORY_ROOT / "SECURITY.md").read_text()
+    normalized_policy = " ".join(policy.split())
+    manifest = (REPOSITORY_ROOT / "MANIFEST.in").read_text()
+
+    assert "security/advisories/new" in policy
+    assert "Do not describe the vulnerability" in normalized_policy
+    assert "synthetic data" in normalized_policy
+    assert "no response deadline" in normalized_policy
+    assert "include SECURITY.md" in manifest
+
+
 def test_source_checkout_uses_a_supported_release_version():
     with (REPOSITORY_ROOT / "pyproject.toml").open("rb") as pyproject_file:
         project = tomllib.load(pyproject_file)["project"]
