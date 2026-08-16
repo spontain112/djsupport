@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spontain112/djsupport/blob/main/scripts/contracts/candidate-qualification-evidence.v1.schema.json",
+  "title": "DJ Support candidate qualification evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_id",
+    "schema_version",
+    "conclusion",
+    "qualification_kind",
+    "run",
+    "candidate",
+    "build",
+    "runtime",
+    "installed_scenarios",
+    "documentation",
+    "checks",
+    "publication",
+    "data_provider_state"
+  ],
+  "properties": {
+    "schema_id": {
+      "const": "djsupport/candidate-qualification-evidence/1"
+    },
+    "schema_version": { "const": 1 },
+    "conclusion": { "const": "passed" },
+    "qualification_kind": {
+      "enum": ["synthetic_non_release", "release_candidate"]
+    },
+    "run": { "$ref": "#/$defs/run" },
+    "candidate": { "$ref": "#/$defs/candidate" },
+    "build": { "$ref": "#/$defs/build" },
+    "runtime": { "$ref": "#/$defs/runtime" },
+    "installed_scenarios": { "$ref": "#/$defs/installedScenarios" },
+    "documentation": { "$ref": "#/$defs/documentation" },
+    "checks": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "const": "passed" },
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" }
+    },
+    "publication": { "$ref": "#/$defs/publication" },
+    "data_provider_state": { "$ref": "#/$defs/dataProviderState" }
+  },
+  "$defs": {
+    "sha": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:(?:\\.dev|rc)[0-9]+)?$"
+    },
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["repository", "run_id", "run_url"],
+      "properties": {
+        "repository": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" },
+        "run_id": { "type": "string", "pattern": "^[A-Za-z0-9_.-]+$", "maxLength": 100 },
+        "run_url": { "type": "string", "format": "uri", "pattern": "^https://github\\.com/" }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "product_commit",
+        "documentation_commit",
+        "package_version",
+        "changelog_identity"
+      ],
+      "properties": {
+        "product_commit": { "$ref": "#/$defs/sha" },
+        "documentation_commit": { "$ref": "#/$defs/sha" },
+        "package_version": { "$ref": "#/$defs/version" },
+        "changelog_identity": { "type": "string", "minLength": 1, "maxLength": 160 }
+      }
+    },
+    "archive": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["filename", "size_bytes", "sha256", "member_count"],
+      "properties": {
+        "filename": { "type": "string", "pattern": "^[A-Za-z0-9_.+-]+$", "maxLength": 160 },
+        "size_bytes": { "type": "integer", "minimum": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "member_count": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "wheel", "reproducible_cells"],
+      "properties": {
+        "source": { "$ref": "#/$defs/archive" },
+        "wheel": { "$ref": "#/$defs/archive" },
+        "reproducible_cells": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_catalog_id",
+        "qualification_policy_id",
+        "qualified_cells",
+        "binding_resolution"
+      ],
+      "properties": {
+        "artifact_catalog_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "qualification_policy_id": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "qualified_cells": { "type": "integer", "minimum": 1 },
+        "binding_resolution": { "const": "binary_only" }
+      }
+    },
+    "installedScenarios": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_kind", "required", "platforms", "conclusion"],
+      "properties": {
+        "evidence_kind": {
+          "enum": ["synthetic_contract", "installed_product"]
+        },
+        "required": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }
+        },
+        "platforms": {
+          "type": "array",
+          "minItems": 3,
+          "uniqueItems": true,
+          "items": { "enum": ["Linux", "macOS", "Windows"] }
+        },
+        "conclusion": { "const": "passed" }
+      }
+    },
+    "documentation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "product_commit",
+        "documentation_commit",
+        "product_contract",
+        "site_checks"
+      ],
+      "properties": {
+        "product_commit": { "$ref": "#/$defs/sha" },
+        "documentation_commit": { "$ref": "#/$defs/sha" },
+        "product_contract": { "const": "passed" },
+        "site_checks": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["validate", "broken_links", "accessibility"],
+          "properties": {
+            "validate": { "const": "passed" },
+            "broken_links": { "const": "passed" },
+            "accessibility": { "const": "passed" }
+          }
+        }
+      }
+    },
+    "publication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tag",
+        "github_release",
+        "artifact_upload",
+        "package_upload",
+        "advisory_publication"
+      ],
+      "properties": {
+        "tag": { "const": false },
+        "github_release": { "const": false },
+        "artifact_upload": { "const": false },
+        "package_upload": { "const": false },
+        "advisory_publication": { "const": false }
+      }
+    },
+    "dataProviderState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["synthetic_only", "live_provider_call", "owner_data"],
+      "properties": {
+        "synthetic_only": { "const": true },
+        "live_provider_call": { "const": false },
+        "owner_data": { "const": false }
+      }
+    }
+  }
+}

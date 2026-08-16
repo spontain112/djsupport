@@ -423,11 +423,11 @@ is `$XDG_DATA_HOME/djsupport` or `~/.local/share/djsupport`.
 - [Maintainer release checklist](docs/releasing.md)
 - [Changelog](CHANGELOG.md)
 - [Security policy](SECURITY.md)
-- [Open-source acknowledgements](THIRD_PARTY.md)
+- [Third-party acknowledgements](THIRD_PARTY.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## License and acknowledgements
 
 DJ Support is available under the [MIT License](LICENSE). It is built with
-open-source projects maintained by people and communities we gratefully credit
-in [Open-source acknowledgements](THIRD_PARTY.md).
+open-source and source-available projects maintained by people and communities
+we gratefully credit in [Third-party acknowledgements](THIRD_PARTY.md).

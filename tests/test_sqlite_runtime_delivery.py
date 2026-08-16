@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import subprocess
 import tarfile
 from io import BytesIO
 from pathlib import Path
@@ -19,7 +21,12 @@ from djsupport.operational_store.delivery import (
     load_artifact_catalog,
     verify_downloaded_wheel,
 )
-from scripts.sqlite_runtime_delivery import _inspect_source, _inspect_wheel
+from scripts.sqlite_runtime_delivery import (
+    _inspect_source,
+    _inspect_wheel,
+    _verify_expected_djsupport_wheel,
+    _verify_installed_candidate_smoke,
+)
 
 try:
     import tomllib
@@ -70,6 +77,62 @@ def _load_json(path: Path) -> dict:
 
 
 class TestRuntimeDeliveryContract:
+    def test_installed_candidate_smoke_invokes_import_and_cli(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        python = tmp_path / "bin" / "python"
+        calls = []
+
+        def run(arguments, **kwargs):
+            calls.append((arguments, kwargs))
+            return subprocess.CompletedProcess(arguments, 0)
+
+        monkeypatch.setattr(subprocess, "run", run)
+
+        _verify_installed_candidate_smoke(python, "0.7.0rc1")
+
+        assert len(calls) == 2
+        assert calls[0][0][:3] == [str(python), "-I", "-c"]
+        assert calls[0][0][-1] == "0.7.0rc1"
+        cli_name = "djsupport.exe" if os.name == "nt" else "djsupport"
+        assert calls[1][0] == [str(python.parent / cli_name), "--help"]
+        assert all(call[1]["check"] is True for call in calls)
+
+    def test_installed_candidate_smoke_fails_when_cli_does_not_start(
+        self,
+        monkeypatch,
+        tmp_path,
+    ):
+        python = tmp_path / "bin" / "python"
+
+        def run(arguments, **kwargs):
+            if arguments[-1] == "--help":
+                raise subprocess.CalledProcessError(1, arguments)
+            return subprocess.CompletedProcess(arguments, 0)
+
+        monkeypatch.setattr(subprocess, "run", run)
+
+        with pytest.raises(
+            SystemExit,
+            match="sqlite_runtime_delivery_failed:installed_candidate_smoke",
+        ):
+            _verify_installed_candidate_smoke(python, "0.7.0rc1")
+
+    def test_candidate_digest_gate_rejects_an_independent_wheel_mismatch(
+        self,
+        tmp_path,
+    ):
+        wheel = tmp_path / "djsupport-synthetic-py3-none-any.whl"
+        wheel.write_bytes(b"synthetic wheel")
+
+        with pytest.raises(
+            SystemExit,
+            match="sqlite_runtime_delivery_failed:djsupport_wheel_digest",
+        ):
+            _verify_expected_djsupport_wheel(wheel, "0" * 64)
+
     def test_package_pins_the_only_production_binding_and_python_surface(self):
         with (REPOSITORY_ROOT / "pyproject.toml").open("rb") as source:
             project = tomllib.load(source)["project"]
@@ -214,6 +277,8 @@ class TestRuntimeDeliveryContract:
             '"certifi==2026.7.22"',
             '"jsonschema==4.26.0"',
             '"pypi-attestations==0.0.30"',
+            '"setuptools==80.9.0"',
+            '"wheel==0.45.1"',
         ):
             assert tool in commands
         assert "python scripts/sqlite_runtime_delivery.py verify" in commands
@@ -223,7 +288,12 @@ class TestRuntimeDeliveryContract:
         assert "--only-binary=:all:" in script
         assert "pypi_attestations" in script
         assert '"-m",\n            "build",' in script
+        assert '"--no-isolation"' in script
+        assert 'environment["SOURCE_DATE_EPOCH"]' in script
+        assert "capture_output=quiet" in script
         assert "_inspect_wheel" in script and "_inspect_source" in script
+        assert "_verify_installed_candidate_smoke" in script
+        assert '"-I"' in script
 
         forbidden = (
             "pull_request_target",
