@@ -125,7 +125,12 @@ SQLite's current WAL documentation says the WAL-reset race is likely present fro
 3.44.6 and 3.50.7. It requires at least two connections in different threads or
 processes and a tightly timed write/checkpoint race, but can corrupt the database;
 SQLite recommends upgrading.
-([official WAL-reset advisory](https://sqlite.org/wal.html#the_wal_reset_bug))
+SQLite separately withdrew 3.52.0 because some expression indexes could fail to
+interoperate with earlier releases; 3.53.0 reintroduced that release line with
+corrections.
+([official WAL-reset advisory](https://sqlite.org/wal.html#the_wal_reset_bug),
+[SQLite 3.52.0 withdrawal](https://sqlite.org/releaselog/3_52_0.html),
+[SQLite release news](https://sqlite.org/news.html))
 
 Python exposes the runtime SQLite library separately from the Python module
 version through `sqlite3.sqlite_version` and `sqlite3.sqlite_version_info`.
@@ -133,26 +138,34 @@ version through `sqlite3.sqlite_version` and `sqlite3.sqlite_version_info`.
 
 ### Implementation implication (inference)
 
-Before #139 enables concurrent authority, the store should fail closed unless its
-runtime is one of:
+Before #139 enables concurrent authority, the store should fail closed unless the
+exact selected-binding artifact and its SQLite version/source identity match a
+reviewed entry in DJ Support's maintained qualification manifest. Initially
+eligible upstream releases include exact 3.44.6 and 3.50.7 backports, exact
+3.51.3, and reviewed non-withdrawn 3.53 releases. Eligibility is not admission by
+version string: the artifact still needs exact source/build evidence.
 
-- SQLite 3.51.3 or later;
-- the 3.50 line at 3.50.7 or later;
-- the 3.44 line at 3.44.6 or later; or
-- a downstream build whose maintainer explicitly documents the same fix, recorded
-  in DJ Support's release qualification.
+SQLite 3.52.0 is denied even though it contains the WAL-reset fix, and an unlisted
+future release remains unknown until reviewed. A simple numeric lower-bound
+comparison is unsafe because upstream identifies the intervening 3.45–3.49 lines
+and 3.51.0–3.51.2 as affected and because a monotonic comparison would admit the
+withdrawn 3.52.0 release. A downstream backport requires exact vendor package,
+source/patch, and runtime-fingerprint evidence rather than a user assertion.
 
-A simple `version >= 3.44.6` comparison is unsafe because upstream identifies the
-intervening 3.45–3.49 lines and 3.51.0–3.51.2 as affected. The capability error
-must report the runtime version without printing a database path. #138 may run its
-single-process, non-authoritative conformance work on older versions, but the
-multi-client capability must remain disabled.
+The capability error must report only public runtime identity and a stable reason
+code, without printing a database path. #138 may run its single-process,
+non-authoritative conformance work on older versions, but the multi-client
+capability must remain disabled. The exact policy and CI evidence are maintained
+in the [runtime delivery](2026-08-16-sqlite-runtime-qualification-and-delivery.md)
+and [CI qualification](2026-08-16-sqlite-runtime-ci-qualification.md) contracts.
 
 ### Required tests
 
-- Unit-test the allow/deny matrix around 3.44.5/3.44.6, 3.45.x, 3.50.6/3.50.7,
-  and 3.51.2/3.51.3.
-- Record `sys.version` and `sqlite3.sqlite_version` as non-private CI metadata on
+- Unit-test the exact evidence policy around 3.44.5/3.44.6, 3.45.x,
+  3.50.6/3.50.7, 3.51.2/3.51.3, withdrawn 3.52.0, a reviewed 3.53 build, and an
+  unlisted future build.
+- Record the Python and selected-binding versions plus the runtime SQLite version,
+  source ID, compile options, and artifact identity as non-private CI metadata on
   macOS, Linux, and Windows, including the Python 3.10 and 3.14 Linux edges.
 - Make the concurrent-persistence suite fail, not skip, if the release runtime is
   not proven patched. A downstream-backport exception requires explicit build
