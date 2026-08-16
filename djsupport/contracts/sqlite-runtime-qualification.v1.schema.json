@@ -1,0 +1,368 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/spontain112/djsupport/sqlite-runtime-qualification.v1.schema.json",
+  "title": "DJ Support SQLite runtime qualification manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "policy_id",
+    "selected_binding",
+    "withdrawn_sqlite_versions",
+    "affected_sqlite_ranges",
+    "entries"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "policy_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9._/-]+$"
+    },
+    "selected_binding": {
+      "$ref": "#/$defs/selected_binding"
+    },
+    "withdrawn_sqlite_versions": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/sqlite_version"}
+    },
+    "affected_sqlite_ranges": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/affected_range"}
+    },
+    "entries": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/entry"}
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "safe_identity": {
+      "type": "string",
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*(/[A-Za-z0-9][A-Za-z0-9._+-]*)*$"
+    },
+    "https_url": {
+      "type": "string",
+      "maxLength": 2048,
+      "pattern": "^https://[^\\s]+$"
+    },
+    "binding_version": {
+      "type": "string",
+      "pattern": "^[0-9]+(?:\\.[0-9]+){3}$"
+    },
+    "utc_timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "sqlite_version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "selected_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["distribution", "version"],
+      "properties": {
+        "distribution": {"type": "string", "minLength": 1},
+        "version": {"$ref": "#/$defs/binding_version"}
+      }
+    },
+    "affected_range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["minimum", "maximum", "exceptions"],
+      "properties": {
+        "minimum": {"$ref": "#/$defs/sqlite_version"},
+        "maximum": {"$ref": "#/$defs/sqlite_version"},
+        "exceptions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/sqlite_version"}
+        }
+      }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {"status": {"const": "revoked"}},
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "revoked_at_utc": {"$ref": "#/$defs/utc_timestamp"},
+              "status_evidence_id": {
+                "$ref": "#/$defs/safe_identity"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"status": {"const": "active"}},
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "revoked_at_utc": {"type": "null"},
+              "status_evidence_id": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"status": {"const": "superseded"}},
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "status_evidence_id": {
+                "$ref": "#/$defs/safe_identity"
+              }
+            }
+          }
+        }
+      ],
+      "required": [
+        "evidence_id",
+        "classification",
+        "status",
+        "selectors",
+        "artifact",
+        "activated_at_utc",
+        "revoked_at_utc",
+        "supersedes_evidence_id",
+        "status_evidence_id"
+      ],
+      "properties": {
+        "evidence_id": {"$ref": "#/$defs/safe_identity"},
+        "classification": {
+          "enum": [
+            "qualified_upstream",
+            "qualified_downstream_attestation"
+          ]
+        },
+        "status": {"enum": ["active", "revoked", "superseded"]},
+        "selectors": {"$ref": "#/$defs/selectors"},
+        "artifact": {"$ref": "#/$defs/artifact"},
+        "activated_at_utc": {"$ref": "#/$defs/utc_timestamp"},
+        "revoked_at_utc": {
+          "anyOf": [
+            {"$ref": "#/$defs/utc_timestamp"},
+            {"type": "null"}
+          ]
+        },
+        "supersedes_evidence_id": {
+          "anyOf": [
+            {"$ref": "#/$defs/safe_identity"},
+            {"type": "null"}
+          ]
+        },
+        "status_evidence_id": {
+          "anyOf": [
+            {"$ref": "#/$defs/safe_identity"},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "selectors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["binding", "sqlite", "python", "platform"],
+      "properties": {
+        "binding": {"$ref": "#/$defs/binding"},
+        "sqlite": {"$ref": "#/$defs/sqlite"},
+        "python": {"$ref": "#/$defs/python"},
+        "platform": {"$ref": "#/$defs/platform"}
+      }
+    },
+    "binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "distribution",
+        "distribution_version",
+        "wrapper_version",
+        "extension_sha256"
+      ],
+      "properties": {
+        "distribution": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*$"
+        },
+        "distribution_version": {"$ref": "#/$defs/binding_version"},
+        "wrapper_version": {"$ref": "#/$defs/binding_version"},
+        "extension_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "sqlite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "version_number",
+        "source_id",
+        "compile_options_sha256",
+        "using_amalgamation"
+      ],
+      "properties": {
+        "version": {"$ref": "#/$defs/sqlite_version"},
+        "version_number": {"type": "integer", "minimum": 1},
+        "source_id": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2} [0-9a-f]{64}$"
+        },
+        "compile_options_sha256": {"$ref": "#/$defs/sha256"},
+        "using_amalgamation": {"type": "boolean"}
+      }
+    },
+    "python": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["implementation", "version", "abi", "gil_mode"],
+      "properties": {
+        "implementation": {"const": "CPython"},
+        "version": {
+          "type": "string",
+          "pattern": "^3\\.(?:10|11|12|13|14)\\.[0-9]+$"
+        },
+        "abi": {
+          "type": "string",
+          "pattern": "^(?:cpython-3(?:10|11|12|13|14)|cp3(?:10|11|12|13|14))t?(?:[-_][A-Za-z0-9_.+-]+)?$"
+        },
+        "gil_mode": {"enum": ["gil", "free-threaded"]}
+      }
+    },
+    "platform": {
+      "type": "object",
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {"os": {"const": "Windows"}},
+            "required": ["os"]
+          },
+          "then": {
+            "properties": {
+              "product_type": {
+                "enum": ["domain_controller", "server", "workstation"]
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "product_type": {"const": "not_applicable"}
+            }
+          }
+        }
+      ],
+      "required": [
+        "os",
+        "version",
+        "kernel_release",
+        "product_type",
+        "architecture"
+      ],
+      "properties": {
+        "os": {"enum": ["Ubuntu", "macOS", "Windows"]},
+        "version": {
+          "type": "string",
+          "pattern": "^[0-9]+(?:\\.[0-9]+){1,3}$"
+        },
+        "kernel_release": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*$"
+        },
+        "product_type": {
+          "enum": [
+            "domain_controller",
+            "not_applicable",
+            "server",
+            "workstation"
+          ]
+        },
+        "architecture": {
+          "enum": ["AMD64", "aarch64", "amd64", "arm64", "x86_64"]
+        }
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "vendor",
+        "filename",
+        "download_url",
+        "size_bytes",
+        "sha256",
+        "platform_tag",
+        "publisher",
+        "build"
+      ],
+      "properties": {
+        "vendor": {"type": "string", "minLength": 1},
+        "filename": {
+          "type": "string",
+          "maxLength": 512,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*$"
+        },
+        "download_url": {"$ref": "#/$defs/https_url"},
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "platform_tag": {
+          "type": "string",
+          "maxLength": 256,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*$"
+        },
+        "publisher": {"$ref": "#/$defs/publisher"},
+        "build": {"$ref": "#/$defs/build"}
+      }
+    },
+    "publisher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["identity", "provenance_url"],
+      "properties": {
+        "identity": {"$ref": "#/$defs/safe_identity"},
+        "provenance_url": {"$ref": "#/$defs/https_url"}
+      }
+    },
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_repository_url",
+        "source_commit",
+        "workflow_url",
+        "runner_image"
+      ],
+      "properties": {
+        "source_repository_url": {"$ref": "#/$defs/https_url"},
+        "source_commit": {
+          "type": "string",
+          "pattern": "^(?:[0-9a-f]{40}|[0-9a-f]{64})$"
+        },
+        "workflow_url": {"$ref": "#/$defs/https_url"},
+        "runner_image": {"$ref": "#/$defs/runner_image"}
+      }
+    },
+    "runner_image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "version", "manifest_url"],
+      "properties": {
+        "label": {"$ref": "#/$defs/safe_identity"},
+        "version": {"$ref": "#/$defs/safe_identity"},
+        "manifest_url": {"$ref": "#/$defs/https_url"}
+      }
+    }
+  }
+}

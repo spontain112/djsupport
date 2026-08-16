@@ -28,6 +28,7 @@ every flag.
 djsupport/
   transfer.py    Durable Transfer policy, planning, checkpoints, and publication
   runtime.py     Private production assembly for Transfer client adapters
+  operational_store/ Fail-closed selected-binding qualification before store access
   agent.py       Versioned, harness-neutral Transfer contract rendering
   readiness.py   Shared presence-only readiness for CLI and web adapters
   cli.py         Thin Click command-line adapter
