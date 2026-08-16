@@ -238,7 +238,8 @@ def synthetic_workflow_run_observation() -> dict[str, object]:
         successful_job(
             "Plan",
             (
-                "Check out the exact candidate source",
+                "Check out workflow product source",
+                "Require exact product workflow commit",
                 "Set up canonical build Python",
                 "Install pinned build and verification tools",
                 "Install the exact checkout for offline validation",
@@ -249,8 +250,10 @@ def synthetic_workflow_run_observation() -> dict[str, object]:
         successful_job(
             "Documentation",
             (
-                "Check out exact product source",
-                "Check out exact documentation source",
+                "Check out workflow product source",
+                "Require exact product workflow commit",
+                "Check out canonical documentation source",
+                "Require exact documentation commit",
                 "Set up documentation Node",
                 "Set up documentation Python",
                 "Install pinned documentation tools",
@@ -263,7 +266,8 @@ def synthetic_workflow_run_observation() -> dict[str, object]:
         ),
     ]
     qualification_steps = (
-        "Check out the exact candidate source",
+        "Check out workflow product source",
+        "Require exact product workflow commit",
         "Set up exact native Python",
         "Install pinned native qualification tools",
         "Require the canonical pure-Python wheel digest",
@@ -800,6 +804,41 @@ class TestCandidateWorkflowAssembly:
         ]
         assert checkouts
         assert all(step["with"]["persist-credentials"] is False for step in checkouts)
+        assert not any(
+            str(step["with"].get("ref", "")).startswith("${{ inputs.")
+            for step in checkouts
+        )
+        product_checkouts = [
+            step
+            for step in checkouts
+            if "repository" not in step["with"]
+            and "ref" in step["with"]
+        ]
+        assert product_checkouts
+        assert {
+            step["with"]["ref"] for step in product_checkouts
+        } == {"${{ github.sha }}"}
+        documentation_checkout = next(
+            step
+            for step in checkouts
+            if step["with"].get("repository")
+            == "spontain112/djsupport-docs"
+        )
+        assert documentation_checkout["with"]["ref"] == "main"
+        for job_name in ("plan", "qualify", "documentation", "finalize"):
+            assert "Require exact product workflow commit" in {
+                step["name"] for step in jobs[job_name]["steps"]
+            }
+        assert "Require exact documentation commit" in {
+            step["name"] for step in jobs["documentation"]["steps"]
+        }
+        wheel_rebuild = next(
+            step
+            for step in jobs["qualify"]["steps"]
+            if step["name"]
+            == "Require the canonical pure-Python wheel digest"
+        )
+        assert wheel_rebuild["shell"] == "bash"
         setup_node = next(
             step
             for step in steps

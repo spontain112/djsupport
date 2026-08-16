@@ -79,7 +79,8 @@ CONTRACT_JOB_STEPS = (
     "Prove the synthetic non-release contract",
 )
 PLAN_JOB_STEPS = (
-    "Check out the exact candidate source",
+    "Check out workflow product source",
+    "Require exact product workflow commit",
     "Set up canonical build Python",
     "Install pinned build and verification tools",
     "Install the exact checkout for offline validation",
@@ -87,7 +88,8 @@ PLAN_JOB_STEPS = (
     "Build, inspect, and bind the exact source",
 )
 QUALIFICATION_JOB_STEPS = (
-    "Check out the exact candidate source",
+    "Check out workflow product source",
+    "Require exact product workflow commit",
     "Set up exact native Python",
     "Install pinned native qualification tools",
     "Require the canonical pure-Python wheel digest",
@@ -95,8 +97,10 @@ QUALIFICATION_JOB_STEPS = (
     "Exercise the installed synthetic scenario seam",
 )
 DOCUMENTATION_JOB_STEPS = (
-    "Check out exact product source",
-    "Check out exact documentation source",
+    "Check out workflow product source",
+    "Require exact product workflow commit",
+    "Check out canonical documentation source",
+    "Require exact documentation commit",
     "Set up documentation Node",
     "Set up documentation Python",
     "Install pinned documentation tools",

@@ -100,13 +100,15 @@ authorize any tag, GitHub Release, or package publication.
 ### Publication-free candidate qualification
 
 Candidate qualification is validation-only. The read-only
-`candidate-qualification.yml` workflow binds an exact product commit, exact
-`djsupport-docs` commit, expected package version, changelog heading, pinned
-build tools, all 25 qualified APSW native cells, reproducible DJ Support wheel
-identity, installed synthetic checks, and documentation validation into one
-path-free evidence document. Finalization consumes the completed public
-workflow job and step observations; missing, failed, or duplicate observations
-fail closed instead of being inferred as passing.
+`candidate-qualification.yml` workflow binds its selected workflow ref to the
+exact expected product commit, and binds the canonical `djsupport-docs` `main`
+checkout to the exact expected documentation commit. It then binds the expected
+package version, changelog heading, pinned build tools, all 25 qualified APSW
+native cells, reproducible DJ Support wheel identity, installed synthetic
+checks, and documentation validation into one path-free evidence document.
+Dispatch inputs never select executable checkout refs. Finalization consumes
+the completed public workflow job and step observations; missing, failed, or
+duplicate observations fail closed instead of being inferred as passing.
 
 The harness does not add `.release-notes/next-version`, does not consume release
 records, does not change `pyproject.toml`, and does not upload its source archive
