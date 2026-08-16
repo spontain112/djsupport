@@ -159,7 +159,7 @@ class QualificationLinkRequest(BaseModel):
     authorize_private_source: bool = False
 
 
-QUALIFICATION_PRIVACY_HEADERS = {
+PRIVATE_SOURCE_PRIVACY_HEADERS = {
     "Cache-Control": "private, no-store",
     "Content-Security-Policy": (
         "default-src 'self'; script-src 'self' 'unsafe-inline'; "
@@ -308,14 +308,15 @@ def create_app(
         inspect_readiness = first_transfer_readiness
 
     @web_app.middleware("http")
-    async def qualification_privacy(request: FastAPIRequest, call_next):
-        qualification_route = (
-            request.url.path.startswith("/rekordbox/qualification/")
-            or request.url.path.startswith("/qualification/")
+    async def private_source_privacy(request: FastAPIRequest, call_next):
+        request_path = request.scope["path"]
+        private_source_route = (
+            request_path.startswith("/rekordbox/")
+            or request_path.startswith("/qualification/")
         )
-        if qualification_route:
+        if private_source_route:
             try:
-                require_qualification_loopback(request)
+                require_private_source_loopback(request)
             except HTTPException as exc:
                 response = JSONResponse(
                     status_code=exc.status_code,
@@ -323,10 +324,8 @@ def create_app(
                 )
             else:
                 response = await call_next(request)
-            privacy_headers = dict(QUALIFICATION_PRIVACY_HEADERS)
-            if request.url.path.startswith(
-                "/rekordbox/qualification/media/"
-            ):
+            privacy_headers = dict(PRIVATE_SOURCE_PRIVACY_HEADERS)
+            if request_path.startswith("/rekordbox/qualification/media/"):
                 privacy_headers["Content-Security-Policy"] = (
                     "default-src 'none'; media-src 'self'"
                 )
@@ -345,7 +344,7 @@ def create_app(
         if not token or mgr.is_token_expired(token):
             raise HTTPException(status_code=401, detail="Not authenticated with Spotify")
 
-    def require_qualification_loopback(request: FastAPIRequest) -> None:
+    def require_private_source_loopback(request: FastAPIRequest) -> None:
         peer = request.client.host if request.client else ""
 
         def is_loopback(value: str, *, allow_test: bool = False) -> bool:
@@ -360,7 +359,7 @@ def create_app(
         if not (peer_is_test or is_loopback(peer)):
             raise HTTPException(
                 status_code=403,
-                detail="Qualification Workspace is available only on loopback",
+                detail="Private-source routes are available only on loopback",
             )
         host_header = request.headers.get("host", "")
         try:
@@ -370,22 +369,19 @@ def create_app(
         if not is_loopback(request_host, allow_test=peer_is_test):
             raise HTTPException(
                 status_code=403,
-                detail="Qualification Workspace requires a loopback Host",
+                detail="Private-source routes require a loopback Host",
             )
-        if request.method not in {"GET", "HEAD", "OPTIONS"}:
-            origin = request.headers.get("origin")
-            if origin:
-                try:
-                    origin_host = urlparse(origin).hostname or ""
-                except ValueError:
-                    origin_host = ""
-                if not is_loopback(origin_host, allow_test=peer_is_test):
-                    raise HTTPException(
-                        status_code=403,
-                        detail=(
-                            "Qualification Workspace requires a loopback Origin"
-                        ),
-                    )
+        origin = request.headers.get("origin")
+        if origin:
+            try:
+                origin_host = urlparse(origin).hostname or ""
+            except ValueError:
+                origin_host = ""
+            if not is_loopback(origin_host, allow_test=peer_is_test):
+                raise HTTPException(
+                    status_code=403,
+                    detail="Private-source routes require a loopback Origin",
+                )
 
     def transfer_for(transfer_id: str, request: SyncRequest | None = None):
         probe_request = request or SyncRequest(
@@ -726,7 +722,7 @@ def create_app(
     def create_qualification_draft(
         request: FastAPIRequest, payload: QualificationDraftRequest,
     ):
-        require_qualification_loopback(request)
+        require_private_source_loopback(request)
         if not payload.authorize_private_source:
             raise HTTPException(
                 status_code=403, detail="Private source authorization required",
@@ -760,7 +756,7 @@ def create_app(
         request: FastAPIRequest,
         authorize_private_source: bool = False,
     ):
-        require_qualification_loopback(request)
+        require_private_source_loopback(request)
         if not authorize_private_source:
             raise HTTPException(
                 status_code=403, detail="Private source authorization required",
@@ -783,7 +779,7 @@ def create_app(
         request: FastAPIRequest,
         payload: QualificationDecisionRequest,
     ):
-        require_qualification_loopback(request)
+        require_private_source_loopback(request)
         if not payload.authorize_private_source:
             raise HTTPException(
                 status_code=403, detail="Private source authorization required",
@@ -813,7 +809,7 @@ def create_app(
         request: FastAPIRequest,
         payload: QualificationAuthorizationRequest,
     ):
-        require_qualification_loopback(request)
+        require_private_source_loopback(request)
         if not payload.authorize_private_source:
             raise HTTPException(
                 status_code=403, detail="Private source authorization required",
@@ -851,7 +847,7 @@ def create_app(
         request: FastAPIRequest,
         payload: QualificationAuthorizationRequest,
     ):
-        require_qualification_loopback(request)
+        require_private_source_loopback(request)
         if not payload.authorize_private_source:
             raise HTTPException(
                 status_code=403, detail="Private source authorization required",
@@ -891,7 +887,7 @@ def create_app(
         request: FastAPIRequest,
         payload: QualificationAuthorizationRequest,
     ):
-        require_qualification_loopback(request)
+        require_private_source_loopback(request)
         if not payload.authorize_private_source:
             raise HTTPException(
                 status_code=403, detail="Private source authorization required",
@@ -928,7 +924,7 @@ def create_app(
         request: FastAPIRequest,
         payload: QualificationLinkRequest,
     ):
-        require_qualification_loopback(request)
+        require_private_source_loopback(request)
         if not payload.authorize_private_source:
             raise HTTPException(
                 status_code=403, detail="Private source authorization required",
@@ -956,7 +952,7 @@ def create_app(
         request: FastAPIRequest,
         payload: QualificationAuthorizationRequest,
     ):
-        require_qualification_loopback(request)
+        require_private_source_loopback(request)
         if not payload.authorize_private_source:
             raise HTTPException(
                 status_code=403, detail="Private source authorization required",
@@ -978,7 +974,7 @@ def create_app(
         request: FastAPIRequest,
         payload: QualificationAuthorizationRequest,
     ):
-        require_qualification_loopback(request)
+        require_private_source_loopback(request)
         if not payload.authorize_private_source:
             raise HTTPException(
                 status_code=403, detail="Private source authorization required",
@@ -1005,7 +1001,7 @@ def create_app(
         request: FastAPIRequest,
         payload: QualificationAuthorizationRequest,
     ):
-        require_qualification_loopback(request)
+        require_private_source_loopback(request)
         if not payload.authorize_private_source:
             raise HTTPException(
                 status_code=403, detail="Private source authorization required",
@@ -1044,8 +1040,8 @@ def create_app(
 
     @web_app.get("/rekordbox/qualification/media/{handle}")
     def qualification_media(handle: str, request: FastAPIRequest):
-        require_qualification_loopback(request)
-        privacy_headers = QUALIFICATION_PRIVACY_HEADERS
+        require_private_source_loopback(request)
+        privacy_headers = PRIVATE_SOURCE_PRIVACY_HEADERS
         try:
             stream = audition.stream(handle, request.headers.get("range"))
         except AuditionHandleUnavailable as exc:
@@ -1132,7 +1128,7 @@ def create_app(
 
     @web_app.get("/qualification/{draft_id}")
     def qualification_workspace(draft_id: str, request: FastAPIRequest):
-        require_qualification_loopback(request)
+        require_private_source_loopback(request)
         del draft_id
         return HTMLResponse((STATIC_DIR / "index.html").read_text())
 

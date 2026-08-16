@@ -95,6 +95,55 @@ def test_first_transfer_web_route_is_a_thin_agent_contract_rendering():
     assert "Private/Selection" not in response.text
 
 
+def test_first_transfer_rejects_nonlocal_context_before_inspecting_a_path():
+    inspected_paths = []
+
+    def inspect_readiness(path, authorized):
+        inspected_paths.append((path, authorized))
+        return FirstTransferReadiness(False, False, True, True, path)
+
+    web = create_app(first_transfer_readiness=inspect_readiness)
+    remote_client = TestClient(
+        web,
+        base_url="http://127.0.0.1",
+        client=("198.51.100.23", 50000),
+    )
+    local_client = TestClient(web)
+    payload = {"xml_path": "/synthetic/outside.xml"}
+
+    responses = (
+        remote_client.post("/rekordbox/first-transfer", json=payload),
+        remote_client.post(
+            "/rekordbox/first-transfer",
+            headers={"Host": "attacker.example/escape"},
+            json=payload,
+        ),
+        local_client.post(
+            "/rekordbox/first-transfer",
+            headers={"Host": "attacker.example"},
+            json=payload,
+        ),
+        local_client.post(
+            "/rekordbox/first-transfer",
+            headers={"Origin": "https://attacker.example"},
+            json=payload,
+        ),
+        local_client.get(
+            "/qualification/synthetic-draft",
+            headers={"Origin": "https://attacker.example"},
+        ),
+    )
+
+    assert [response.status_code for response in responses] == [
+        403,
+        403,
+        403,
+        403,
+        403,
+    ]
+    assert inspected_paths == []
+
+
 def test_first_transfer_web_route_ignores_caller_asserted_readiness():
     transfer = MagicMock()
     web = create_app(
@@ -778,7 +827,9 @@ class TestAuthEndpoints:
         mock_mgr_fn.return_value = mgr
         res = client.get("/auth/login", follow_redirects=False)
         assert res.status_code == 307
-        assert "spotify.com" in res.headers["location"]
+        assert res.headers["location"] == (
+            "https://accounts.spotify.com/authorize?..."
+        )
 
     @patch("djsupport.web._auth_manager")
     def test_auth_callback_success(self, mock_mgr_fn):
