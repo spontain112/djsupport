@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Security
 
+- Private Rekordbox web routes now require loopback peer, Host, and Origin checks before inspecting user-selected local paths.
 - Unsupported matching-knowledge schemas fail closed without rewriting private state, and changed Preview/publication scope cannot resume an earlier Batch.
 
 ### Fixed
