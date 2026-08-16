@@ -44,6 +44,7 @@ def active_upstream_manifest():
         "entries": [
             {
                 "evidence_id": "apsw/3.53.4.0/test-wheel",
+                "artifact_id": "apsw/3.53.4.0/test-wheel",
                 "classification": "qualified_upstream",
                 "status": "active",
                 "selectors": {
@@ -991,7 +992,7 @@ class TestRuntimeGate:
 class TestBindingArchitecture:
     def test_operational_store_has_one_direct_sqlite_binding_import(self):
         repository_root = Path(__file__).parents[1]
-        package_root = repository_root / "djsupport" / "operational_store"
+        package_root = repository_root / "djsupport"
         apsw_importers = set()
         sqlite3_importers = set()
 

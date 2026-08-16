@@ -28,7 +28,7 @@ every flag.
 djsupport/
   transfer.py    Durable Transfer policy, planning, checkpoints, and publication
   runtime.py     Private production assembly for Transfer client adapters
-  operational_store/ Fail-closed selected-binding qualification before store access
+  operational_store/ Fail-closed binding, artifact, and runtime qualification
   agent.py       Versioned, harness-neutral Transfer contract rendering
   readiness.py   Shared presence-only readiness for CLI and web adapters
   cli.py         Thin Click command-line adapter
@@ -49,6 +49,7 @@ djsupport/
   local_audio.py Optional local-only Chromaprint boundary
   local_audition.py Process-local, path-redacted selected-media boundary
 tests/           Offline behavior, adapter, migration, privacy, and package tests
+scripts/sqlite_runtime_delivery.py Binary-only clean-install/provenance gate
 docs/adr/        Architecture decisions
 docs/plans/      Product roadmap and retained implementation history
 docs/research/   Durable research findings

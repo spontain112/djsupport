@@ -132,6 +132,7 @@
       ],
       "required": [
         "evidence_id",
+        "artifact_id",
         "classification",
         "status",
         "selectors",
@@ -143,6 +144,7 @@
       ],
       "properties": {
         "evidence_id": {"$ref": "#/$defs/safe_identity"},
+        "artifact_id": {"$ref": "#/$defs/safe_identity"},
         "classification": {
           "enum": [
             "qualified_upstream",

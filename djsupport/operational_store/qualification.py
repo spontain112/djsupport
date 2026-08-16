@@ -73,7 +73,7 @@ class RuntimeFacts:
     os_product_type: str
     architecture: str
 
-    def _selectors(self) -> dict[str, object]:
+    def selectors(self) -> dict[str, object]:
         return {
             "binding": {
                 "distribution": self.binding_distribution,
@@ -191,7 +191,7 @@ class SQLiteRuntimeQualification:
                 QualificationState.UNQUALIFIED_UNKNOWN,
                 "binding_unapproved",
             )
-        selectors = facts._selectors()
+        selectors = facts.selectors()
         entries = self._manifest.get("entries", [])
         near_miss_reason = None
         if isinstance(entries, list):
