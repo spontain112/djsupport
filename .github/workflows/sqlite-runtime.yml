@@ -157,7 +157,7 @@ jobs:
           "build==1.3.0"
           "jsonschema==4.26.0"
           "pypi-attestations==0.0.30"
-      - name: Collect binary provenance and loaded-runtime evidence
+      - name: Verify binary provenance and loaded-runtime admission
         env:
           DJ_SUPPORT_RUNNER_LABEL: ${{ matrix.runner }}
-        run: python scripts/sqlite_runtime_delivery.py collect
+        run: python scripts/sqlite_runtime_delivery.py verify

@@ -4,9 +4,10 @@
 from __future__ import annotations
 
 import argparse
+from functools import lru_cache
 import json
 import os
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import subprocess
 import sys
 import tarfile
@@ -32,10 +33,39 @@ APSW_REQUIREMENT = "apsw==3.53.4.0"
 APSW_REPOSITORY = "https://github.com/rogerbinns/apsw"
 NATIVE_SUFFIXES = (".dylib", ".dll", ".pyd", ".so")
 PRIVATE_SUFFIXES = (
+    ".db",
+    ".sqlite",
     ".sqlite3",
     ".sqlite3-journal",
     ".sqlite3-shm",
     ".sqlite3-wal",
+)
+PRIVATE_MEMBER_NAMES = frozenset(
+    {
+        "backup-manifest.json",
+        "config.json",
+        "foundation-migration.json",
+        "legacy-migration.json",
+        "matching-knowledge.json",
+        "publication-manifests.json",
+        "publication-manifests.transfers.json",
+        "transfers.json",
+    }
+)
+PRIVATE_COMPONENT_PREFIXES = (
+    ".djsupport_",
+    "djsupport-analytics",
+    "djsupport-backup-",
+    "djsupport-diagnostics",
+    "djsupport-migration-",
+    "djsupport-operational-events",
+    "djsupport-query-export",
+    "djsupport-restore-",
+    "djsupport-rollback-",
+    "djsupport-snapshot-",
+    "local-regression",
+    "matching-regression",
+    "playlist-state",
 )
 
 
@@ -206,23 +236,26 @@ def _build_and_inspect(destination: Path) -> Path:
 
 
 def _inspect_wheel(path: Path) -> None:
+    tracked = _tracked_repository_files()
     with zipfile.ZipFile(path) as archive:
-        for name in archive.namelist():
+        for member in archive.infolist():
+            name = member.filename
             _safe_archive_name(name)
-            lowered = name.casefold()
-            if lowered.endswith(PRIVATE_SUFFIXES):
+            if member.is_dir():
+                continue
+            relative = PurePosixPath(name).as_posix()
+            _inspect_member_name(relative)
+            generated = ".dist-info/" in relative
+            if relative not in tracked and not generated:
                 raise SystemExit(
-                    "sqlite_runtime_delivery_failed:private_package_member"
+                    "sqlite_runtime_delivery_failed:unexpected_package_member"
                 )
-            if name.startswith("djsupport/") and lowered.endswith(
-                NATIVE_SUFFIXES
-            ):
-                raise SystemExit(
-                    "sqlite_runtime_delivery_failed:unexpected_native_member"
-                )
+            with archive.open(member) as source:
+                _reject_build_root(source.read())
 
 
 def _inspect_source(path: Path) -> None:
+    tracked = _tracked_repository_files()
     with tarfile.open(path, "r:gz") as archive:
         for member in archive.getmembers():
             _safe_archive_name(member.name)
@@ -230,24 +263,94 @@ def _inspect_source(path: Path) -> None:
                 raise SystemExit(
                     "sqlite_runtime_delivery_failed:unsafe_source_member"
                 )
-            lowered = member.name.casefold()
-            if lowered.endswith(PRIVATE_SUFFIXES):
-                raise SystemExit(
-                    "sqlite_runtime_delivery_failed:private_package_member"
-                )
             parts = PurePosixPath(member.name).parts
             relative = "/".join(parts[1:])
-            if relative.startswith("djsupport/") and lowered.endswith(
-                NATIVE_SUFFIXES
-            ):
+            if member.isdir():
+                continue
+            _inspect_member_name(relative)
+            generated = (
+                relative == "PKG-INFO"
+                or relative == "setup.cfg"
+                or relative.startswith("djsupport.egg-info/")
+            )
+            if relative not in tracked and not generated:
                 raise SystemExit(
-                    "sqlite_runtime_delivery_failed:unexpected_native_member"
+                    "sqlite_runtime_delivery_failed:unexpected_package_member"
                 )
+            source = archive.extractfile(member)
+            if source is None:
+                raise SystemExit(
+                    "sqlite_runtime_delivery_failed:unsafe_source_member"
+                )
+            _reject_build_root(source.read())
+
+
+def _inspect_member_name(name: str) -> None:
+    lowered = name.casefold()
+    parts = PurePosixPath(lowered).parts
+    basename = parts[-1] if parts else ""
+    private_component = any(
+        part == "reports"
+        or part.startswith(PRIVATE_COMPONENT_PREFIXES)
+        for part in parts
+    )
+    private_name = (
+        basename in PRIVATE_MEMBER_NAMES
+        or "credential" in basename
+        or basename.startswith(".env")
+        or basename.endswith(PRIVATE_SUFFIXES)
+        or ".sqlite3-" in basename
+        or private_component
+    )
+    if private_name:
+        raise SystemExit(
+            "sqlite_runtime_delivery_failed:private_package_member"
+        )
+    if lowered.endswith(NATIVE_SUFFIXES):
+        raise SystemExit(
+            "sqlite_runtime_delivery_failed:unexpected_native_member"
+        )
+
+
+def _reject_build_root(payload: bytes) -> None:
+    repository_path = str(REPOSITORY_ROOT)
+    markers = {
+        repository_path.encode("utf-8"),
+        repository_path.replace("\\", "/").encode("utf-8"),
+        repository_path.replace("/", "\\").encode("utf-8"),
+    }
+    if any(marker and marker in payload for marker in markers):
+        raise SystemExit(
+            "sqlite_runtime_delivery_failed:local_path_in_package"
+        )
+
+
+@lru_cache(maxsize=1)
+def _tracked_repository_files() -> frozenset[str]:
+    try:
+        result = subprocess.run(
+            ["git", "ls-files"],
+            cwd=REPOSITORY_ROOT,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        raise SystemExit(
+            "sqlite_runtime_delivery_failed:tracked_source_unavailable"
+        ) from None
+    return frozenset(result.stdout.splitlines())
 
 
 def _safe_archive_name(name: str) -> None:
-    path = PurePosixPath(name)
-    if path.is_absolute() or ".." in path.parts:
+    posix_path = PurePosixPath(name)
+    windows_path = PureWindowsPath(name)
+    if (
+        posix_path.is_absolute()
+        or windows_path.is_absolute()
+        or ".." in posix_path.parts
+        or ".." in windows_path.parts
+    ):
         raise SystemExit("sqlite_runtime_delivery_failed:unsafe_package_path")
 
 
