@@ -309,9 +309,10 @@ def create_app(
 
     @web_app.middleware("http")
     async def private_source_privacy(request: FastAPIRequest, call_next):
+        request_path = request.scope["path"]
         private_source_route = (
-            request.url.path.startswith("/rekordbox/")
-            or request.url.path.startswith("/qualification/")
+            request_path.startswith("/rekordbox/")
+            or request_path.startswith("/qualification/")
         )
         if private_source_route:
             try:
@@ -324,9 +325,7 @@ def create_app(
             else:
                 response = await call_next(request)
             privacy_headers = dict(PRIVATE_SOURCE_PRIVACY_HEADERS)
-            if request.url.path.startswith(
-                "/rekordbox/qualification/media/"
-            ):
+            if request_path.startswith("/rekordbox/qualification/media/"):
                 privacy_headers["Content-Security-Policy"] = (
                     "default-src 'none'; media-src 'self'"
                 )
