@@ -55,13 +55,25 @@ def test_canonical_documentation_surfaces_are_navigable() -> None:
         assert f"({Path(filename).name})" in index
 
 
-def test_documentation_has_rendered_and_plain_text_architecture_views() -> None:
+def test_documentation_has_portable_and_detailed_architecture_views() -> None:
     readme = _read("README.md")
     architecture = _read("docs/architecture.md")
     domain_model = _read("docs/domain-model.md")
     lifecycles = _read("docs/lifecycles.md")
 
-    assert "```mermaid\nflowchart" in readme
+    overview = readme.split("### How it fits together", 1)[1].split(
+        "## Requirements", 1
+    )[0]
+    assert "```mermaid" not in overview
+    for relationship in (
+        "**Sources → Transfer:**",
+        "**Clients → Transfer:**",
+        "**Transfer → private local state:**",
+        "**Transfer → Spotify:**",
+        "**Spotify → Provisional Playlist → human review:**",
+        "**Approval → private local state:**",
+    ):
+        assert relationship in overview
     assert "```mermaid\nflowchart" in architecture
     assert "```text" in architecture
     assert "```mermaid\nerDiagram" in domain_model
@@ -208,7 +220,10 @@ def test_client_and_abandonment_docs_follow_canonical_behavior() -> None:
     architecture = _read("docs/architecture.md")
     lifecycles = _read("docs/lifecycles.md")
 
-    assert 'A["Agent Client"]' in readme
+    assert (
+        "the CLI, local web interface, and Agent Client all use that same "
+        "policy authority."
+    ) in " ".join(readme.split())
     assert "AI agent" not in architecture
     assert "RetainingPublication --> Abandoned" in lifecycles
     assert "does not infer playlist deletion or Approval" in " ".join(
