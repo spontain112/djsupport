@@ -18,19 +18,20 @@ Every client uses the same public Transfer policy. Source data enters only for
 an explicitly selected operation; retained knowledge and recovery state stay in
 private local storage; Spotify changes require separate authority.
 
-```mermaid
-flowchart LR
-    R["Rekordbox XML"] --> T
-    B["Beatport chart or label"] --> T
-    C["CLI"] --> T["Transfer<br/>policy authority"]
-    W["Local web interface"] --> T
-    A["Agent Client"] --> T
-    T --> L["Private local state"]
-    T --> S["Spotify"]
-    S --> P["Provisional Playlist"]
-    P --> H["Human review and Approval"]
-    H --> L
-```
+![DJ Support authority architecture: selected sources and clients enter Transfer, Spotify effects remain reviewable, and only human review creates playlist-scoped Approval](docs/assets/djsupport-architecture-mobile.svg)
+
+- **Sources → Transfer:** Rekordbox XML or an explicitly selected Beatport
+  chart or label enters the Transfer policy.
+- **Clients → Transfer:** the CLI, local web interface, and Agent Client all
+  use that same policy authority.
+- **Transfer → private local state:** retained knowledge and recovery state
+  stay on the user's device.
+- **Transfer → Spotify:** Spotify changes happen only with separate explicit
+  authority.
+- **Spotify → Provisional Playlist → human review:** published results remain
+  reviewable before Approval.
+- **Approval → private local state:** accepted matches become reusable local
+  matching knowledge.
 
 This view intentionally omits recovery states and internal adapters. See the
 [architecture documentation](docs/architecture.md) for the full module map,
