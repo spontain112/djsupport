@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-18
+
+### Changed
+
+- Clarify the documented 0.7 storage plan: APSW 3.53.4.0 will be the sole production SQLite binding, and unsupported runtime, artifact, or platform combinations will fail closed instead of silently falling back.
+- Document the accepted single Operational Store direction and extend repository privacy guardrails to the planned SQLite family, backups, staging, diagnostics, exports, and retained legacy state.
+- Keep CLI and Agent Client production wiring consistent through one private Runtime Assembly without changing Transfer behavior or local storage formats.
+- Keep web, CLI, and Agent Client flows on one production runtime path, including fresh Transfer state when multiple clients use the same private store.
+
+### Added
+
+- Add a read-only, publication-free candidate qualification workflow that binds exact source, package, native APSW, documentation, and synthetic check evidence.
+- Scan Python and GitHub Actions changes with pinned, least-privilege CodeQL analysis on pull requests, main, and a weekly schedule.
+- Credit the open-source runtime dependencies, optional web stack, development tooling, and independent local tools that make DJ Support possible.
+- Document supported versions, private vulnerability reporting, sensitive-data handling, report scope, and safe coordinated disclosure.
+- Deliver the pinned APSW runtime through exact binary provenance and native qualification gates.
+- Add the fail-closed runtime qualification foundation for the planned 0.7 Operational Store, with path-free diagnostics and no admitted native artifact until its exact runtime and provenance evidence is reviewed.
+
+### Fixed
+
+- Render the README architecture flowchart as a mobile-friendly SVG with a text fallback instead of exposed Mermaid source.
+
 ## [0.6.0] - 2026-08-15
 
 ### Added
