@@ -18,6 +18,8 @@ Every client uses the same public Transfer policy. Source data enters only for
 an explicitly selected operation; retained knowledge and recovery state stay in
 private local storage; Spotify changes require separate authority.
 
+![DJ Support authority architecture: selected sources and clients enter Transfer, Spotify effects remain reviewable, and only human review creates playlist-scoped Approval](docs/assets/djsupport-architecture-mobile.svg)
+
 - **Sources → Transfer:** Rekordbox XML or an explicitly selected Beatport
   chart or label enters the Transfer policy.
 - **Clients → Transfer:** the CLI, local web interface, and Agent Client all

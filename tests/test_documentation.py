@@ -65,6 +65,7 @@ def test_documentation_has_portable_and_detailed_architecture_views() -> None:
         "## Requirements", 1
     )[0]
     assert "```mermaid" not in overview
+    assert "(docs/assets/djsupport-architecture-mobile.svg)" in overview
     for relationship in (
         "**Sources → Transfer:**",
         "**Clients → Transfer:**",
@@ -82,6 +83,7 @@ def test_documentation_has_portable_and_detailed_architecture_views() -> None:
     assert "## Transition tables" in lifecycles
 
     portrait = DOCS / "assets" / "djsupport-architecture-mobile.svg"
+    assert "(docs/assets/djsupport-architecture-mobile.svg)" in readme
     assert "(assets/djsupport-architecture-mobile.svg)" in architecture
     assert portrait.read_text(encoding="utf-8").startswith("<svg ")
 

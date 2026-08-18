@@ -3,5 +3,5 @@ bump: patch
 section: Fixed
 ---
 
-Make the README architecture overview readable on renderers that do not
-support Mermaid diagrams.
+Render the README architecture flowchart as a mobile-friendly SVG with a text
+fallback instead of exposed Mermaid source.
