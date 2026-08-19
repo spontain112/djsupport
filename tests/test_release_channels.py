@@ -56,19 +56,40 @@ def test_security_policy_uses_private_reporting_and_is_in_source_archive():
     assert "include SECURITY.md" in manifest
 
 
-def test_source_checkout_uses_a_supported_release_version():
+def test_source_checkout_uses_the_next_development_version():
     with (REPOSITORY_ROOT / "pyproject.toml").open("rb") as pyproject_file:
         project = tomllib.load(pyproject_file)["project"]
 
-    assert re.fullmatch(r"\d+\.\d+\.\d+(?:(?:\.dev|rc)\d+)?", project["version"])
+    assert project["version"] == "0.7.0.dev0"
 
 
-def test_documented_latest_stable_release_differs_from_source_version():
+def test_documented_stable_channel_uses_exact_final_release():
     readme = (REPOSITORY_ROOT / "README.md").read_text()
     with (REPOSITORY_ROOT / "pyproject.toml").open("rb") as pyproject_file:
         source_version = tomllib.load(pyproject_file)["project"]["version"]
 
-    assert "v0.5.0" in readme and source_version != "0.5.0"
+    stable_section = readme.split("### Stable — recommended", 1)[1].split(
+        "### Preview/testing", 1
+    )[0]
+    stable_version = "0.6.0"
+    stable_tag = f"v{stable_version}"
+    repository_url = "https://github.com/spontain112/djsupport"
+    release_url = f"{repository_url}/releases/tag/{stable_tag}"
+    archive_url = f"{repository_url}/archive/refs/tags/{stable_tag}.zip"
+
+    assert (
+        f"[Latest final GitHub Release]({repository_url}/releases/latest)"
+    ) in stable_section
+    assert f"[`{stable_tag}`]({release_url})" in stable_section
+    for requirement in ("djsupport", "djsupport[web]"):
+        assert (
+            'python3 -m pip install --only-binary=apsw '
+            f'"{requirement} @ {archive_url}"'
+        ) in stable_section
+    assert set(re.findall(r"v\d+\.\d+\.\d+(?:rc\d+)?", stable_section)) == {
+        stable_tag
+    }
+    assert source_version != stable_version
 
 
 def test_manual_release_checklist_separates_validation_from_publication():
