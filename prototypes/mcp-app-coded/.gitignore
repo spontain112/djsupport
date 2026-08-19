@@ -1,0 +1,6 @@
+# Installed JavaScript dependencies are reproducible from package-lock.json.
+node_modules/
+
+# Local process output is diagnostic only. The six reviewed PNG captures and
+# their observation manifest remain tracked evidence on this prototype branch.
+*.log

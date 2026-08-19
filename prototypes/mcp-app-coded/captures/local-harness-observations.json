@@ -1,0 +1,58 @@
+{
+  "classification": "concept",
+  "evidenceSource": "local MCP Apps host harness, not ChatGPT",
+  "externalNetworkRequests": 0,
+  "observedOrigins": [
+    "loopback harness origin"
+  ],
+  "observations": [
+    {
+      "screen": "choose_file",
+      "viewportWidth": 720,
+      "iframeWidth": 720,
+      "clientWidth": 720,
+      "scrollWidth": 720,
+      "scrollHeight": 317
+    },
+    {
+      "screen": "preparing",
+      "viewportWidth": 720,
+      "iframeWidth": 720,
+      "clientWidth": 720,
+      "scrollWidth": 720,
+      "scrollHeight": 298
+    },
+    {
+      "screen": "choose_playlist",
+      "viewportWidth": 920,
+      "iframeWidth": 920,
+      "clientWidth": 920,
+      "scrollWidth": 920,
+      "scrollHeight": 617
+    },
+    {
+      "screen": "confirm_check",
+      "viewportWidth": 720,
+      "iframeWidth": 720,
+      "clientWidth": 720,
+      "scrollWidth": 720,
+      "scrollHeight": 367
+    },
+    {
+      "screen": "match_results",
+      "viewportWidth": 720,
+      "iframeWidth": 720,
+      "clientWidth": 720,
+      "scrollWidth": 720,
+      "scrollHeight": 360
+    },
+    {
+      "screen": "match_results_reduced_width",
+      "viewportWidth": 320,
+      "iframeWidth": 320,
+      "clientWidth": 320,
+      "scrollWidth": 320,
+      "scrollHeight": 577
+    }
+  ]
+}

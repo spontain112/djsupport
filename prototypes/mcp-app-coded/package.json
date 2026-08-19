@@ -1,0 +1,27 @@
+{
+  "name": "djsupport-mcp-app-coded-prototype",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Permanent throwaway MCP Apps host-validation prototype for DJ Support issue 185",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test/*.test.mjs",
+    "test:mcp": "node --test test/mcp.test.mjs",
+    "test:browser": "node --test test/browser.test.mjs",
+    "check": "node --check server.mjs && node --check component.mjs && node --check scripts/capture.mjs && node --check test/mcp.test.mjs && node --check test/browser.test.mjs && node --test test/*.test.mjs",
+    "capture": "node scripts/capture.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "1.7.5",
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "playwright-core": "1.62.1"
+  }
+}
