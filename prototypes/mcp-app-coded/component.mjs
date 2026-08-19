@@ -363,12 +363,11 @@ function bootComponent(protocolVersion) {
         name: "advance_synthetic_playlist_check",
         arguments: args,
       });
+      busy = false;
       acceptToolResult(result);
     } catch {
-      errorMessage = "DJ Support couldn’t continue the synthetic check. Try the action again.";
-      render(false);
-    } finally {
       busy = false;
+      errorMessage = "DJ Support couldn’t continue the synthetic check. Try the action again.";
       render(false);
     }
   }
@@ -377,6 +376,7 @@ function bootComponent(protocolVersion) {
     if (busy) return;
     busy = true;
     errorMessage = null;
+    let modeChanged = false;
     render(false);
     try {
       const result = await request("ui/request-display-mode", { mode });
@@ -385,11 +385,13 @@ function bootComponent(protocolVersion) {
       }
       hostContext = { ...hostContext, displayMode: result.mode };
       document.documentElement.dataset.displayMode = result.mode;
+      modeChanged = true;
     } catch {
       errorMessage = "This host couldn’t change the component size. The synthetic journey stayed unchanged.";
     } finally {
       busy = false;
       render(false);
+      if (modeChanged) root.querySelector('[data-focus-key="display-mode"]')?.focus({ preventScroll: true });
     }
   }
 
@@ -441,6 +443,9 @@ function bootComponent(protocolVersion) {
           selectedPlaylistId = playlist.id;
           window.openai?.setWidgetState?.({ privateContent: { selectedPlaylistId } });
           render(false);
+          [...root.querySelectorAll('input[name="playlist"]')]
+            .find((input) => input.value === playlist.id)
+            ?.focus({ preventScroll: true });
         },
       });
       list.append(node("label", { className: `playlist-row${selected ? " selected" : ""}` }, [
@@ -462,6 +467,7 @@ function bootComponent(protocolVersion) {
         text: hostContext.displayMode === "fullscreen" ? "Use inline view" : "Open larger",
         type: "button",
         disabled: busy,
+        attributes: { "data-focus-key": "display-mode" },
         onClick: () => requestDisplayMode(hostContext.displayMode === "fullscreen" ? "inline" : "fullscreen"),
       })
       : null;

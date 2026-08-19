@@ -67,20 +67,32 @@ describe("MCP Apps bridge component", { skip: !chromePath }, () => {
     assert.ok(fallbackContrast.context >= 4.5);
     assert.ok(fallbackContrast.metadata >= 4.5);
     await app.getByRole("button", { name: "Use synthetic file" }).click();
-    await assert.doesNotReject(() => app.getByRole("heading", { name: "Preparing your playlists" }).waitFor());
+    const preparingHeading = app.getByRole("heading", { name: "Preparing your playlists" });
+    await assert.doesNotReject(() => preparingHeading.waitFor());
+    assert.equal(await preparingHeading.evaluate((node) => node === document.activeElement), true);
     assert.equal(await app.getByText("Found 12 of 12 playlists").count(), 1);
 
     await app.getByRole("button", { name: "Choose a playlist" }).click();
-    await assert.doesNotReject(() => app.getByRole("heading", { name: "Which playlist should we check?" }).waitFor());
+    const playlistHeading = app.getByRole("heading", { name: "Which playlist should we check?" });
+    await assert.doesNotReject(() => playlistHeading.waitFor());
+    assert.equal(await playlistHeading.evaluate((node) => node === document.activeElement), true);
     await app.getByRole("button", { name: "Open larger" }).click();
     assert.equal(await app.locator("html").getAttribute("data-display-mode"), "fullscreen");
-    assert.equal(await app.getByRole("button", { name: "Use inline view" }).count(), 1);
-    await app.getByRole("radio", { name: /Playlist 07/ }).check();
-    await app.getByRole("button", { name: "Check 34 songs" }).click();
+    const inlineModeButton = app.getByRole("button", { name: "Use inline view" });
+    assert.equal(await inlineModeButton.count(), 1);
+    assert.equal(await inlineModeButton.evaluate((node) => node === document.activeElement), true);
+    const playlist11 = app.getByRole("radio", { name: /Playlist 11/ });
+    await playlist11.press("Space");
+    assert.equal(await playlist11.evaluate((node) => node === document.activeElement), true);
+    await app.getByRole("button", { name: "Check 41 songs" }).click();
 
-    await assert.doesNotReject(() => app.getByRole("heading", { name: "Check 34 songs on Spotify?" }).waitFor());
+    const confirmationHeading = app.getByRole("heading", { name: "Check 41 songs on Spotify?" });
+    await assert.doesNotReject(() => confirmationHeading.waitFor());
+    assert.equal(await confirmationHeading.evaluate((node) => node === document.activeElement), true);
     await app.getByRole("button", { name: "Find matches" }).click();
-    await assert.doesNotReject(() => app.getByRole("heading", { name: "Spotify check complete" }).waitFor());
+    const resultsHeading = app.getByRole("heading", { name: "Spotify check complete" });
+    await assert.doesNotReject(() => resultsHeading.waitFor());
+    assert.equal(await resultsHeading.evaluate((node) => node === document.activeElement), true);
 
     assert.equal(await app.getByLabel("28 likely matches", { exact: true }).count(), 1);
     assert.equal(await app.getByLabel("4 need review", { exact: true }).count(), 1);
@@ -117,8 +129,10 @@ describe("MCP Apps bridge component", { skip: !chromePath }, () => {
     await page.goto(`${harnessUrl}?fail=1`);
     const app = page.frameLocator("iframe");
     await app.getByRole("button", { name: "Use synthetic file" }).click();
-    await assert.doesNotReject(() => app.getByRole("alert").waitFor());
-    assert.match(await app.getByRole("alert").innerText(), /couldn’t continue the synthetic check/i);
+    const alert = app.getByRole("alert");
+    await assert.doesNotReject(() => alert.waitFor());
+    assert.match(await alert.innerText(), /couldn’t continue the synthetic check/i);
+    assert.equal(await alert.evaluate((node) => node === document.activeElement), true);
     assert.equal(await app.getByRole("heading", { name: "Start with your Rekordbox playlists" }).count(), 1);
     await page.close();
   });

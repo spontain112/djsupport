@@ -25,7 +25,7 @@ after observing the real supported host through Secure MCP Tunnel.
 | Remount | A newly mounted local harness creates a new journey. Re-rendering an existing live `journeyId` returns its server snapshot. |
 | Navigation | No internal route or nested frame exists. All five surfaces render within one iframe instance. |
 | Presentation modes | The component advertises inline and fullscreen support. The playlist surface requests `ui/request-display-mode`; the harness confirms the request/response and keeps journey authority unchanged. |
-| Keyboard and focus | Native buttons and radios work with Enter/Space; each authoritative screen change focuses its heading; errors focus the alert. |
+| Keyboard and focus | Native buttons and radios work with Enter/Space; each authoritative screen change focuses its heading; playlist and presentation-mode changes retain the active control; errors focus the alert. |
 | Loading, empty, and error | Initial host-result latency shows a waiting state; an empty generated list has an explicit disabled state; tool calls mark the card busy; a rejected call shows a bounded alert without changing the screen. |
 | Reduced width | The 320 px harness keeps content within the iframe; metrics and actions stack vertically. |
 | Network and resources | The component performs no fetch, XHR, WebSocket, image, font, media, or nested-frame request. The diagnostic parent alone calls its loopback server. |
