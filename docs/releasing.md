@@ -49,7 +49,7 @@ authorize any tag, GitHub Release, or package publication.
       the complete offline suite plus compilation:
 
   ```bash
-  python3 -m pip install ".[dev,web]"
+  python3 -m pip install --only-binary=apsw ".[dev,web]"
   python3 -m pytest
   python3 -m compileall -q djsupport tests
   ```
@@ -87,6 +87,7 @@ authorize any tag, GitHub Release, or package publication.
   install_dir="$(mktemp -d)"
   python3 -m venv "$install_dir/venv"
   "$install_dir/venv/bin/python" -m pip install \
+    --only-binary=apsw \
     "$artifact_dir/djsupport-X.Y.Z-py3-none-any.whl"
   "$install_dir/venv/bin/python" -c \
     'from importlib.metadata import version; assert version("djsupport") == "X.Y.Z"; import djsupport'
@@ -95,6 +96,28 @@ authorize any tag, GitHub Release, or package publication.
 
 - [ ] Resolve every validation failure. A skipped or partially run command is not
       a passing release gate.
+
+### Publication-free candidate qualification
+
+Candidate qualification is validation-only. The read-only
+`candidate-qualification.yml` workflow binds its selected workflow ref to the
+exact expected product commit, and binds the canonical `djsupport-docs` `main`
+checkout to the exact expected documentation commit. It then binds the expected
+package version, changelog heading, pinned build tools, all 25 qualified APSW
+native cells, reproducible DJ Support wheel identity, installed synthetic
+checks, and documentation validation into one path-free evidence document.
+Dispatch inputs never select executable checkout refs. Finalization consumes
+the completed public workflow job and step observations; missing, failed, or
+duplicate observations fail closed instead of being inferred as passing.
+
+The harness does not add `.release-notes/next-version`, does not consume release
+records, does not change `pyproject.toml`, and does not upload its source archive
+or wheel. A green evidence document is not authority to create a tag, GitHub
+Release, release asset, package upload, advisory publication, live-provider
+call, or owner-data test. The exact final Operational Store scenarios are added
+only after their owning behavior is merged; the checked-in harness proves the
+same versioned interface now with invented, synthetic facts. Synthetic evidence
+is always labelled non-release and cannot qualify a release candidate.
 
 ## 5. Require green CI on the release commit
 

@@ -34,6 +34,11 @@ def test_direct_tools_are_credited_and_source_archive_includes_acknowledgements(
     assert not [name for name in package_names if name not in credits.lower()]
     assert "Chromaprint" in credits and "beatport-pp-cli" in credits
     assert "[CodeQL](https://github.com/github/codeql-action)" in credits
+    assert "[Node.js](https://github.com/nodejs/node)" in credits
+    assert "[npm CLI](https://github.com/npm/cli)" in credits
+    assert "[setup-node](https://github.com/actions/setup-node)" in credits
+    assert "[Mint CLI](https://github.com/mintlify/mint)" in credits
+    assert "Elastic-2.0" in credits
     assert "issue #133" in credits and "Unverified" in credits
     assert "include THIRD_PARTY.md" in (REPOSITORY_ROOT / "MANIFEST.in").read_text()
     assert (REPOSITORY_ROOT / "THIRD_PARTY.md").is_file()
@@ -88,6 +93,10 @@ def test_manual_release_checklist_separates_validation_from_publication():
         "green CI on the exact final commit",
         "version PR does not authorize tagging or publication",
         "separate gated operations",
+        "Candidate qualification is validation-only",
+        "does not add `.release-notes/next-version`",
+        "does not consume release records",
+        "does not upload its source archive or wheel",
     )
 
     assert not [
@@ -129,7 +138,7 @@ def test_ci_is_a_least_privilege_offline_release_gate():
         step.get("run", "") for step in test_job.get("steps", [])
     )
     for command in (
-        'python -m pip install ".[dev,web]"',
+        'python -m pip install --only-binary=apsw ".[dev,web]"',
         "python -m pytest",
         "python -m compileall -q djsupport tests",
     ):
@@ -144,6 +153,7 @@ def test_ci_is_a_least_privilege_offline_release_gate():
         "python -m tarfile -l",
         "python -m zipfile -l",
         "python -m venv",
+        "python -m pip install --only-binary=apsw dist/*.whl",
         "import djsupport",
         "djsupport --help",
     ):

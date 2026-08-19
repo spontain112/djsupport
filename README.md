@@ -18,19 +18,20 @@ Every client uses the same public Transfer policy. Source data enters only for
 an explicitly selected operation; retained knowledge and recovery state stay in
 private local storage; Spotify changes require separate authority.
 
-```mermaid
-flowchart LR
-    R["Rekordbox XML"] --> T
-    B["Beatport chart or label"] --> T
-    C["CLI"] --> T["Transfer<br/>policy authority"]
-    W["Local web interface"] --> T
-    A["Agent Client"] --> T
-    T --> L["Private local state"]
-    T --> S["Spotify"]
-    S --> P["Provisional Playlist"]
-    P --> H["Human review and Approval"]
-    H --> L
-```
+![DJ Support authority architecture: selected sources and clients enter Transfer, Spotify effects remain reviewable, and only human review creates playlist-scoped Approval](docs/assets/djsupport-architecture-mobile.svg)
+
+- **Sources → Transfer:** Rekordbox XML or an explicitly selected Beatport
+  chart or label enters the Transfer policy.
+- **Clients → Transfer:** the CLI, local web interface, and Agent Client all
+  use that same policy authority.
+- **Transfer → private local state:** retained knowledge and recovery state
+  stay on the user's device.
+- **Transfer → Spotify:** Spotify changes happen only with separate explicit
+  authority.
+- **Spotify → Provisional Playlist → human review:** published results remain
+  reviewable before Approval.
+- **Approval → private local state:** accepted matches become reusable local
+  matching knowledge.
 
 This view intentionally omits recovery states and internal adapters. See the
 [architecture documentation](docs/architecture.md) for the full module map,
@@ -43,7 +44,7 @@ Corrections, or destructive playlist intent.
 
 ## Requirements
 
-- Python 3.10 or newer
+- Python 3.10–3.14
 - A [Spotify Developer](https://developer.spotify.com/dashboard) application
 - A Rekordbox XML export for Rekordbox Transfers
 - Optional: `fpcalc` from Chromaprint for local audio identity
@@ -61,13 +62,13 @@ A newer release marked **Pre-release** is not stable.
 Install the command-line application from that exact final tag:
 
 ```bash
-python3 -m pip install "djsupport @ https://github.com/spontain112/djsupport/archive/refs/tags/v0.6.0.zip"
+python3 -m pip install --only-binary=apsw "djsupport @ https://github.com/spontain112/djsupport/archive/refs/tags/v0.6.0.zip"
 ```
 
 Include the optional local web application with:
 
 ```bash
-python3 -m pip install "djsupport[web] @ https://github.com/spontain112/djsupport/archive/refs/tags/v0.6.0.zip"
+python3 -m pip install --only-binary=apsw "djsupport[web] @ https://github.com/spontain112/djsupport/archive/refs/tags/v0.6.0.zip"
 ```
 
 ### Preview/testing
@@ -78,7 +79,7 @@ Release explicitly marked **Pre-release**. For example, after `v0.7.0rc1`
 exists as a pre-release, its exact tag can be installed with:
 
 ```bash
-python3 -m pip install "djsupport @ https://github.com/spontain112/djsupport/archive/refs/tags/v0.7.0rc1.zip"
+python3 -m pip install --only-binary=apsw "djsupport @ https://github.com/spontain112/djsupport/archive/refs/tags/v0.7.0rc1.zip"
 ```
 
 Expect instability. Before testing, back up DJ Support's local application data
@@ -423,11 +424,11 @@ is `$XDG_DATA_HOME/djsupport` or `~/.local/share/djsupport`.
 - [Maintainer release checklist](docs/releasing.md)
 - [Changelog](CHANGELOG.md)
 - [Security policy](SECURITY.md)
-- [Open-source acknowledgements](THIRD_PARTY.md)
+- [Third-party acknowledgements](THIRD_PARTY.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## License and acknowledgements
 
 DJ Support is available under the [MIT License](LICENSE). It is built with
-open-source projects maintained by people and communities we gratefully credit
-in [Open-source acknowledgements](THIRD_PARTY.md).
+open-source and source-available projects maintained by people and communities
+we gratefully credit in [Third-party acknowledgements](THIRD_PARTY.md).

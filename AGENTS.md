@@ -33,7 +33,7 @@ Generated reports, review CSVs, matching knowledge, playlist state, credentials,
 
 ## Capabilities
 
-- Python 3.10+ package with Click CLI and optional FastAPI web adapter.
+- Python 3.10–3.14 package with Click CLI and optional FastAPI web adapter.
 - Use `pytest` for the fully offline default suite; detailed install, test, and command guidance lives in `CONTRIBUTING.md`.
 - Use the public Transfer interface for high-level behavior. CLI and web remain thin adapters; user-specific state stays in versioned platform application-data storage under ADR-0001.
 - A distributable change includes a `.release-notes/*.md` record. Automation maintains the version PR and consumes records into `CHANGELOG.md`; tags, GitHub Releases, and package publication remain separately gated.
