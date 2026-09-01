@@ -17,7 +17,7 @@ license = "MIT"
 requires-python = ">=3.10,<3.15"
 dependencies = [
     "apsw==3.53.4.0",
-    "spotipy>=2.23",
+    "spotipy==2.26.0",
     "click>=8.0",
     "python-dotenv>=1.0",
     "rapidfuzz>=3.0",
@@ -37,6 +37,11 @@ dev = [
     "httpx>=0.27",
     "PyYAML>=6.0",
     "tomli>=2.0; python_version < '3.11'",
+    "ruff==0.15.8",
+    "mypy==1.19.1",
+    "types-requests==2.33.0.20260712",
+    "types-jsonschema==4.26.0.20260518",
+    "pre-commit>=4.0",
 ]
 
 [project.scripts]
@@ -56,3 +61,59 @@ omit = ["djsupport/cli.py"]
 
 [tool.coverage.report]
 show_missing = true
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+extend-exclude = ["docs", "todos"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["djsupport"]
+warn_unused_configs = true
+warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+module = ["spotipy", "spotipy.*"]
+ignore_missing_imports = true
+
+# Typing-debt ratchet. Every module below is checked for every error code
+# except the ones listed. Remove a code once its errors are fixed; never add
+# a module or code here to make a new change pass.
+[[tool.mypy.overrides]]
+module = "djsupport.transfer"
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "attr-defined",
+    "misc",
+    "return-value",
+    "union-attr",
+]
+
+[[tool.mypy.overrides]]
+module = "djsupport.migration"
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "attr-defined",
+    "call-arg",
+    "call-overload",
+]
+
+[[tool.mypy.overrides]]
+module = "djsupport.beatport_export"
+disable_error_code = [
+    "attr-defined",
+    "index",
+    "misc",
+    "operator",
+    "return-value",
+]
+
+[[tool.mypy.overrides]]
+module = "djsupport.report"
+disable_error_code = ["arg-type"]

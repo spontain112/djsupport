@@ -15,7 +15,10 @@ from pathlib import Path
 from typing import Callable
 
 from djsupport.config import CONFIG_FILENAME, CONFIG_VERSION
-from djsupport.paths import default_app_data_path
+
+# Re-exported: the CLI and tests resolve the application-data root through this
+# module so one monkeypatch point covers backup, restore, and migration.
+from djsupport.paths import default_app_data_path as default_app_data_path
 
 
 BACKUP_VERSION = 1

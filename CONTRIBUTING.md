@@ -17,6 +17,27 @@ pytest
 python3 -m compileall -q djsupport tests
 ```
 
+CI also lints and type-checks every pull request. Run the same checks locally
+with:
+
+```bash
+ruff check djsupport tests scripts
+mypy
+```
+
+Install the local commit hooks once per clone. They run ruff, mypy, and a fast
+pytest subset with the tools from the development extra, so `pyproject.toml`
+remains the single version source:
+
+```bash
+pre-commit install
+```
+
+The hook subset skips the two slowest test files; CI runs the complete suite.
+`pyproject.toml` lists per-module mypy error codes that existing modules still
+fail. That list only shrinks: fix the errors and remove the code, and never add
+a module or code to make a new change pass.
+
 Use `djsupport --help` and `djsupport <command> --help` for the current command
 and option reference. Click declarations in `djsupport/cli.py` are the executable
 source of truth; documentation should explain workflows instead of duplicating
@@ -51,6 +72,7 @@ djsupport/
 tests/           Offline behavior, adapter, migration, privacy, and package tests
 scripts/candidate_qualification.py Publication-free candidate evidence gate
 scripts/sqlite_runtime_delivery.py Binary-only clean-install/provenance gate
+scripts/spotify_live_smoke.py Scheduled, explicitly authorized live Spotify search probe
 scripts/contracts/ Versioned release-tooling input and evidence contracts
 docs/adr/        Architecture decisions
 docs/plans/      Product roadmap and retained implementation history
@@ -133,6 +155,22 @@ This workflow calls Spotify and is not part of the offline test suite. Do not
 attach its output to an issue or pull request unless it has been generalized
 and privacy-reviewed.
 
+## Live smoke check
+
+The `Live Spotify smoke check` workflow runs weekly and on manual dispatch. It
+authenticates with the application client-credentials flow, searches for one
+public catalogue track through `search_track`, and fails when authentication
+or the search boundary breaks. It reads no user account, playlist, or private
+data and prints no token. Maintainers enable it by adding the
+`SPOTIPY_CLIENT_ID` and `SPOTIPY_CLIENT_SECRET` repository secrets; without
+them the run fails with an explicit message. User-scoped playlist operations
+are outside this check because they require interactive consent. Run the same
+probe locally with:
+
+```bash
+python3 scripts/spotify_live_smoke.py
+```
+
 ## Release checks
 
 Run the offline suite with `pytest`. Release preparation also compiles the
@@ -152,6 +190,15 @@ upstream project, state how DJ Support uses it, and verify the SPDX license from
 upstream metadata. Do not copy a third-party license into DJ Support unless its
 distribution terms require that exact notice; package artifacts must retain all
 notices required for content they actually bundle.
+
+Dependabot proposes weekly updates for exact pins in `pyproject.toml` (Spotipy,
+APSW, ruff, mypy, and type stubs) and for the SHA-pinned GitHub Actions. It
+does not propose updates for open ranges such as `click>=8.0`. Every
+Dependabot pull request is reviewed and merged by a maintainer; one that
+changes `pyproject.toml` is a distributable change and needs a
+`.release-notes/*.md` record before the release-record CI job passes. The
+Spotipy pin is exact because it is the live Spotify boundary and its behavior
+changes deserve a reviewed release record.
 
 When a persistent schema changes, keep its reader compatible with documented
 older versions or provide an explicit migration. Add a synthetic backup/restore

@@ -283,7 +283,8 @@ def _load_packaged_json(filename: str) -> dict[str, object]:
     try:
         document = json.loads(
             resources.files("djsupport")
-            .joinpath("contracts", filename)
+            .joinpath("contracts")
+            .joinpath(filename)
             .read_text(encoding="utf-8")
         )
     except (OSError, TypeError, ValueError):

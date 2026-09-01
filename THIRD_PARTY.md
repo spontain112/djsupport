@@ -46,6 +46,10 @@ the exact version and complete license material in a particular environment.
 | [HTTPX](https://github.com/encode/httpx) | Local web-adapter tests | BSD-3-Clause |
 | [PyYAML](https://github.com/yaml/pyyaml) | Release-workflow validation tests | MIT |
 | [Tomli](https://github.com/hukkin/tomli) | TOML parsing on Python 3.10 | MIT |
+| [Ruff](https://github.com/astral-sh/ruff) | Linting in CI and pre-commit | MIT |
+| [mypy](https://github.com/python/mypy) | Static type checking in CI and pre-commit | MIT |
+| [typeshed](https://github.com/python/typeshed) (`types-requests`, `types-jsonschema`) | Type stubs for Requests and jsonschema during type checking | Apache-2.0 |
+| [pre-commit](https://github.com/pre-commit/pre-commit) | Local commit hooks running ruff, mypy, and a fast pytest subset | MIT |
 
 ## Continuous integration tools
 
@@ -55,6 +59,7 @@ the exact version and complete license material in a particular environment.
 | [setup-python](https://github.com/actions/setup-python) | GitHub Actions Python toolchains | MIT |
 | [setup-node](https://github.com/actions/setup-node) | GitHub Actions Node.js toolchain for exact documentation-site checks | MIT |
 | [CodeQL](https://github.com/github/codeql-action) | Static security analysis for Python and GitHub Actions workflows | MIT |
+| [Dependabot](https://github.com/dependabot/dependabot-core) | Proposed dependency and workflow-action updates | MIT |
 | [certifi](https://github.com/certifi/python-certifi) | CA bundle for CI-only PyPI attestation HTTPS verification | MPL-2.0 |
 | [PyPI Attestations](https://github.com/pypi/pypi-attestations) | Pinned CI verifier for APSW wheel Trusted Publisher attestations | Apache-2.0 |
 | [Mint CLI](https://github.com/mintlify/mint) | Exact documentation validation, link, redirect, and accessibility checks for candidate qualification | Elastic-2.0 |

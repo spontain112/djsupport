@@ -99,8 +99,9 @@ Thumbs.db
 htmlcov/
 .tox/
 
-# Type checking
+# Lint and type-check caches
 .mypy_cache/
+.ruff_cache/
 
 # Logs
 *.log

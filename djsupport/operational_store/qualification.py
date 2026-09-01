@@ -150,7 +150,8 @@ class SQLiteRuntimeQualification:
         """Load the immutable policy shipped with this DJ Support build."""
         manifest_text = (
             resources.files("djsupport")
-            .joinpath("contracts", _PACKAGED_MANIFEST)
+            .joinpath("contracts")
+            .joinpath(_PACKAGED_MANIFEST)
             .read_text(encoding="utf-8")
         )
         manifest = json.loads(manifest_text)
@@ -467,7 +468,8 @@ def _platform_facts_are_well_formed(facts: RuntimeFacts) -> bool:
 def _validate_manifest(manifest: Mapping[str, object]) -> None:
     schema_text = (
         resources.files("djsupport")
-        .joinpath("contracts", _MANIFEST_SCHEMA)
+        .joinpath("contracts")
+        .joinpath(_MANIFEST_SCHEMA)
         .read_text(encoding="utf-8")
     )
     schema = json.loads(schema_text)

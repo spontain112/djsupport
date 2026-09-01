@@ -39,7 +39,7 @@ class CacheEntry:
 
 
 class MatchCache:
-    def __init__(self, path: str = DEFAULT_CACHE_PATH):
+    def __init__(self, path: str | Path = DEFAULT_CACHE_PATH):
         self.path = Path(path)
         self.entries: dict[str, CacheEntry] = {}
         self.local_regressions: list[dict] = []

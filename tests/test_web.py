@@ -35,7 +35,6 @@ from djsupport.transfer import (
     SourceSelection,
     Transfer,
     TransferAuthorization,
-    TransferProgress,
     TransferMode,
 )
 from djsupport.web import _report_to_dict, app, create_app

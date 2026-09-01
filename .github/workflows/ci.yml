@@ -49,6 +49,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: Install development and web extras
         run: python -m pip install --only-binary=apsw ".[dev,web]"
+      - name: Lint with ruff
+        run: python -m ruff check djsupport tests scripts
+      - name: Type-check with mypy
+        run: python -m mypy
       - name: Run complete offline suite
         run: python -m pytest
       - name: Compile package and tests

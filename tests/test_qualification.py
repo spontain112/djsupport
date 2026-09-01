@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
-from datetime import datetime
 
 import pytest
 
 from djsupport.agent import AgentAuthorization, AgentTransferContract
-from djsupport.cache import MatchCache
 from djsupport.local_audition import (
     AuditionHandleUnavailable,
     LocalSourceAudition,
@@ -21,9 +19,6 @@ from djsupport.transfer import (
     EphemeralMatchingKnowledge,
     FilePublicationStorage,
     FileTransferStorage,
-    MatchCacheKnowledge,
-    PublicationItem,
-    PublicationManifest,
     QualificationDecision,
     QualificationRequest,
     QualificationStatus,
