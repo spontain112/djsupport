@@ -1,10 +1,7 @@
 """Tests for djsupport.report — dataclasses and computed properties."""
 
 from datetime import datetime
-from io import StringIO
-from unittest.mock import patch
 
-import pytest
 
 from djsupport.report import (
     MatchedTrack,

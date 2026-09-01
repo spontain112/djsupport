@@ -1,11 +1,9 @@
 """Tests for djsupport.rekordbox — XML parsing."""
 
 import textwrap
-from pathlib import Path
 
-import pytest
 
-from djsupport.rekordbox import Track, Playlist, parse_xml
+from djsupport.rekordbox import Track, parse_xml
 
 
 class TestParseXml:

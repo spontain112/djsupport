@@ -28,7 +28,7 @@ from uuid import uuid4
 import requests
 import spotipy
 
-if os.name == "nt":
+if sys.platform == "win32":
     import msvcrt
 else:
     import fcntl
@@ -674,7 +674,7 @@ class AccountPublishingGuards:
 
     @staticmethod
     def _lock(lock_file) -> None:
-        if os.name == "nt":
+        if sys.platform == "win32":
             lock_file.seek(0)
             if not lock_file.read(1):
                 lock_file.write(b"0")
@@ -686,7 +686,7 @@ class AccountPublishingGuards:
 
     @staticmethod
     def _unlock(lock_file) -> None:
-        if os.name == "nt":
+        if sys.platform == "win32":
             lock_file.seek(0)
             msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
         else:
@@ -1191,7 +1191,7 @@ class FileTransferStorage:
         lock_path = self.path.with_suffix(f"{self.path.suffix}.lock")
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         with self._thread_lock, lock_path.open("a+") as lock_file:
-            if os.name == "nt":
+            if sys.platform == "win32":
                 lock_file.seek(0)
                 if not lock_file.read(1):
                     lock_file.write("0")
@@ -1203,7 +1203,7 @@ class FileTransferStorage:
             try:
                 yield
             finally:
-                if os.name == "nt":
+                if sys.platform == "win32":
                     lock_file.seek(0)
                     msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
                 else:

@@ -1,7 +1,6 @@
 """Behavior tests for opt-in local audio identity at the Transfer seam."""
 
 import json
-from pathlib import Path
 
 import pytest
 import requests

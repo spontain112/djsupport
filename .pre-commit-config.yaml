@@ -1,0 +1,33 @@
+# Local hooks run the tools installed by
+#   python3 -m pip install --only-binary=apsw -e ".[dev,web]"
+# so pyproject.toml stays the single version source for ruff, mypy, and pytest
+# in CI, in pre-commit, and in a maintainer shell. Install once per clone with
+#   pre-commit install
+minimum_pre_commit_version: "4.0.0"
+default_install_hook_types: [pre-commit]
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: ruff check
+        entry: python -m ruff check --force-exclude
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+      - id: mypy
+        name: mypy
+        entry: python -m mypy
+        language: system
+        pass_filenames: false
+        files: ^(djsupport/.*\.py|pyproject\.toml)$
+      - id: pytest-fast
+        name: pytest fast subset
+        # The complete offline suite runs in CI. Locally, skip the two
+        # multi-second files so a commit stays under roughly ten seconds.
+        entry: >-
+          python -m pytest -x
+          --ignore=tests/test_qualification.py
+          --ignore=tests/test_local_audio_identity.py
+        language: system
+        pass_filenames: false
+        files: ^(djsupport/|tests/|scripts/|pyproject\.toml)

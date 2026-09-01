@@ -13,8 +13,6 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
 from djsupport.matcher import match_track
 from djsupport.rekordbox import Track
 from djsupport.spotify import get_client
@@ -23,6 +21,7 @@ from djsupport.transfer import default_matching_knowledge_path
 
 
 def run_accuracy_test(knowledge_path: Path | None = None):
+    load_dotenv()
     knowledge_path = knowledge_path or default_matching_knowledge_path()
     regression_cases = load_local_regressions(knowledge_path)
     if not regression_cases:

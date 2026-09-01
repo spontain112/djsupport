@@ -909,7 +909,7 @@ class TestEarlyExit:
         # _classify_version_match → fallback_version → -15 penalty → below 95.
         sp = self._mock_sp([make_spotify_item("Sapphire", "Eagles & Butterflies", "uri:1")])
         track = make_track("Sapphire (Joris Voorn Remix)", "Eagles & Butterflies", remixer="Joris Voorn")
-        result = match_track(sp, track, threshold=80)
+        match_track(sp, track, threshold=80)
         # Strategies 1, 2 (stripped title differs), and 3 (remixer) should fire
         assert sp.search.call_count >= 3
 

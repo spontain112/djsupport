@@ -22,7 +22,7 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if "__inner__" not in sys.argv:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from djsupport.operational_store.delivery import (
+from djsupport.operational_store.delivery import (  # noqa: E402
     artifact_for_cell,
     collect_candidate_entry,
     load_artifact_catalog,

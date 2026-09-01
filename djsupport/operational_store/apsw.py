@@ -154,7 +154,12 @@ def _required_platform_value(value: object) -> str:
 
 
 def _windows_product_type() -> str:
-    product_type = getattr(sys.getwindowsversion(), "product_type", None)
+    windows_version = getattr(sys, "getwindowsversion", None)
+    if windows_version is None:
+        raise RuntimeProbeError("platform_identity_unavailable")
+    product_type = getattr(windows_version(), "product_type", None)
+    if not isinstance(product_type, int):
+        raise RuntimeProbeError("platform_identity_unavailable")
     try:
         return {
             1: "workstation",

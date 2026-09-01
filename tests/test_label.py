@@ -16,10 +16,8 @@ from djsupport.label import (
     _slugify,
     LabelParseError,
     InvalidLabelURL,
-    LabelResult,
     PER_PAGE,
     MAX_PAGES,
-    LARGE_LABEL_THRESHOLD,
 )
 from djsupport.rekordbox import Track
 

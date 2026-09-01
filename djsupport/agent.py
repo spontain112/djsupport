@@ -11,7 +11,6 @@ from djsupport.transfer import (
     BatchPlanRequest,
     QualificationDecision,
     QualificationRequest,
-    QualificationStatus,
     SpotifyPlaylistChanged,
     SpotifyPlaylistReviewRequired,
     Transfer,
@@ -199,7 +198,7 @@ class AgentTransferContract:
         """Return the next safe decision in a first Rekordbox journey."""
         if not request.spotify_configured:
             next_action = "configure_spotify"
-            required_input = {
+            required_input: dict[str, object] = {
                 "kind": "spotify_configuration",
                 "redirect_uri": "http://127.0.0.1:8888/callback",
                 "callback_policy": "add_without_replacing_existing",

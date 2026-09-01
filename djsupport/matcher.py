@@ -2,13 +2,17 @@
 
 import re
 import unicodedata
+from typing import TYPE_CHECKING
 
 from rapidfuzz import fuzz
 
 from djsupport.rekordbox import Track
+from djsupport.spotify import search_track
+
+if TYPE_CHECKING:
+    from djsupport.cache import MatchCache
 
 EARLY_EXIT_THRESHOLD = 95  # Skip remaining strategies when Strategy 1 finds a high-confidence exact match
-from djsupport.spotify import search_track
 
 
 def _normalize(text: str) -> str:
@@ -450,7 +454,6 @@ def match_track_cached(
 
     source is one of: "cache", "api", "retry"
     """
-    from djsupport.cache import MatchCache  # noqa: F811
 
     entry = cache.lookup(track.artist, track.name, threshold)
 

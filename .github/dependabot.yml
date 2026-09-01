@@ -1,0 +1,39 @@
+# Dependabot proposes reviewed updates; nothing here merges on its own.
+#
+# pip: pyproject.toml is the canonical dependency source. Dependabot only
+# proposes an update for a requirement whose range excludes the newest
+# release, so exact pins (spotipy, apsw, ruff, mypy, type stubs) receive
+# proposals while open ranges do not. A pull request that changes
+# pyproject.toml is a distributable change and needs a .release-notes record
+# before the release-record CI job passes.
+#
+# github-actions: workflow actions stay pinned to full commit SHAs; Dependabot
+# updates the SHA and the trailing version comment together.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(deps)"
+    labels: []
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(ci)"
+    labels: []
+    groups:
+      actions:
+        patterns:
+          - "*"
