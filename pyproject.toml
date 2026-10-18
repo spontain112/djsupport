@@ -10,7 +10,7 @@ djsupport = ["static/*.html", "static/*.png", "contracts/*.json"]
 
 [project]
 name = "djsupport"
-version = "0.6.0"
+version = "0.7.0.dev0"
 description = "Transfer Rekordbox and Beatport selections to Spotify"
 readme = "README.md"
 license = "MIT"
