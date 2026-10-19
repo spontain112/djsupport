@@ -16,7 +16,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10,<3.15"
 dependencies = [
-    "apsw==3.53.4.0",
+    "apsw==3.54.0.0",
     "spotipy==2.26.0",
     "click>=8.0",
     "python-dotenv>=1.0",
