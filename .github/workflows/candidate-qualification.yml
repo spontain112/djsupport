@@ -47,11 +47,11 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Check out qualification source
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - name: Set up contract Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
         with:
           python-version: "3.12.14"
           architecture: x64
@@ -80,7 +80,7 @@ jobs:
       wheel-sha256: ${{ steps.plan.outputs.wheel-sha256 }}
     steps:
       - name: Check out workflow product source
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -91,7 +91,7 @@ jobs:
         shell: bash
         run: test "$EXPECTED_PRODUCT_COMMIT" = "$WORKFLOW_PRODUCT_COMMIT"
       - name: Set up canonical build Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
         with:
           python-version: "3.14.7"
           architecture: x64
@@ -140,7 +140,7 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - name: Check out workflow product source
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -151,7 +151,7 @@ jobs:
         shell: bash
         run: test "$EXPECTED_PRODUCT_COMMIT" = "$WORKFLOW_PRODUCT_COMMIT"
       - name: Set up exact native Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
         with:
           python-version: ${{ matrix.python-version }}
           architecture: ${{ matrix.setup-architecture }}
@@ -199,7 +199,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out workflow product source
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.sha }}
           path: product
@@ -211,7 +211,7 @@ jobs:
         shell: bash
         run: test "$EXPECTED_PRODUCT_COMMIT" = "$WORKFLOW_PRODUCT_COMMIT"
       - name: Check out canonical documentation source
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           repository: spontain112/djsupport-docs
           ref: main
@@ -224,11 +224,11 @@ jobs:
         shell: bash
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_DOCUMENTATION_COMMIT"
       - name: Set up documentation Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
           node-version: "22.23.1"
       - name: Set up documentation Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
         with:
           python-version: "3.12.14"
           architecture: x64
@@ -269,7 +269,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Check out workflow product source
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -280,7 +280,7 @@ jobs:
         shell: bash
         run: test "$EXPECTED_PRODUCT_COMMIT" = "$WORKFLOW_PRODUCT_COMMIT"
       - name: Set up evidence Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
         with:
           python-version: "3.12.14"
           architecture: x64
